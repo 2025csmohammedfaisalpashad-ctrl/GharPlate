@@ -9,14 +9,22 @@ from app.db.init_db import seed_database
 from app.db.session import Base, SessionLocal, engine
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
+def initialize_and_seed() -> None:
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
         seed_database(db, write_report=True)
     finally:
         db.close()
+
+
+# Ensure tables and image_url columns are always initialized even when TestClient is used without context manager
+initialize_and_seed()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    initialize_and_seed()
     yield
 
 

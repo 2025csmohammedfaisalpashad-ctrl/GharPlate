@@ -60,6 +60,7 @@ beforeEach(() => {
             slug: 'cereals-millets',
             name: 'Cereals & Millets',
             description: 'Staple grains and millets',
+            image_url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/b/b2/Eleusine_coracana_seeds.jpg/640px-Eleusine_coracana_seeds.jpg',
             display_order: 1,
           },
         ],
@@ -81,6 +82,7 @@ beforeEach(() => {
               slug: 'ragi-finger-millet',
               ifct_code: 'A010',
               name_en: 'Ragi (Finger Millet)',
+              image_url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/b/b2/Eleusine_coracana_seeds.jpg/640px-Eleusine_coracana_seeds.jpg',
               category_slug: 'cereals-millets',
               category_name: 'Cereals & Millets',
               is_packaged: false,
@@ -138,8 +140,8 @@ beforeEach(() => {
   });
 });
 
-describe('GharPlate Frontend UI & Feature Suite', () => {
-  it('renders Landing Home Page with medical safety disclaimer and live database stats', async () => {
+describe('GharPlate Redesigned Visual UI & Feature Suite', () => {
+  it('renders Redesigned Visual Home Page with hero, food photos, and live stats', async () => {
     render(
       <HouseholdProvider>
         <MemoryRouter initialEntries={['/']}>
@@ -148,17 +150,17 @@ describe('GharPlate Frontend UI & Feature Suite', () => {
       </HouseholdProvider>
     );
 
+    expect(screen.getByText(/Know What’s on Your Plate/i)).toBeInTheDocument();
     expect(
       screen.getByText(/Transparent, Evidence-Based Nutrition Intelligence/i)
     ).toBeInTheDocument();
-    expect(screen.getByText(/Educational Tool Only:/i)).toBeInTheDocument();
 
     await waitFor(() => {
       expect(screen.getByText('75')).toBeInTheDocument();
     });
   });
 
-  it('renders Food Explorer and displays multilingual alias cards', async () => {
+  it('renders Image-First Food Explorer with Grid and Compact List view toggle', async () => {
     render(
       <HouseholdProvider>
         <MemoryRouter initialEntries={['/foods']}>
@@ -170,9 +172,13 @@ describe('GharPlate Frontend UI & Feature Suite', () => {
     await waitFor(() => {
       expect(screen.getByText('Ragi (Finger Millet)')).toBeInTheDocument();
     });
+
+    const listBtn = screen.getByText(/Compact List/i);
+    fireEvent.click(listBtn);
+    expect(screen.getByText('Ragi (Finger Millet)')).toBeInTheDocument();
   });
 
-  it('supports manual OCR correction workflow on Food Scanner page', async () => {
+  it('supports visual step-by-step OCR review and correction workflow', async () => {
     render(
       <HouseholdProvider>
         <MemoryRouter initialEntries={['/scanner']}>

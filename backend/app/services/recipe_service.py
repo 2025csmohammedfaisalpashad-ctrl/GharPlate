@@ -7,6 +7,7 @@ and NEVER replaces missing (NULL) ingredient nutrients with zero.
 from typing import Dict, List, Optional
 from sqlalchemy.orm import Session, joinedload
 
+from app.db.seed_images import resolve_food_image_url
 from app.models.entities import (
     FoodItem,
     Household,
@@ -14,7 +15,6 @@ from app.models.entities import (
     Recipe,
     RecipeIngredient,
 )
-from app.rules.guidance_engine import resolve_serving_grams
 from app.schemas.api_schemas import (
     RecipeCreateRequest,
     RecipeDetailOut,
@@ -57,8 +57,14 @@ def serialize_recipe_detail(db: Session, recipe: Recipe) -> RecipeDetailOut:
     serving_weight = round(total_weight / servings_count, 2)
 
     contributions: List[RecipeIngredientContributionOut] = []
+    primary_img_url: Optional[str] = None
+
     for ing in recipe.ingredients:
         food = ing.food
+        img = getattr(food, "image_url", None) or resolve_food_image_url(food.slug)
+        if primary_img_url is None:
+            primary_img_url = img
+
         factor = ing.grams_equivalent / 100.0
         nv_map: Dict[str, Optional[float]] = {
             nv.nutrient_code: nv.value for nv in food.nutrient_values
@@ -70,6 +76,7 @@ def serialize_recipe_detail(db: Session, recipe: Recipe) -> RecipeDetailOut:
             RecipeIngredientContributionOut(
                 food_slug=food.slug,
                 food_name=food.name_en,
+                image_url=img,
                 quantity=ing.quantity,
                 unit_name=ing.unit_name,
                 grams_equivalent=ing.grams_equivalent,
@@ -160,6 +167,7 @@ def serialize_recipe_detail(db: Session, recipe: Recipe) -> RecipeDetailOut:
         household_token=recipe.household_token,
         title=recipe.title,
         description=recipe.description,
+        image_url=primary_img_url,
         servings=recipe.servings,
         meal_type=recipe.meal_type,
         total_weight_grams=round(total_weight, 2),

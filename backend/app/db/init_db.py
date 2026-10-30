@@ -1,9 +1,9 @@
 import json
-import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.models.entities import (
@@ -31,17 +31,31 @@ from app.db.seed_foods_part3 import FOOD_ITEMS_SEED_PART3
 from app.db.seed_foods_part4 import FOOD_ITEMS_SEED_PART4
 from app.db.seed_conditions import HEALTH_CONDITIONS_SEED
 from app.db.seed_rules import CONDITION_CONFLICT_RULES_SEED, NUTRITION_RULES_SEED
+from app.db.seed_images import resolve_category_image_url, resolve_food_image_url
 
 
 def normalize_alias(text: str) -> str:
     return re.sub(r"[^a-z0-9\u0900-\u097f\u0c80-\u0cff]+", " ", text.lower()).strip()
 
 
+def ensure_image_columns(db: Session) -> None:
+    """Safely adds image_url columns to existing SQLite tables if created prior to redesign."""
+    for table_name in ("food_categories", "food_items"):
+        try:
+            db.execute(text(f"ALTER TABLE {table_name} ADD COLUMN image_url VARCHAR(500)"))
+            db.commit()
+        except Exception:
+            db.rollback()
+
+
 def seed_database(db: Session, write_report: bool = True) -> Dict[str, Any]:
     """
     Idempotent, reproducible data-ingestion pipeline.
-    Validates records, preserves NULL for missing nutrients, and writes an import report.
+    Validates records, populates database-driven image_url references, preserves NULL for missing nutrients,
+    and writes an import report.
     """
+    ensure_image_columns(db)
+
     sources_by_code: Dict[str, DataSource] = {}
     for src_data in DATA_SOURCES_SEED:
         existing = db.query(DataSource).filter(DataSource.code == src_data["code"]).first()
@@ -67,10 +81,13 @@ def seed_database(db: Session, write_report: bool = True) -> Dict[str, Any]:
     categories_by_slug: Dict[str, FoodCategory] = {}
     for cat_data in FOOD_CATEGORIES_SEED:
         existing = db.query(FoodCategory).filter(FoodCategory.slug == cat_data["slug"]).first()
+        img_url = resolve_category_image_url(cat_data["slug"])
         if not existing:
-            existing = FoodCategory(**cat_data)
+            existing = FoodCategory(**cat_data, image_url=img_url)
             db.add(existing)
             db.flush()
+        elif not existing.image_url:
+            existing.image_url = img_url
         categories_by_slug[cat_data["slug"]] = existing
 
     all_foods_seed = (
@@ -89,7 +106,10 @@ def seed_database(db: Session, write_report: bool = True) -> Dict[str, Any]:
 
     for food_data in all_foods_seed:
         existing_food = db.query(FoodItem).filter(FoodItem.slug == food_data["slug"]).first()
+        resolved_img = resolve_food_image_url(food_data["slug"], food_data["category_slug"])
         if existing_food:
+            if not existing_food.image_url:
+                existing_food.image_url = resolved_img
             foods_by_slug[existing_food.slug] = existing_food
             continue
 
@@ -103,6 +123,7 @@ def seed_database(db: Session, write_report: bool = True) -> Dict[str, Any]:
             scientific_name=food_data.get("scientific_name"),
             category_id=category.id,
             description=food_data["description"],
+            image_url=resolved_img,
             region_state=food_data.get("region_state"),
             is_packaged=food_data.get("is_packaged", False),
             brand=food_data.get("brand"),
@@ -126,7 +147,6 @@ def seed_database(db: Session, write_report: bool = True) -> Dict[str, Any]:
         foods_by_slug[food_item.slug] = food_item
         imported_foods_count += 1
 
-        # Add English primary name + configured aliases
         seen_aliases = set()
         raw_aliases = [
             {"language": "en", "alias_text": food_item.name_en, "script_text": food_item.name_en}
@@ -147,7 +167,6 @@ def seed_database(db: Session, write_report: bool = True) -> Dict[str, Any]:
                     )
                 )
                 alias_count += 1
-            # Also index native script if distinct
             script_val = al.get("script_text")
             if script_val:
                 norm_script = normalize_alias(script_val)
@@ -165,7 +184,6 @@ def seed_database(db: Session, write_report: bool = True) -> Dict[str, Any]:
                     )
                     alias_count += 1
 
-        # Serving conversions
         servings_list = food_data.get("servings", [])
         has_100 = any(s["unit_name"] in ("100g", "100ml") for s in servings_list)
         if not has_100:
@@ -188,7 +206,6 @@ def seed_database(db: Session, write_report: bool = True) -> Dict[str, Any]:
                     "is_default": True,
                 }
             )
-        # Ensure common household units (cup, katori, bowl, tbsp, tsp) have conversions where applicable
         existing_units = {s["unit_name"] for s in servings_list}
         if "katori" not in existing_units:
             servings_list.append(
@@ -229,7 +246,6 @@ def seed_database(db: Session, write_report: bool = True) -> Dict[str, Any]:
                 )
             )
 
-        # Nutrient values (preserving None as SQL NULL)
         nut_map = food_data.get("nutrients", {})
         for nut_code in nutrients_by_code:
             val = nut_map.get(nut_code, None)
@@ -252,7 +268,6 @@ def seed_database(db: Session, write_report: bool = True) -> Dict[str, Any]:
                 )
             )
 
-    # Seed Health Conditions
     conditions_by_code: Dict[str, HealthCondition] = {}
     for cond_data in HEALTH_CONDITIONS_SEED:
         existing_cond = (
@@ -268,7 +283,6 @@ def seed_database(db: Session, write_report: bool = True) -> Dict[str, Any]:
             db.flush()
         conditions_by_code[cond_data["code"]] = existing_cond
 
-    # Seed Nutrition Rules
     for rule_data in NUTRITION_RULES_SEED:
         existing_rule = (
             db.query(NutritionRule)
@@ -291,7 +305,6 @@ def seed_database(db: Session, write_report: bool = True) -> Dict[str, Any]:
                 )
             )
 
-    # Seed Multi-Condition Conflict Rules
     for conf_data in CONDITION_CONFLICT_RULES_SEED:
         existing_conf = (
             db.query(ConditionConflictRule)
@@ -303,7 +316,6 @@ def seed_database(db: Session, write_report: bool = True) -> Dict[str, Any]:
             payload = {k: v for k, v in conf_data.items() if k != "source_code"}
             db.add(ConditionConflictRule(**payload, source_id=src.id))
 
-    # Seed default household recipe templates if none exist
     if db.query(Recipe).count() == 0 and "ragi-finger-millet" in foods_by_slug:
         sample_recipe = Recipe(
             household_token="system_template",
@@ -337,6 +349,9 @@ def seed_database(db: Session, write_report: bool = True) -> Dict[str, Any]:
 
     db.commit()
 
+    total_known = db.query(FoodNutrientValue).filter(FoodNutrientValue.value.isnot(None)).count()
+    total_null = db.query(FoodNutrientValue).filter(FoodNutrientValue.value.is_(None)).count()
+
     report = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "total_data_sources": db.query(DataSource).count(),
@@ -347,8 +362,8 @@ def seed_database(db: Session, write_report: bool = True) -> Dict[str, Any]:
         "total_health_conditions": db.query(HealthCondition).count(),
         "total_nutrition_rules": db.query(NutritionRule).count(),
         "total_conflict_rules": db.query(ConditionConflictRule).count(),
-        "known_nutrient_values": known_nutrient_records_count,
-        "null_unmeasured_nutrient_values": null_nutrient_records_count,
+        "known_nutrient_values": total_known,
+        "null_unmeasured_nutrient_values": total_null,
         "zero_replacement_for_missing": False,
         "validation_status": "PASSED",
     }

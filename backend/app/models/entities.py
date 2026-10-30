@@ -45,6 +45,7 @@ class FoodCategory(Base):
     slug: Mapped[str] = mapped_column(String(80), unique=True, index=True, nullable=False)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
+    image_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     display_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     foods: Mapped[List["FoodItem"]] = relationship("FoodItem", back_populates="category")
@@ -62,6 +63,7 @@ class FoodItem(Base):
         Integer, ForeignKey("food_categories.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     description: Mapped[str] = mapped_column(Text, nullable=False)
+    image_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     region_state: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
 
     is_packaged: Mapped[bool] = mapped_column(Boolean, default=False, index=True, nullable=False)

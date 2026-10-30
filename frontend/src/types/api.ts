@@ -16,6 +16,7 @@ export interface FoodCategory {
   slug: string;
   name: string;
   description: string;
+  image_url?: string | null;
   display_order: number;
 }
 
@@ -54,6 +55,7 @@ export interface FoodSummary {
   slug: string;
   ifct_code?: string | null;
   name_en: string;
+  image_url?: string | null;
   category_slug: string;
   category_name: string;
   is_packaged: boolean;
@@ -80,6 +82,7 @@ export interface FoodDetail {
   slug: string;
   ifct_code?: string | null;
   name_en: string;
+  image_url?: string | null;
   scientific_name?: string | null;
   description: string;
   region_state?: string | null;
@@ -156,7 +159,8 @@ export interface HealthConditionSummary {
   publication_year: number;
 }
 
-export interface HealthConditionDetail extends HealthConditionSummary {
+export interface HealthConditionDetail extends Omit<HealthConditionSummary, 'condition_group_name'> {
+  condition_group_name: string;
   relevant_food_groups: string[];
   evidence_dietary_patterns: string;
   portion_considerations: string;
@@ -263,6 +267,7 @@ export interface RecipeNutrientBreakdown {
 export interface RecipeIngredientContribution {
   food_slug: string;
   food_name: string;
+  image_url?: string | null;
   quantity: number;
   unit_name: string;
   grams_equivalent: number;
@@ -278,6 +283,7 @@ export interface RecipeDetail {
   household_token?: string | null;
   title: string;
   description?: string | null;
+  image_url?: string | null;
   servings: number;
   meal_type: string;
   total_weight_grams: number;
@@ -323,6 +329,7 @@ export interface BarcodeLookupResponse {
 export interface DishCandidate {
   food_slug: string;
   food_name: string;
+  image_url?: string | null;
   regional_aliases: string[];
   visual_similarity_score: number;
   uncertainty_label: string;
@@ -342,6 +349,7 @@ export interface DishRecognitionResponse {
 export interface ProductComparisonItem {
   slug: string;
   name_en: string;
+  image_url?: string | null;
   brand?: string | null;
   barcode?: string | null;
   normalized_basis: string;
@@ -370,6 +378,7 @@ export interface MealSuggestionCard {
   suggestion_id: string;
   title: string;
   meal_type: string;
+  image_url?: string | null;
   primary_food_slugs: string[];
   components: string[];
   why_suggested: string;

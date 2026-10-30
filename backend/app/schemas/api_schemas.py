@@ -25,6 +25,7 @@ class FoodCategoryOut(BaseModel):
     slug: str
     name: str
     description: str
+    image_url: Optional[str] = None
     display_order: int
 
 
@@ -67,6 +68,7 @@ class FoodSummaryOut(BaseModel):
     slug: str
     ifct_code: Optional[str] = None
     name_en: str
+    image_url: Optional[str] = None
     category_slug: str
     category_name: str
     is_packaged: bool
@@ -93,6 +95,7 @@ class FoodDetailOut(BaseModel):
     slug: str
     ifct_code: Optional[str] = None
     name_en: str
+    image_url: Optional[str] = None
     scientific_name: Optional[str] = None
     description: str
     region_state: Optional[str] = None
@@ -307,6 +310,7 @@ class RecipeNutrientBreakdown(BaseModel):
 class RecipeIngredientContributionOut(BaseModel):
     food_slug: str
     food_name: str
+    image_url: Optional[str] = None
     quantity: float
     unit_name: str
     grams_equivalent: float
@@ -322,6 +326,7 @@ class RecipeDetailOut(BaseModel):
     household_token: Optional[str] = None
     title: str
     description: Optional[str] = None
+    image_url: Optional[str] = None
     servings: float
     meal_type: str
     total_weight_grams: float
@@ -387,6 +392,7 @@ class BarcodeLookupResponse(BaseModel):
 class DishCandidateOut(BaseModel):
     food_slug: str
     food_name: str
+    image_url: Optional[str] = None
     regional_aliases: List[str]
     visual_similarity_score: float
     uncertainty_label: str
@@ -413,6 +419,7 @@ class ProductComparisonRequest(BaseModel):
 class ProductComparisonItem(BaseModel):
     slug: str
     name_en: str
+    image_url: Optional[str] = None
     brand: Optional[str] = None
     barcode: Optional[str] = None
     normalized_basis: str
@@ -451,6 +458,7 @@ class MealSuggestionCard(BaseModel):
     suggestion_id: str
     title: str
     meal_type: str
+    image_url: Optional[str] = None
     primary_food_slugs: List[str]
     components: List[str]
     why_suggested: str

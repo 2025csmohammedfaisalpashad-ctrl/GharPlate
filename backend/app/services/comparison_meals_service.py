@@ -5,9 +5,9 @@ Packaged Product Comparison (Module 9) and Personalised Indian Meal Suggestions 
 from typing import Dict, List, Optional
 from sqlalchemy.orm import Session, joinedload
 
+from app.db.seed_images import resolve_food_image_url
 from app.models.entities import (
     ConditionConflictRule,
-    FoodCategory,
     FoodItem,
 )
 from app.rules.guidance_engine import evaluate_food_guidance
@@ -81,7 +81,6 @@ def compare_packaged_products(
                 nut_serv[code] = None
                 unavailable.append(code)
 
-        # Evaluate condition context if conditions or allergies provided
         guidance_res = evaluate_food_guidance(
             db,
             GuidanceEvaluationRequest(
@@ -96,10 +95,15 @@ def compare_packaged_products(
         if idx == 0:
             conflicts_out = guidance_res.multi_condition_conflicts
 
+        img_url = getattr(food, "image_url", None) or resolve_food_image_url(
+            food.slug, food.category.slug
+        )
+
         items_out.append(
             ProductComparisonItem(
                 slug=food.slug,
                 name_en=food.name_en,
+                image_url=img_url,
                 brand=food.brand or ("Packaged Brand" if food.is_packaged else "Whole Food Reference"),
                 barcode=food.barcode,
                 normalized_basis=food.default_basis,
@@ -229,7 +233,6 @@ MEAL_TEMPLATES = [
 def generate_meal_suggestions(
     db: Session, req: MealSuggestionRequest
 ) -> MealSuggestionResponse:
-    # Check multi-condition conflicts upfront
     conflicts_out: List[ConditionConflictOut] = []
     if len(req.condition_codes) >= 2:
         selected_set = set(req.condition_codes)
@@ -278,14 +281,12 @@ def generate_meal_suggestions(
         if not tpl_foods:
             continue
 
-        # Filter by vegetarian/vegan dietary preference
         dp = req.dietary_preference.lower()
         if dp in ("vegetarian", "jain", "vegan") and any(not f.is_vegetarian for f in tpl_foods):
             continue
         if dp == "vegan" and any(not f.is_vegan for f in tpl_foods):
             continue
 
-        # Filter out meals containing declared user allergens or coeliac gluten
         has_allergen = False
         for f in tpl_foods:
             f_allergens = {a.lower() for a in (f.allergen_tags or [])}
@@ -296,7 +297,6 @@ def generate_meal_suggestions(
         if has_allergen:
             continue
 
-        # Compute aggregated nutritional summary per serving across primary foods
         summary_keys = ["energy_kcal", "protein_g", "carbs_g", "fibre_g", "fat_total_g", "sodium_mg", "calcium_mg", "iron_mg"]
         agg_nut: Dict[str, Optional[float]] = {k: 0.0 for k in summary_keys}
         missing_set = set()
@@ -358,12 +358,15 @@ def generate_meal_suggestions(
             )
 
         completeness = round(((len(summary_keys) - len(missing_set)) / len(summary_keys)) * 100.0, 1)
+        lead_slug = tpl["primary_food_slugs"][0]
+        lead_img = resolve_food_image_url(lead_slug)
 
         cards.append(
             MealSuggestionCard(
                 suggestion_id=tpl["suggestion_id"],
                 title=tpl["title"],
                 meal_type=tpl["meal_type"],
+                image_url=lead_img,
                 primary_food_slugs=tpl["primary_food_slugs"],
                 components=tpl["components"],
                 why_suggested=tpl["why_suggested"],

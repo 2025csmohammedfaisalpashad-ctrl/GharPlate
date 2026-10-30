@@ -1,12 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { MacroDistributionBarChart } from '../components/UIWidgets';
+import {
+  ExpandableSection,
+  FoodImage,
+  MacroDistributionBarChart,
+} from '../components/UIWidgets';
 import { useHousehold } from '../hooks/useHousehold';
 import { api } from '../services/api';
 import type { FoodSummary, RecipeDetail, RecipeIngredientInput } from '../types/api';
 
 // ==========================================
-// PAGE 8: RECIPE AND MEAL NUTRITION CALCULATOR
+// PAGE 8: VISUAL RECIPE & MEAL NUTRITION CALCULATOR
 // ==========================================
 export const RecipeCalculatorPage: React.FC = () => {
   const { household } = useHousehold();
@@ -14,20 +18,23 @@ export const RecipeCalculatorPage: React.FC = () => {
   const editRecipeId = searchParams.get('edit') ? Number(searchParams.get('edit')) : null;
 
   const [allFoods, setAllFoods] = useState<FoodSummary[]>([]);
-  const [title, setTitle] = useState('Homemade Vegetable Ragi Upma & Moong Dal');
+  const [ingredientSearch, setIngredientSearch] = useState('');
+  const [title, setTitle] = useState('Karnataka Ragi Mudde & Palak Toor Dal Bowl');
   const [description, setDescription] = useState(
-    'Nutritious household meal combining finger millet, split green gram, carrot, onion, and tomato.'
+    'Home-cooked finger millet mudde paired with pigeon pea sambar, fresh spinach, and ripe tomatoes.'
   );
   const [servings, setServings] = useState(2);
   const [mealType, setMealType] = useState('lunch');
+  const [displayMode, setDisplayMode] = useState<'per_serving' | 'total'>('per_serving');
+
   const [ingredients, setIngredients] = useState<RecipeIngredientInput[]>([
     { food_slug: 'ragi-finger-millet', quantity: 2, unit_name: 'standard_serving' },
-    { food_slug: 'moong-dal-green-gram', quantity: 1, unit_name: 'standard_serving' },
-    { food_slug: 'carrot-orange', quantity: 1, unit_name: 'standard_serving' },
+    { food_slug: 'toor-dal-red-gram', quantity: 1, unit_name: 'standard_serving' },
+    { food_slug: 'spinach-palak', quantity: 1, unit_name: '100g' },
     { food_slug: 'tomato-ripe', quantity: 1, unit_name: 'standard_serving' },
   ]);
 
-  const [selectedFoodSlug, setSelectedFoodSlug] = useState('spinach-palak');
+  const [selectedFoodSlug, setSelectedFoodSlug] = useState('carrot-orange');
   const [selectedQty, setSelectedQty] = useState(1);
   const [selectedUnit, setSelectedUnit] = useState('standard_serving');
 
@@ -64,12 +71,22 @@ export const RecipeCalculatorPage: React.FC = () => {
     }
   }, [editRecipeId]);
 
-  const handleAddIngredient = () => {
-    if (!selectedFoodSlug) return;
+  const handleAddIngredient = (slugToAdd = selectedFoodSlug) => {
+    if (!slugToAdd) return;
     setIngredients((prev) => [
       ...prev,
-      { food_slug: selectedFoodSlug, quantity: selectedQty, unit_name: selectedUnit },
+      { food_slug: slugToAdd, quantity: selectedQty, unit_name: selectedUnit },
     ]);
+  };
+
+  const handleUpdateQty = (index: number, delta: number) => {
+    setIngredients((prev) =>
+      prev.map((item, idx) =>
+        idx === index
+          ? { ...item, quantity: Math.max(0.25, Number((item.quantity + delta).toFixed(2))) }
+          : item
+      )
+    );
   };
 
   const handleRemoveIngredient = (index: number) => {
@@ -104,76 +121,96 @@ export const RecipeCalculatorPage: React.FC = () => {
     }
   };
 
-  const getPerServingVal = (code: string) => {
+  const getVal = (code: string) => {
     if (!calculatedRecipe) return null;
     const row = calculatedRecipe.nutrients.find((n) => n.nutrient_code === code);
-    return row ? row.per_serving_known_value : null;
+    if (!row) return null;
+    return displayMode === 'per_serving'
+      ? row.per_serving_known_value
+      : row.total_known_value;
   };
+
+  const filteredPickerFoods = ingredientSearch.trim()
+    ? allFoods.filter(
+        (f) =>
+          f.name_en.toLowerCase().includes(ingredientSearch.toLowerCase()) ||
+          f.aliases.some((a) =>
+            a.alias_text.toLowerCase().includes(ingredientSearch.toLowerCase())
+          )
+      )
+    : allFoods.slice(0, 8);
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-wrap items-center justify-between gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-4 rounded-3xl border border-stone-200/90 bg-white p-6 shadow-sm">
         <div>
-          <h1 className="text-2xl font-extrabold text-stone-900">
+          <span className="rounded-full bg-amber-100 px-3 py-0.5 text-xs font-extrabold text-amber-950">
+            🍲 Interactive Cooking Assistant
+          </span>
+          <h1 className="mt-2 text-2xl sm:text-3xl font-black text-stone-900">
             Recipe & Meal Nutrition Calculator
           </h1>
-          <p className="mt-1 text-xs text-stone-600">
-            Combine whole ingredients and packaged foods using Indian household measures (katori, cup, roti, tbsp, tsp, or 100g). Unknown ingredient nutrients remain NULL and are never treated as zero.
+          <p className="text-xs text-stone-500">
+            Pick ingredients visually, adjust katoris, cups, or rotis, and compare Per-Serving vs. Total Recipe nutrition.
           </p>
         </div>
         <Link
           to="/recipes/saved"
-          className="rounded-xl border border-stone-300 bg-white px-4 py-2 text-xs font-bold text-stone-800 hover:bg-stone-100"
+          className="rounded-2xl border border-stone-300 bg-stone-50 px-4 py-2.5 text-xs font-extrabold text-stone-800 hover:bg-stone-100"
         >
-          View Saved Household Recipes →
+          📖 Saved Recipes →
         </Link>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-12">
-        {/* Recipe Builder Form */}
+      <div className="grid gap-8 lg:grid-cols-12">
+        {/* Left: Visual Ingredient Builder */}
         <form
           onSubmit={(e) => void handleCalculateAndSave(e)}
-          className="lg:col-span-6 rounded-2xl border border-stone-200 bg-white p-6 shadow-sm space-y-4"
+          className="lg:col-span-6 rounded-3xl border border-stone-200/90 bg-white p-6 shadow-sm space-y-5"
         >
-          <h2 className="text-base font-bold text-stone-900">
-            1. Configure Recipe & Ingredients
-          </h2>
-
           {error && (
-            <div className="rounded-xl border border-rose-300 bg-rose-50 p-3 text-xs text-rose-900">
+            <div className="rounded-2xl border border-rose-300 bg-rose-50 p-3.5 text-xs font-bold text-rose-900">
               {error}
             </div>
           )}
 
-          <div>
-            <label className="block text-xs font-bold text-stone-700">Recipe Title *</label>
-            <input
-              type="text"
-              required
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              className="mt-1 w-full rounded-xl border border-stone-300 px-3 py-2 text-sm"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold text-stone-700">Number of Servings</label>
+          <div className="grid gap-3 sm:grid-cols-12">
+            <div className="sm:col-span-7">
+              <label className="block text-xs font-bold text-stone-700">Recipe Name *</label>
               <input
-                type="number"
-                min={0.5}
-                step={0.5}
-                value={servings}
-                onChange={(e) => setServings(Math.max(0.5, Number(e.target.value) || 1))}
-                className="mt-1 w-full rounded-xl border border-stone-300 px-3 py-2 text-sm"
+                type="text"
+                required
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                className="mt-1 w-full rounded-2xl border border-stone-300 px-3.5 py-2 text-sm font-bold"
               />
             </div>
-            <div>
-              <label className="block text-xs font-bold text-stone-700">Meal Type</label>
+            <div className="sm:col-span-3">
+              <label className="block text-xs font-bold text-stone-700">Servings</label>
+              <div className="mt-1 flex items-center rounded-2xl border border-stone-300 bg-stone-50">
+                <button
+                  type="button"
+                  onClick={() => setServings((s) => Math.max(1, s - 1))}
+                  className="px-3 py-2 font-black text-stone-700"
+                >
+                  −
+                </button>
+                <span className="flex-1 text-center text-sm font-extrabold">{servings}</span>
+                <button
+                  type="button"
+                  onClick={() => setServings((s) => s + 1)}
+                  className="px-3 py-2 font-black text-stone-700"
+                >
+                  +
+                </button>
+              </div>
+            </div>
+            <div className="sm:col-span-2">
+              <label className="block text-xs font-bold text-stone-700">Meal</label>
               <select
                 value={mealType}
                 onChange={(e) => setMealType(e.target.value)}
-                className="mt-1 w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-2xl border border-stone-300 bg-white px-2 py-2 text-xs font-bold"
               >
                 <option value="breakfast">Breakfast</option>
                 <option value="lunch">Lunch</option>
@@ -183,16 +220,51 @@ export const RecipeCalculatorPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Add Ingredient Row */}
-          <div className="rounded-xl border border-stone-200 bg-stone-50 p-3.5 space-y-2.5">
-            <div className="text-xs font-bold text-stone-700">Add Ingredient from Database</div>
-            <div className="grid grid-cols-12 gap-2">
+          {/* Visual Ingredient Search & Quick Photo Picker */}
+          <div className="rounded-2xl border border-stone-200 bg-stone-50 p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-extrabold text-stone-800">
+                Add Ingredient from Catalog
+              </span>
+              <input
+                type="text"
+                value={ingredientSearch}
+                onChange={(e) => setIngredientSearch(e.target.value)}
+                placeholder="Quick filter (e.g. Paneer, Aloo, Dal)..."
+                className="rounded-xl border border-stone-300 bg-white px-3 py-1 text-xs"
+              />
+            </div>
+
+            {/* Visual Ingredient Thumbnails Strip */}
+            <div className="grid grid-cols-4 gap-2">
+              {filteredPickerFoods.slice(0, 4).map((f) => (
+                <button
+                  key={f.slug}
+                  type="button"
+                  onClick={() => handleAddIngredient(f.slug)}
+                  className="group overflow-hidden rounded-xl border border-stone-200 bg-white p-1.5 text-left hover:border-emerald-600 transition"
+                >
+                  <FoodImage
+                    src={f.image_url}
+                    foodName={f.name_en}
+                    categorySlug={f.category_slug}
+                    aspectClass="aspect-[4/3] rounded-lg"
+                  />
+                  <div className="mt-1 truncate text-[11px] font-bold text-stone-800">
+                    + {f.name_en.split(' (')[0]}
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            {/* Full Dropdown + Unit Selector */}
+            <div className="grid grid-cols-12 gap-2 pt-1">
               <div className="col-span-6">
                 <select
                   aria-label="Select Recipe Ingredient"
                   value={selectedFoodSlug}
                   onChange={(e) => setSelectedFoodSlug(e.target.value)}
-                  className="w-full rounded-lg border border-stone-300 bg-white px-2.5 py-2 text-xs"
+                  className="w-full rounded-xl border border-stone-300 bg-white px-2.5 py-2 text-xs font-semibold"
                 >
                   {allFoods.map((f) => (
                     <option key={f.slug} value={f.slug}>
@@ -208,14 +280,14 @@ export const RecipeCalculatorPage: React.FC = () => {
                   step={0.25}
                   value={selectedQty}
                   onChange={(e) => setSelectedQty(Math.max(0.25, Number(e.target.value) || 1))}
-                  className="w-full rounded-lg border border-stone-300 px-2 py-2 text-xs"
+                  className="w-full rounded-xl border border-stone-300 px-2 py-2 text-xs font-bold"
                 />
               </div>
               <div className="col-span-4">
                 <select
                   value={selectedUnit}
                   onChange={(e) => setSelectedUnit(e.target.value)}
-                  className="w-full rounded-lg border border-stone-300 bg-white px-2 py-2 text-xs"
+                  className="w-full rounded-xl border border-stone-300 bg-white px-2 py-2 text-xs font-semibold"
                 >
                   <option value="standard_serving">Standard Serving</option>
                   <option value="100g">100 g / 100 ml</option>
@@ -231,40 +303,68 @@ export const RecipeCalculatorPage: React.FC = () => {
             </div>
             <button
               type="button"
-              onClick={handleAddIngredient}
-              className="rounded-lg bg-stone-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-stone-800"
+              onClick={() => handleAddIngredient(selectedFoodSlug)}
+              className="rounded-xl bg-stone-900 px-4 py-2 text-xs font-bold text-white hover:bg-stone-800"
             >
-              + Add Ingredient to Recipe
+              + Add Selected Ingredient
             </button>
           </div>
 
-          {/* Current Ingredients List */}
-          <div className="space-y-2">
-            <div className="text-xs font-bold text-stone-700">
-              Recipe Ingredients ({ingredients.length})
+          {/* Visual Selected Ingredient Cards with Stepper Controls */}
+          <div className="space-y-2.5">
+            <div className="text-xs font-extrabold uppercase tracking-wider text-stone-400">
+              Selected Ingredients ({ingredients.length})
             </div>
             {ingredients.map((ing, idx) => {
               const fObj = allFoods.find((f) => f.slug === ing.food_slug);
               return (
                 <div
                   key={`${ing.food_slug}-${idx}`}
-                  className="flex items-center justify-between rounded-xl border border-stone-200 px-3 py-2 text-xs"
+                  className="flex items-center justify-between gap-3 rounded-2xl border border-stone-200/90 bg-stone-50/70 p-2.5 text-xs"
                 >
-                  <div>
-                    <span className="font-bold text-stone-900">
-                      {fObj ? fObj.name_en : ing.food_slug}
-                    </span>
-                    <span className="ml-2 text-stone-600">
-                      {ing.quantity} × {ing.unit_name}
-                    </span>
+                  <div className="flex items-center gap-3 min-w-0">
+                    <FoodImage
+                      src={fObj?.image_url}
+                      foodName={fObj?.name_en || ing.food_slug}
+                      categorySlug={fObj?.category_slug}
+                      aspectClass="h-11 w-14 shrink-0 rounded-xl"
+                    />
+                    <div className="min-w-0">
+                      <div className="truncate font-extrabold text-stone-900">
+                        {fObj ? fObj.name_en : ing.food_slug}
+                      </div>
+                      <div className="text-stone-500">
+                        {ing.quantity} × {ing.unit_name.replace('_', ' ')}
+                      </div>
+                    </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveIngredient(idx)}
-                    className="text-rose-700 font-semibold hover:underline"
-                  >
-                    Remove
-                  </button>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <div className="inline-flex items-center rounded-xl border border-stone-300 bg-white">
+                      <button
+                        type="button"
+                        onClick={() => handleUpdateQty(idx, -0.5)}
+                        className="px-2 py-1 font-bold text-stone-700 hover:bg-stone-100"
+                      >
+                        −
+                      </button>
+                      <span className="px-2 font-extrabold">{ing.quantity}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleUpdateQty(idx, 0.5)}
+                        className="px-2 py-1 font-bold text-stone-700 hover:bg-stone-100"
+                      >
+                        +
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveIngredient(idx)}
+                      className="rounded-lg p-1.5 text-stone-400 hover:bg-rose-50 hover:text-rose-700 font-bold"
+                    >
+                      ✕
+                    </button>
+                  </div>
                 </div>
               );
             })}
@@ -273,107 +373,151 @@ export const RecipeCalculatorPage: React.FC = () => {
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-xl bg-emerald-800 py-3 text-xs font-bold text-white shadow hover:bg-emerald-700 disabled:opacity-50"
+            className="w-full rounded-2xl bg-emerald-800 py-3.5 text-sm font-extrabold text-white shadow-md hover:bg-emerald-700 disabled:opacity-50 transition"
           >
-            {loading ? 'Calculating...' : 'Calculate Nutrition & Save to Household'}
+            {loading ? 'Calculating...' : 'Calculate Nutrition & Save Recipe'}
           </button>
         </form>
 
-        {/* Calculated Output */}
-        <div className="lg:col-span-6 space-y-4">
+        {/* Right: Visual Recipe Nutrition Results */}
+        <div className="lg:col-span-6 space-y-5">
           {!calculatedRecipe ? (
-            <div className="rounded-2xl border border-stone-200 bg-white p-8 text-center text-xs text-stone-600">
-              Click <strong>"Calculate Nutrition & Save to Household"</strong> on the left to compute total recipe nutrition, per-serving breakdown, ingredient contributions, and data completeness.
+            <div className="rounded-3xl border border-stone-200 bg-white p-10 text-center space-y-3">
+              <div className="text-4xl">🍲</div>
+              <h3 className="text-base font-extrabold text-stone-900">
+                Ready to Calculate Your Recipe
+              </h3>
+              <p className="text-xs text-stone-500 max-w-sm mx-auto">
+                Click <strong>"Calculate Nutrition & Save Recipe"</strong> to generate interactive per-serving and total recipe charts.
+              </p>
             </div>
           ) : (
-            <div className="space-y-4">
-              <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-5 text-xs space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="font-extrabold text-sm text-emerald-950">
-                    {calculatedRecipe.title}
-                  </span>
-                  <span className="rounded-full bg-emerald-800 px-2.5 py-0.5 text-white font-bold">
-                    {calculatedRecipe.completeness_pct}% Data Complete
-                  </span>
+            <div className="space-y-5">
+              {/* Recipe Header Card with Per-Serving vs Total Switch */}
+              <div className="overflow-hidden rounded-3xl border border-stone-200/90 bg-white shadow-sm">
+                <div className="relative h-44">
+                  <FoodImage
+                    src={calculatedRecipe.image_url}
+                    foodName={calculatedRecipe.title}
+                    categorySlug="indian-dishes"
+                    aspectClass="h-full w-full"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent" />
+                  <div className="absolute bottom-4 left-5 right-5 flex flex-wrap items-end justify-between gap-2 text-white">
+                    <div>
+                      <span className="rounded-full bg-emerald-700/90 px-2.5 py-0.5 text-[10px] font-bold uppercase">
+                        {calculatedRecipe.meal_type} • {calculatedRecipe.servings} Servings
+                      </span>
+                      <h2 className="mt-1 text-xl font-black">{calculatedRecipe.title}</h2>
+                    </div>
+                    <span className="rounded-full bg-white/95 px-3 py-1 text-xs font-extrabold text-emerald-950">
+                      {calculatedRecipe.completeness_pct}% Data Complete
+                    </span>
+                  </div>
                 </div>
-                <p className="text-stone-700">
-                  Total Recipe Weight: <strong>{calculatedRecipe.total_weight_grams} g</strong> •{' '}
-                  Servings: <strong>{calculatedRecipe.servings}</strong> • Per Serving Weight:{' '}
-                  <strong>{calculatedRecipe.serving_weight_grams} g</strong>
-                </p>
-                <p className="text-amber-900 font-medium">{calculatedRecipe.completeness_notice}</p>
+
+                <div className="p-5 space-y-4">
+                  {/* Prominent Switch: Per Serving vs Total Recipe */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-stone-100 p-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setDisplayMode('per_serving')}
+                      className={`flex-1 rounded-xl py-2 text-xs font-extrabold transition ${
+                        displayMode === 'per_serving'
+                          ? 'bg-emerald-800 text-white shadow-sm'
+                          : 'text-stone-700'
+                      }`}
+                    >
+                      Per 1 Serving ({calculatedRecipe.serving_weight_grams}g)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDisplayMode('total')}
+                      className={`flex-1 rounded-xl py-2 text-xs font-extrabold transition ${
+                        displayMode === 'total'
+                          ? 'bg-emerald-800 text-white shadow-sm'
+                          : 'text-stone-700'
+                      }`}
+                    >
+                      Total Recipe ({calculatedRecipe.total_weight_grams}g)
+                    </button>
+                  </div>
+
+                  {/* 5 Highlight Cards */}
+                  <div className="grid grid-cols-5 gap-2 text-center">
+                    {[
+                      { label: 'Calories', val: getVal('energy_kcal'), unit: 'kcal' },
+                      { label: 'Protein', val: getVal('protein_g'), unit: 'g' },
+                      { label: 'Carbs', val: getVal('carbs_g'), unit: 'g' },
+                      { label: 'Fat', val: getVal('fat_total_g'), unit: 'g' },
+                      { label: 'Fibre', val: getVal('fibre_g'), unit: 'g' },
+                    ].map((s) => (
+                      <div key={s.label} className="rounded-2xl bg-stone-50 p-2.5 border border-stone-100">
+                        <div className="text-[10px] font-bold text-stone-500">{s.label}</div>
+                        <div className="mt-0.5 text-sm font-black text-stone-900">
+                          {s.val !== null ? `${s.val}${s.unit === 'kcal' ? '' : s.unit}` : 'NULL'}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
 
               <MacroDistributionBarChart
-                proteinG={getPerServingVal('protein_g')}
-                carbsG={getPerServingVal('carbs_g')}
-                fatG={getPerServingVal('fat_total_g')}
-                fibreG={getPerServingVal('fibre_g')}
-                basisLabel={`Per Serving (${calculatedRecipe.serving_weight_grams}g)`}
+                energyKcal={getVal('energy_kcal')}
+                proteinG={getVal('protein_g')}
+                carbsG={getVal('carbs_g')}
+                fatG={getVal('fat_total_g')}
+                fibreG={getVal('fibre_g')}
+                basisLabel={
+                  displayMode === 'per_serving'
+                    ? `Per Serving (${calculatedRecipe.serving_weight_grams}g)`
+                    : `Entire Recipe (${calculatedRecipe.total_weight_grams}g)`
+                }
               />
 
-              {/* Ingredient Contributions */}
-              <div className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
-                <h3 className="text-sm font-bold text-stone-900">
-                  Ingredient Contribution Breakdown
-                </h3>
-                <div className="mt-3 overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead>
-                      <tr className="border-b border-stone-200 text-stone-500">
-                        <th className="py-1.5">Ingredient</th>
-                        <th className="py-1.5">Weight</th>
-                        <th className="py-1.5">Energy</th>
-                        <th className="py-1.5">Protein</th>
-                        <th className="py-1.5">Carbs</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-stone-100">
-                      {calculatedRecipe.ingredients.map((ing, i) => (
-                        <tr key={i}>
-                          <td className="py-1.5 font-semibold text-stone-800">{ing.food_name}</td>
-                          <td className="py-1.5">{ing.grams_equivalent} g</td>
-                          <td className="py-1.5">
-                            {ing.energy_kcal_contribution !== null
-                              ? `${ing.energy_kcal_contribution} kcal`
-                              : 'NULL'}
-                          </td>
-                          <td className="py-1.5">
-                            {ing.protein_g_contribution !== null
-                              ? `${ing.protein_g_contribution} g`
-                              : 'NULL'}
-                          </td>
-                          <td className="py-1.5">
-                            {ing.carbs_g_contribution !== null
-                              ? `${ing.carbs_g_contribution} g`
-                              : 'NULL'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+              {/* Progressive Disclosure for Ingredient Contributions & All 20 Nutrients */}
+              <ExpandableSection
+                title="Ingredient Contributions"
+                subtitle="How each ingredient contributes to total weight and calories"
+              >
+                <div className="space-y-2">
+                  {calculatedRecipe.ingredients.map((ing, i) => (
+                    <div
+                      key={i}
+                      className="flex items-center justify-between rounded-xl bg-stone-50 p-2.5 text-xs"
+                    >
+                      <span className="font-bold text-stone-800">
+                        {ing.food_name} ({ing.grams_equivalent}g)
+                      </span>
+                      <span className="font-mono text-stone-600">
+                        {ing.energy_kcal_contribution ?? 'NULL'} kcal •{' '}
+                        {ing.protein_g_contribution ?? 'NULL'}g P •{' '}
+                        {ing.carbs_g_contribution ?? 'NULL'}g C
+                      </span>
+                    </div>
+                  ))}
                 </div>
-              </div>
+              </ExpandableSection>
 
-              {/* Nutrient Totals Table */}
-              <div className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
-                <h3 className="text-sm font-bold text-stone-900">
-                  Known Total & Per-Serving Nutrients
-                </h3>
-                <div className="mt-3 max-h-72 overflow-y-auto">
+              <ExpandableSection
+                title="Complete 20-Nutrient Recipe Table & Missing Data Check"
+                subtitle={calculatedRecipe.completeness_notice}
+              >
+                <div className="max-h-72 overflow-y-auto">
                   <table className="w-full text-left text-xs">
                     <thead>
                       <tr className="border-b border-stone-200 text-stone-500">
                         <th className="py-1.5">Nutrient</th>
                         <th className="py-1.5">Total Known</th>
                         <th className="py-1.5">Per Serving</th>
-                        <th className="py-1.5">Coverage</th>
+                        <th className="py-1.5">Status</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-stone-100">
                       {calculatedRecipe.nutrients.map((n) => (
                         <tr key={n.nutrient_code}>
-                          <td className="py-1.5 font-semibold text-stone-800">
+                          <td className="py-1.5 font-bold text-stone-800">
                             {n.nutrient_name} ({n.unit})
                           </td>
                           <td className="py-1.5 font-mono">
@@ -386,7 +530,7 @@ export const RecipeCalculatorPage: React.FC = () => {
                           </td>
                           <td className="py-1.5">
                             {n.is_complete ? (
-                              <span className="text-emerald-700 font-semibold">Complete</span>
+                              <span className="text-emerald-700 font-bold">Complete</span>
                             ) : (
                               <span className="text-amber-700">
                                 {n.ingredients_missing_data} ing. NULL
@@ -398,7 +542,7 @@ export const RecipeCalculatorPage: React.FC = () => {
                     </tbody>
                   </table>
                 </div>
-              </div>
+              </ExpandableSection>
             </div>
           )}
         </div>
@@ -408,7 +552,7 @@ export const RecipeCalculatorPage: React.FC = () => {
 };
 
 // ==========================================
-// PAGE 9: SAVED RECIPES PAGE
+// PAGE 9: VISUAL SAVED RECIPES PAGE
 // ==========================================
 export const SavedRecipesPage: React.FC = () => {
   const { household } = useHousehold();
@@ -435,71 +579,75 @@ export const SavedRecipesPage: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-4 rounded-3xl border border-stone-200/90 bg-white p-6 shadow-sm">
         <div>
-          <h1 className="text-2xl font-extrabold text-stone-900">Saved Household Recipes</h1>
-          <p className="mt-1 text-xs text-stone-600">
-            Reopen, scale, or edit your saved household recipes and ICMR-NIN reference meal templates.
+          <h1 className="text-2xl font-black text-stone-900">Saved Household Recipes</h1>
+          <p className="text-xs text-stone-500">
+            Reopen any saved recipe in the calculator to adjust ingredients or servings.
           </p>
         </div>
         <Link
           to="/recipes/calculator"
-          className="rounded-xl bg-emerald-800 px-4 py-2.5 text-xs font-bold text-white hover:bg-emerald-700"
+          className="rounded-2xl bg-emerald-800 px-5 py-2.5 text-xs font-extrabold text-white hover:bg-emerald-700"
         >
           + Create New Recipe
         </Link>
       </div>
 
       {loading ? (
-        <div className="h-48 animate-pulse rounded-2xl bg-stone-200/70" />
-      ) : recipes.length === 0 ? (
-        <div className="rounded-2xl border border-stone-200 bg-white p-8 text-center text-xs text-stone-600">
-          No saved recipes yet. Use the Recipe Calculator to create one.
-        </div>
+        <div className="h-48 animate-pulse rounded-3xl bg-stone-200/70" />
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {recipes.map((rec) => {
-            const kcal = rec.nutrients.find((n) => n.nutrient_code === 'energy_kcal')?.per_serving_known_value;
-            const prot = rec.nutrients.find((n) => n.nutrient_code === 'protein_g')?.per_serving_known_value;
+            const kcal = rec.nutrients.find((n) => n.nutrient_code === 'energy_kcal')
+              ?.per_serving_known_value;
+            const prot = rec.nutrients.find((n) => n.nutrient_code === 'protein_g')
+              ?.per_serving_known_value;
             return (
               <div
                 key={rec.id}
-                className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm flex flex-col justify-between"
+                className="overflow-hidden rounded-3xl border border-stone-200/90 bg-white shadow-sm flex flex-col justify-between"
               >
                 <div>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="rounded bg-stone-100 px-2 py-0.5 font-semibold uppercase text-stone-700">
-                      {rec.meal_type} • {rec.servings} servings
-                    </span>
-                    <span className="text-emerald-800 font-bold">
-                      {rec.completeness_pct}% Complete
-                    </span>
+                  <FoodImage
+                    src={rec.image_url}
+                    foodName={rec.title}
+                    categorySlug="indian-dishes"
+                    aspectClass="aspect-[16/10]"
+                  />
+                  <div className="p-5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="rounded-full bg-stone-100 px-2.5 py-0.5 font-bold uppercase text-stone-700">
+                        {rec.meal_type} • {rec.servings} servings
+                      </span>
+                      <span className="text-emerald-800 font-bold">
+                        {rec.completeness_pct}% Complete
+                      </span>
+                    </div>
+                    <h2 className="mt-2 text-lg font-extrabold text-stone-900">{rec.title}</h2>
+                    <div className="mt-3 flex gap-2 text-xs">
+                      <span className="rounded-xl bg-stone-50 px-3 py-1.5 font-bold">
+                        {kcal ?? 'NULL'} kcal / serve
+                      </span>
+                      <span className="rounded-xl bg-emerald-50 px-3 py-1.5 font-bold text-emerald-900">
+                        {prot ?? 'NULL'}g Protein
+                      </span>
+                    </div>
                   </div>
-                  <h2 className="mt-2 text-lg font-bold text-stone-900">{rec.title}</h2>
-                  {rec.description && (
-                    <p className="mt-1 text-xs text-stone-600">{rec.description}</p>
-                  )}
-                  <p className="mt-2 text-xs text-stone-700">
-                    <strong>Per Serving ({rec.serving_weight_grams}g):</strong>{' '}
-                    {kcal ?? 'NULL'} kcal • {prot ?? 'NULL'} g protein
-                  </p>
-                  <p className="mt-1 text-xs text-stone-500">
-                    Ingredients: {rec.ingredients.map((i) => i.food_name).join(', ')}
-                  </p>
                 </div>
 
-                <div className="mt-4 flex items-center justify-between border-t border-stone-100 pt-3 text-xs">
+                <div className="px-5 pb-5 pt-3 border-t border-stone-100 flex items-center justify-between text-xs">
                   <Link
                     to={`/recipes/calculator?edit=${rec.id}`}
-                    className="font-bold text-emerald-800 hover:underline"
+                    className="font-extrabold text-emerald-800 hover:underline"
                   >
-                    Reopen & Edit in Calculator →
+                    Open in Calculator →
                   </Link>
                   {rec.household_token !== 'system_template' && (
                     <button
                       type="button"
                       onClick={() => void handleDelete(rec.id)}
-                      className="text-rose-700 hover:underline"
+                      className="text-stone-400 hover:text-rose-700 font-bold"
                     >
                       Delete
                     </button>

@@ -3,6 +3,7 @@ import re
 from typing import Dict, List, Optional, Tuple
 from sqlalchemy.orm import Session, joinedload
 
+from app.db.seed_images import resolve_category_image_url, resolve_food_image_url
 from app.models.entities import (
     DataSource,
     FoodAlias,
@@ -48,7 +49,6 @@ def serialize_food_summary(food: FoodItem, total_nutrient_defs: int = 20) -> Foo
     available_count = sum(1 for nv in food.nutrient_values if nv.value is not None)
     completeness = round((available_count / max(total_nutrient_defs, 1)) * 100.0, 1)
 
-    # Deduplicate display aliases
     seen = set()
     aliases_out: List[FoodAliasOut] = []
     for al in food.aliases:
@@ -63,11 +63,16 @@ def serialize_food_summary(food: FoodItem, total_nutrient_defs: int = 20) -> Foo
                 )
             )
 
+    img_url = getattr(food, "image_url", None) or resolve_food_image_url(
+        food.slug, food.category.slug
+    )
+
     return FoodSummaryOut(
         id=food.id,
         slug=food.slug,
         ifct_code=food.ifct_code,
         name_en=food.name_en,
+        image_url=img_url,
         category_slug=food.category.slug,
         category_name=food.category.name,
         is_packaged=food.is_packaged,
@@ -158,15 +163,29 @@ def serialize_food_detail(db: Session, food: FoodItem) -> FoodDetailOut:
             "Allergen tags are data-based indications from reference composition or declared ingredients, NOT a clinical safety guarantee against mill or factory cross-contamination."
         )
 
+    cat_out = FoodCategoryOut(
+        id=food.category.id,
+        slug=food.category.slug,
+        name=food.category.name,
+        description=food.category.description,
+        image_url=getattr(food.category, "image_url", None)
+        or resolve_category_image_url(food.category.slug),
+        display_order=food.category.display_order,
+    )
+    img_url = getattr(food, "image_url", None) or resolve_food_image_url(
+        food.slug, food.category.slug
+    )
+
     return FoodDetailOut(
         id=food.id,
         slug=food.slug,
         ifct_code=food.ifct_code,
         name_en=food.name_en,
+        image_url=img_url,
         scientific_name=food.scientific_name,
         description=food.description,
         region_state=food.region_state,
-        category=FoodCategoryOut.model_validate(food.category),
+        category=cat_out,
         is_packaged=food.is_packaged,
         brand=food.brand,
         barcode=food.barcode,
@@ -222,7 +241,6 @@ def search_foods(
     all_candidates: List[FoodItem] = query.all()
     total_defs = db.query(NutrientDefinition).count() or 20
 
-    # Optional nutritional characteristic filter
     if nutrient_filter:
         filtered: List[FoodItem] = []
         for f in all_candidates:
@@ -269,7 +287,6 @@ def search_foods(
                 elif norm_q in al_norm:
                     best_score = max(best_score, 78.0)
                 else:
-                    # Token & fuzzy matching for misspellings (e.g., "eeruli", "avalaki", "alugade")
                     for tok in al_norm.split():
                         ratio = difflib.SequenceMatcher(None, norm_q, tok).ratio()
                         if ratio >= 0.72:
@@ -290,7 +307,6 @@ def search_foods(
                 scored_items.append((best_score, item))
 
         scored_items.sort(key=lambda x: (-x[0], x[1].name_en))
-        # Build search suggestions
         close_keys = difflib.get_close_matches(norm_q, list(all_vocab.keys()), n=5, cutoff=0.55)
         for ck in close_keys:
             label = all_vocab[ck]
@@ -302,7 +318,6 @@ def search_foods(
 
     matched_foods = [item for _, item in scored_items]
 
-    # Explicit sorting
     if sort_by == "name_asc":
         matched_foods.sort(key=lambda f: f.name_en.lower())
     elif sort_by == "protein_desc":
