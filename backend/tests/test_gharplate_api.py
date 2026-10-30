@@ -15,7 +15,7 @@ def setup_test_db():
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
-        seed_database(db, write_report=True)
+        seed_database(db, write_report=False)
     finally:
         db.close()
     yield

@@ -1,11 +1,12 @@
+/// <reference types="vite/client" />
 import type {
   BarcodeLookupResponse,
+  ConditionFoodRecommendationResponse,
   DataSource,
   DishRecognitionResponse,
   FoodCategory,
   FoodDetail,
   FoodSearchResponse,
-  FoodSummary,
   GuidanceEvaluationResponse,
   HealthConditionDetail,
   HealthConditionSummary,
@@ -84,8 +85,27 @@ export const api = {
   getConditionDetail: (code: string) =>
     request<HealthConditionDetail>(`/conditions/${encodeURIComponent(code)}`),
 
-  getFoodsByCondition: (code: string) =>
-    request<FoodSummary[]>(`/conditions/${encodeURIComponent(code)}/foods`),
+  getFoodsByCondition: (
+    code: string,
+    params?: {
+      household_token?: string;
+      member_id?: number | null;
+      dietary_preference?: string | null;
+    }
+  ) => {
+    const sp = new URLSearchParams();
+    if (params?.household_token) sp.set('household_token', params.household_token);
+    if (params?.member_id !== undefined && params?.member_id !== null) {
+      sp.set('member_id', String(params.member_id));
+    }
+    if (params?.dietary_preference) {
+      sp.set('dietary_preference', params.dietary_preference);
+    }
+    const qs = sp.toString();
+    return request<ConditionFoodRecommendationResponse>(
+      `/conditions/${encodeURIComponent(code)}/foods${qs ? `?${qs}` : ''}`
+    );
+  },
 
   evaluateGuidance: (payload: {
     food_slug: string;

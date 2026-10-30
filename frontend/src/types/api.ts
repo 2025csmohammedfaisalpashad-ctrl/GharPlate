@@ -173,6 +173,76 @@ export interface HealthConditionDetail extends Omit<HealthConditionSummary, 'con
   rules: NutritionRule[];
 }
 
+export interface ConditionBrief {
+  code: string;
+  name: string;
+  condition_group_code: string;
+  condition_group_name: string;
+  is_short_term_illness: boolean;
+}
+
+export interface ConditionMemberContext {
+  member_id: number | null;
+  member_name?: string | null;
+  dietary_preference: string | null;
+  allergies: string[];
+  intolerances: string[];
+  personalised: boolean;
+  personalisation_note: string;
+}
+
+export interface ConditionFoodSource {
+  name: string;
+  organization: string;
+  year: number;
+  url: string;
+  section: string;
+}
+
+export interface DietaryCompatibility {
+  is_vegetarian: boolean;
+  is_vegan: boolean;
+  is_eggetarian_compatible: boolean;
+  dietary_tags: string[];
+}
+
+export interface ConditionFoodRecommendationItem extends FoodSummary {
+  category: string;
+  relevance_type:
+    | 'relevant_food_to_explore'
+    | 'portion_sensitive'
+    | 'nutrient_to_monitor'
+    | 'individualised_advice_required'
+    | 'insufficient_information'
+    | string;
+  relevance_label: string;
+  reason: string;
+  caution_notes?: string | null;
+  portion_guidance?: string | null;
+  evidence_type: string;
+  review_status: string;
+  priority_order: number;
+  relevant_tags: string[];
+  nutrition_highlights: Record<string, number | null>;
+  missing_relevant_nutrients: string[];
+  dietary_compatibility: DietaryCompatibility;
+  allergen_flags: string[];
+  intolerance_flags: string[];
+  allergen_warnings: string[];
+  intolerance_warnings: string[];
+  incomplete_ingredient_warning?: string | null;
+  source: ConditionFoodSource;
+}
+
+export interface ConditionFoodRecommendationResponse {
+  condition: ConditionBrief;
+  member_context: ConditionMemberContext;
+  total_reviewed_foods: number;
+  empty_state_message?: string | null;
+  medical_disclaimer: string;
+  foods: ConditionFoodRecommendationItem[];
+}
+
 export interface GuidanceObservation {
   rule_code: string;
   condition_code: string;

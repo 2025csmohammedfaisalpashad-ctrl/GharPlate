@@ -19,12 +19,12 @@ from app.rules.guidance_engine import evaluate_food_guidance
 from app.schemas.api_schemas import (
     BarcodeLookupResponse,
     ConditionConflictOut,
+    ConditionFoodRecommendationResponse,
     DataSourceOut,
     DishRecognitionResponse,
     FoodCategoryOut,
     FoodDetailOut,
     FoodSearchResponse,
-    FoodSummaryOut,
     GuidanceEvaluationRequest,
     GuidanceEvaluationResponse,
     HealthConditionDetailOut,
@@ -48,10 +48,10 @@ from app.services.comparison_meals_service import (
     compare_packaged_products,
     generate_meal_suggestions,
 )
+from app.services.condition_food_service import get_condition_food_recommendations
 from app.services.food_service import (
     search_foods,
     serialize_food_detail,
-    serialize_food_summary,
 )
 from app.services.ocr_barcode_service import (
     create_user_confirmed_product,
@@ -275,26 +275,39 @@ def get_health_condition_detail(code: str, db: Session = Depends(get_db)):
     )
 
 
-@api_router.get("/conditions/{code}/foods", response_model=List[FoodSummaryOut], tags=["Conditions & Guidance"])
-def explore_foods_by_condition(code: str, db: Session = Depends(get_db)):
-    cond = db.query(HealthCondition).filter(HealthCondition.code == code).first()
-    if not cond:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Condition '{code}' not found")
-
-    foods = (
-        db.query(FoodItem)
-        .options(
-            joinedload(FoodItem.category),
-            joinedload(FoodItem.source),
-            joinedload(FoodItem.aliases),
-            joinedload(FoodItem.nutrient_values),
+@api_router.get(
+    "/conditions/{code}/foods",
+    response_model=ConditionFoodRecommendationResponse,
+    tags=["Conditions & Guidance"],
+)
+def explore_foods_by_condition(
+    code: str,
+    household_token: Optional[str] = Query(
+        default=None,
+        description="Optional household convenience token for member context resolution",
+    ),
+    member_id: Optional[int] = Query(
+        default=None,
+        description="Optional household member ID to filter by dietary preference and flag allergens",
+    ),
+    dietary_preference: Optional[str] = Query(
+        default=None,
+        description="Optional explicit dietary preference override (vegetarian, vegan, eggetarian, non_vegetarian, jain)",
+    ),
+    db: Session = Depends(get_db),
+):
+    try:
+        return get_condition_food_recommendations(
+            db=db,
+            condition_code=code,
+            household_token=household_token,
+            member_id=member_id,
+            dietary_preference=dietary_preference,
         )
-        .join(FoodCategory)
-        .filter(FoodCategory.slug.in_(cond.relevant_food_groups))
-        .order_by(FoodItem.name_en.asc())
-        .all()
-    )
-    return [serialize_food_summary(f) for f in foods]
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
 
 
 @api_router.post("/guidance/evaluate", response_model=GuidanceEvaluationResponse, tags=["Conditions & Guidance"])

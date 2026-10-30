@@ -51,6 +51,44 @@ class FoodCategory(Base):
     foods: Mapped[List["FoodItem"]] = relationship("FoodItem", back_populates="category")
 
 
+class FoodTag(Base):
+    """
+    Structured, reusable food characteristic tag definition.
+    Separates dietary classifications, digestive traits, nutritional characteristics, and allergen indications.
+    """
+    __tablename__ = "food_tags"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    code: Mapped[str] = mapped_column(String(80), unique=True, index=True, nullable=False)
+    label: Mapped[str] = mapped_column(String(120), nullable=False)
+    tag_domain: Mapped[str] = mapped_column(
+        String(60), index=True, nullable=False
+    )  # dietary_classification, digestive_characteristic, nutritional_characteristic, allergen_indication, intolerance_marker
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class FoodItemTag(Base):
+    """
+    Structured relational link between an individual FoodItem and a FoodTag.
+    """
+    __tablename__ = "food_item_tags"
+    __table_args__ = (
+        UniqueConstraint("food_id", "tag_id", name="uq_food_item_tag"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    food_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("food_items.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    tag_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("food_tags.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    derivation_note: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+
+    food: Mapped["FoodItem"] = relationship("FoodItem", back_populates="structured_tags")
+    tag: Mapped["FoodTag"] = relationship("FoodTag")
+
+
 class FoodItem(Base):
     __tablename__ = "food_items"
 
@@ -101,6 +139,12 @@ class FoodItem(Base):
     )
     servings: Mapped[List["ServingConversion"]] = relationship(
         "ServingConversion", back_populates="food", cascade="all, delete-orphan"
+    )
+    structured_tags: Mapped[List["FoodItemTag"]] = relationship(
+        "FoodItemTag", back_populates="food", cascade="all, delete-orphan"
+    )
+    condition_mappings: Mapped[List["ConditionFoodMapping"]] = relationship(
+        "ConditionFoodMapping", back_populates="food", cascade="all, delete-orphan"
     )
 
 
@@ -218,6 +262,61 @@ class HealthCondition(Base):
     rules: Mapped[List["NutritionRule"]] = relationship(
         "NutritionRule", back_populates="condition", cascade="all, delete-orphan"
     )
+    food_mappings: Mapped[List["ConditionFoodMapping"]] = relationship(
+        "ConditionFoodMapping", back_populates="condition", cascade="all, delete-orphan"
+    )
+
+
+class ConditionFoodMapping(Base):
+    """
+    Explicit, reviewed condition-food relevance mapping.
+    Replaces naive category-membership food recommendations.
+    A food appears in condition-specific exploration ONLY when an active, reviewed mapping exists.
+    """
+    __tablename__ = "condition_food_mappings"
+    __table_args__ = (
+        UniqueConstraint("condition_id", "food_id", name="uq_condition_food_mapping"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    condition_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("health_conditions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    food_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("food_items.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    # Allowed relevance_category values:
+    # - "relevant_to_explore" ("Relevant food to explore")
+    # - "portion_sensitive" ("Portion-sensitive")
+    # - "nutrient_to_monitor" ("Nutrient to monitor")
+    # - "individualised_advice_required" ("Individualised advice required")
+    # - "insufficient_information" ("Insufficient information")
+    relevance_category: Mapped[str] = mapped_column(
+        String(60), nullable=False, index=True, default="relevant_to_explore"
+    )
+    relevance_display_label: Mapped[str] = mapped_column(
+        String(100), nullable=False, default="Relevant food to explore"
+    )
+    explanation: Mapped[str] = mapped_column(Text, nullable=False)
+    relevant_nutrient_or_characteristic: Mapped[str] = mapped_column(String(255), nullable=False)
+    relevant_tags: Mapped[List[str]] = mapped_column(JSON, default=list, nullable=False)
+
+    source_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("data_sources.id", ondelete="RESTRICT"), nullable=False
+    )
+    source_section: Mapped[str] = mapped_column(String(200), nullable=False)
+    review_status: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="reviewed", index=True
+    )  # reviewed, requires_research, unreviewed
+    applicability_limitations: Mapped[str] = mapped_column(Text, nullable=False)
+    serving_consideration: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+
+    condition: Mapped["HealthCondition"] = relationship("HealthCondition", back_populates="food_mappings")
+    food: Mapped["FoodItem"] = relationship("FoodItem", back_populates="condition_mappings")
+    source: Mapped["DataSource"] = relationship("DataSource")
 
 
 class NutritionRule(Base):
@@ -242,15 +341,6 @@ class NutritionRule(Base):
     educational_category: Mapped[str] = mapped_column(
         String(80), nullable=False
     )
-    # Allowed educational categories ONLY:
-    # - "Nutritionally relevant"
-    # - "Portion-sensitive"
-    # - "Nutrient to monitor"
-    # - "May require individualised advice"
-    # - "Limited evidence available"
-    # - "Insufficient nutritional information"
-    # - "Potential allergen concern"
-
     relevance_level: Mapped[str] = mapped_column(
         String(40), default="monitor", nullable=False
     )  # contextual_note, monitor, portion_awareness, individualised_review

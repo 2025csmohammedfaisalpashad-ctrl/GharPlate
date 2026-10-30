@@ -185,6 +185,94 @@ class HealthConditionDetailOut(HealthConditionSummaryOut):
     rules: List[NutritionRuleOut]
 
 
+class ConditionBriefOut(BaseModel):
+    code: str
+    name: str
+    condition_group_code: str
+    condition_group_name: str
+    is_short_term_illness: bool
+
+
+class ConditionMemberContextOut(BaseModel):
+    member_id: Optional[int] = None
+    member_name: Optional[str] = None
+    dietary_preference: Optional[str] = None
+    allergies: List[str] = Field(default_factory=list)
+    intolerances: List[str] = Field(default_factory=list)
+    personalised: bool = False
+    personalisation_note: str
+
+
+class ConditionFoodSourceOut(BaseModel):
+    name: str
+    organization: str
+    year: int
+    url: str
+    section: str
+
+
+class DietaryCompatibilityOut(BaseModel):
+    is_vegetarian: bool
+    is_vegan: bool
+    is_eggetarian_compatible: bool
+    dietary_tags: List[str] = Field(default_factory=list)
+
+
+class ConditionFoodRecommendationItem(BaseModel):
+    id: int
+    slug: str
+    ifct_code: Optional[str] = None
+    name_en: str
+    image_url: Optional[str] = None
+    category: str
+    category_slug: str
+    category_name: str
+    is_packaged: bool
+    brand: Optional[str] = None
+    barcode: Optional[str] = None
+    default_basis: str
+    standard_serving_name: str
+    standard_serving_grams: float
+    is_vegetarian: bool
+    is_vegan: bool
+    aliases: List[FoodAliasOut] = Field(default_factory=list)
+    key_nutrients: Dict[str, Optional[float]] = Field(default_factory=dict)
+    unavailable_nutrients: List[str] = Field(default_factory=list)
+    completeness_pct: float
+    confidence_level: str
+    source_name: str
+    source_organization: str
+    source_url: str
+    publication_year: int
+    relevance_type: str
+    relevance_label: str
+    reason: str
+    caution_notes: Optional[str] = None
+    portion_guidance: Optional[str] = None
+    evidence_type: str
+    review_status: str
+    priority_order: int
+    relevant_tags: List[str] = Field(default_factory=list)
+    nutrition_highlights: Dict[str, Optional[float]] = Field(default_factory=dict)
+    missing_relevant_nutrients: List[str] = Field(default_factory=list)
+    dietary_compatibility: DietaryCompatibilityOut
+    allergen_flags: List[str] = Field(default_factory=list)
+    intolerance_flags: List[str] = Field(default_factory=list)
+    allergen_warnings: List[str] = Field(default_factory=list)
+    intolerance_warnings: List[str] = Field(default_factory=list)
+    incomplete_ingredient_warning: Optional[str] = None
+    source: ConditionFoodSourceOut
+
+
+class ConditionFoodRecommendationResponse(BaseModel):
+    condition: ConditionBriefOut
+    member_context: ConditionMemberContextOut
+    total_reviewed_foods: int
+    empty_state_message: Optional[str] = None
+    medical_disclaimer: str
+    foods: List[ConditionFoodRecommendationItem]
+
+
 class GuidanceObservation(BaseModel):
     rule_code: str
     condition_code: str

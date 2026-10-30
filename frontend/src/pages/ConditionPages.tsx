@@ -3,19 +3,88 @@ import { Link, useParams } from 'react-router-dom';
 import {
   EducationalCategoryBadge,
   ExpandableSection,
-  FoodCard,
   FoodImage,
   ObservationCard,
 } from '../components/UIWidgets';
 import { useHousehold } from '../hooks/useHousehold';
 import { api } from '../services/api';
 import type {
-  FoodSummary,
+  ConditionFoodRecommendationItem,
+  ConditionFoodRecommendationResponse,
   GuidanceEvaluationResponse,
   HealthConditionDetail,
   HealthConditionSummary,
 } from '../types/api';
 import { CONDITION_GROUP_VISUALS } from '../utils/visualAssets';
+
+const RELEVANCE_BADGE_STYLES: Record<
+  string,
+  { label: string; bg: string; border: string; text: string; icon: string }
+> = {
+  relevant_food_to_explore: {
+    label: 'Relevant food to explore',
+    bg: 'bg-emerald-50',
+    border: 'border-emerald-300',
+    text: 'text-emerald-900',
+    icon: '🌿',
+  },
+  portion_sensitive: {
+    label: 'Portion-sensitive',
+    bg: 'bg-amber-50',
+    border: 'border-amber-300',
+    text: 'text-amber-950',
+    icon: '⚖️',
+  },
+  nutrient_to_monitor: {
+    label: 'Nutrient to monitor',
+    bg: 'bg-orange-50',
+    border: 'border-orange-300',
+    text: 'text-orange-950',
+    icon: '📊',
+  },
+  individualised_advice_required: {
+    label: 'Individualised advice required',
+    bg: 'bg-purple-50',
+    border: 'border-purple-300',
+    text: 'text-purple-950',
+    icon: '🩺',
+  },
+  insufficient_information: {
+    label: 'Insufficient information',
+    bg: 'bg-stone-100',
+    border: 'border-stone-300',
+    text: 'text-stone-700',
+    icon: 'ℹ️',
+  },
+};
+
+function formatDietaryBadge(item: ConditionFoodRecommendationItem): {
+  label: string;
+  className: string;
+} {
+  if (item.dietary_compatibility.is_vegan) {
+    return {
+      label: 'Vegan & Vegetarian',
+      className: 'bg-emerald-100 text-emerald-900 border-emerald-300',
+    };
+  }
+  if (item.dietary_compatibility.is_vegetarian) {
+    return {
+      label: 'Vegetarian',
+      className: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+    };
+  }
+  if (item.dietary_compatibility.is_eggetarian_compatible) {
+    return {
+      label: 'Contains Egg (Eggetarian)',
+      className: 'bg-amber-100 text-amber-900 border-amber-300',
+    };
+  }
+  return {
+    label: 'Non-Vegetarian',
+    className: 'bg-rose-100 text-rose-900 border-rose-300',
+  };
+}
 
 // ==========================================
 // PAGE 4: VISUAL CONDITION EXPLORER PAGE
@@ -197,28 +266,56 @@ export const ConditionExplorerPage: React.FC = () => {
 // ==========================================
 export const ConditionDetailPage: React.FC = () => {
   const { code } = useParams<{ code: string }>();
-  const { activeMember } = useHousehold();
+  const { household, activeMember, setActiveMemberId } = useHousehold();
   const [condition, setCondition] = useState<HealthConditionDetail | null>(null);
-  const [foods, setFoods] = useState<FoodSummary[]>([]);
+  const [recommendationData, setRecommendationData] =
+    useState<ConditionFoodRecommendationResponse | null>(null);
+  const [dietaryOverride, setDietaryOverride] = useState<string>('');
+  const [relevanceFilter, setRelevanceFilter] = useState<string>('all');
   const [foodFilterQuery, setFoodFilterQuery] = useState('');
-  const [selectedFoodForCheck, setSelectedFoodForCheck] = useState<FoodSummary | null>(null);
+  const [selectedFoodForCheck, setSelectedFoodForCheck] =
+    useState<ConditionFoodRecommendationItem | null>(null);
   const [liveGuidance, setLiveGuidance] = useState<GuidanceEvaluationResponse | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!code) return;
     setLoading(true);
-    Promise.all([api.getConditionDetail(code), api.getFoodsByCondition(code)])
-      .then(([condRes, foodsRes]) => {
+
+    const effectiveDietaryPref =
+      dietaryOverride === 'all_unfiltered'
+        ? undefined
+        : dietaryOverride || activeMember?.dietary_preference || undefined;
+
+    const effectiveMemberId =
+      dietaryOverride === 'all_unfiltered' ? undefined : activeMember?.id;
+
+    Promise.all([
+      api.getConditionDetail(code),
+      api.getFoodsByCondition(code, {
+        household_token:
+          dietaryOverride === 'all_unfiltered' ? undefined : household?.household_token,
+        member_id: effectiveMemberId,
+        dietary_preference: effectiveDietaryPref,
+      }),
+    ])
+      .then(([condRes, recRes]) => {
         setCondition(condRes);
-        setFoods(foodsRes);
-        if (foodsRes.length > 0) {
-          setSelectedFoodForCheck(foodsRes[0]);
+        setRecommendationData(recRes);
+        if (recRes.foods.length > 0) {
+          setSelectedFoodForCheck((prev) => {
+            if (prev && recRes.foods.some((f) => f.slug === prev.slug)) {
+              return recRes.foods.find((f) => f.slug === prev.slug) || recRes.foods[0];
+            }
+            return recRes.foods[0];
+          });
+        } else {
+          setSelectedFoodForCheck(null);
         }
       })
       .catch(() => null)
       .finally(() => setLoading(false));
-  }, [code]);
+  }, [code, activeMember?.id, activeMember?.dietary_preference, household?.household_token, dietaryOverride]);
 
   useEffect(() => {
     if (!condition || !selectedFoodForCheck) return;
@@ -234,11 +331,14 @@ export const ConditionDetailPage: React.FC = () => {
         age_group: activeMember?.age_group || 'adult',
         allergies: activeMember?.allergies || [],
         intolerances: activeMember?.intolerances || [],
-        dietary_preference: activeMember?.dietary_preference,
+        dietary_preference:
+          dietaryOverride && dietaryOverride !== 'all_unfiltered'
+            ? dietaryOverride
+            : activeMember?.dietary_preference,
       })
       .then(setLiveGuidance)
       .catch(() => null);
-  }, [condition, selectedFoodForCheck, activeMember]);
+  }, [condition, selectedFoodForCheck, activeMember, dietaryOverride]);
 
   if (loading) {
     return <div className="h-96 animate-pulse rounded-3xl bg-stone-200/70" />;
@@ -258,15 +358,28 @@ export const ConditionDetailPage: React.FC = () => {
     CONDITION_GROUP_VISUALS[condition.condition_group_code] ||
     CONDITION_GROUP_VISUALS.A_metabolic;
 
-  const filteredFoods = foodFilterQuery.trim()
-    ? foods.filter(
-        (f) =>
-          f.name_en.toLowerCase().includes(foodFilterQuery.toLowerCase()) ||
-          f.aliases.some((a) =>
-            a.alias_text.toLowerCase().includes(foodFilterQuery.toLowerCase())
-          )
-      )
-    : foods;
+  const foods = recommendationData?.foods || [];
+
+  const filteredFoods = foods.filter((f) => {
+    const matchesRelevance =
+      relevanceFilter === 'all' || f.relevance_type === relevanceFilter;
+    const matchesQuery =
+      !foodFilterQuery.trim() ||
+      f.name_en.toLowerCase().includes(foodFilterQuery.toLowerCase()) ||
+      f.reason.toLowerCase().includes(foodFilterQuery.toLowerCase()) ||
+      f.relevant_tags.some((t) =>
+        t.toLowerCase().includes(foodFilterQuery.toLowerCase())
+      ) ||
+      f.aliases.some((a) =>
+        a.alias_text.toLowerCase().includes(foodFilterQuery.toLowerCase())
+      );
+    return matchesRelevance && matchesQuery;
+  });
+
+  const relevanceCounts = foods.reduce<Record<string, number>>((acc, item) => {
+    acc[item.relevance_type] = (acc[item.relevance_type] || 0) + 1;
+    return acc;
+  }, {});
 
   return (
     <div className="space-y-8">
@@ -315,6 +428,74 @@ export const ConditionDetailPage: React.FC = () => {
         )}
       </section>
 
+      {/* Household Member & Dietary Preference Context Bar */}
+      <section className="rounded-3xl border border-stone-200/90 bg-white p-5 shadow-sm flex flex-wrap items-center justify-between gap-4">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-extrabold uppercase tracking-wider text-emerald-900">
+              Evidence-Reviewed Condition Food Relevance
+            </span>
+            {recommendationData?.member_context.personalised ? (
+              <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-[11px] font-bold text-emerald-900">
+                Personalised Filter Active
+              </span>
+            ) : (
+              <span className="rounded-full bg-stone-100 px-2.5 py-0.5 text-[11px] font-semibold text-stone-700">
+                All Dietary Preferences Shown
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-stone-600">
+            {recommendationData?.member_context.personalisation_note}
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          {household && household.members.length > 0 && (
+            <div className="flex items-center gap-2 rounded-2xl bg-stone-50 border border-stone-200 px-3.5 py-2 text-xs">
+              <span className="font-bold text-stone-700">Member:</span>
+              <select
+                aria-label="Member Filter for Condition"
+                value={activeMember?.id || ''}
+                onChange={(e) => {
+                  setDietaryOverride('');
+                  void setActiveMemberId(Number(e.target.value));
+                }}
+                className="bg-transparent font-extrabold text-emerald-900 focus:outline-none"
+              >
+                {household.members.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.display_name} ({m.dietary_preference.replace('_', ' ')})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div className="flex items-center gap-2 rounded-2xl bg-stone-50 border border-stone-200 px-3.5 py-2 text-xs">
+            <span className="font-bold text-stone-700">Dietary Filter:</span>
+            <select
+              aria-label="Dietary Preference Override"
+              value={dietaryOverride}
+              onChange={(e) => setDietaryOverride(e.target.value)}
+              className="bg-transparent font-extrabold text-stone-900 focus:outline-none"
+            >
+              <option value="">
+                {activeMember
+                  ? `Use ${activeMember.display_name}’s Preference (${activeMember.dietary_preference.replace('_', ' ')})`
+                  : 'All Reviewed Foods (No Dietary Assumption)'}
+              </option>
+              <option value="all_unfiltered">Show All Reviewed Foods (Unfiltered)</option>
+              <option value="vegetarian">Vegetarian Only</option>
+              <option value="vegan">Vegan Only</option>
+              <option value="eggetarian">Eggetarian (Vegetarian + Egg)</option>
+              <option value="non_vegetarian">Non-Vegetarian Inclusive</option>
+              <option value="jain">Jain Compatible</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
       {/* INTERACTIVE FOOD-AGAINST-CONDITION CHECKER */}
       {selectedFoodForCheck && (
         <section className="rounded-3xl border border-stone-200/90 bg-white p-6 shadow-sm space-y-5">
@@ -325,8 +506,8 @@ export const ConditionDetailPage: React.FC = () => {
               </h2>
               <p className="text-xs text-stone-500">
                 {activeMember
-                  ? `Evaluated for ${activeMember.display_name} • Select any food below to preview its relevance`
-                  : 'Select any food below to preview its nutritional relevance'}
+                  ? `Evaluated for ${activeMember.display_name} • Select any reviewed food below to inspect its rule-based guidance`
+                  : 'Select any reviewed food below to inspect its rule-based guidance'}
               </p>
             </div>
             <Link
@@ -347,13 +528,25 @@ export const ConditionDetailPage: React.FC = () => {
                 aspectClass="aspect-[16/10]"
               />
               <div className="p-4 space-y-2">
-                <div className="text-xs font-bold text-emerald-800">
-                  {selectedFoodForCheck.category_name}
+                <div className="flex flex-wrap items-center justify-between gap-1">
+                  <span className="text-xs font-bold text-emerald-800">
+                    {selectedFoodForCheck.category_name}
+                  </span>
+                  <span
+                    className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${
+                      formatDietaryBadge(selectedFoodForCheck).className
+                    }`}
+                  >
+                    {formatDietaryBadge(selectedFoodForCheck).label}
+                  </span>
                 </div>
                 <div className="text-lg font-black text-stone-900">
                   {selectedFoodForCheck.name_en}
                 </div>
-                <div className="text-xs text-stone-500">
+                <p className="text-xs text-stone-700 leading-relaxed">
+                  {selectedFoodForCheck.reason}
+                </p>
+                <div className="text-[11px] text-stone-500">
                   Evaluated Serving: {selectedFoodForCheck.standard_serving_name} ({selectedFoodForCheck.standard_serving_grams}g)
                 </div>
               </div>
@@ -378,46 +571,257 @@ export const ConditionDetailPage: React.FC = () => {
         </section>
       )}
 
-      {/* Visual Food Grid to Explore for This Condition */}
+      {/* Reviewed Condition-Specific Food Recommendations Grid */}
       <section className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <h2 className="text-xl font-black text-stone-900">
-              Explore Foods for {condition.name}
+              Reviewed Foods & Nutritional Relevance for {condition.name}
             </h2>
             <p className="text-xs text-stone-500">
-              Click "Preview on This Page" or open any food card for full details
+              Only explicitly mapped, evidence-reviewed foods for this condition are displayed — never unreviewed category dumps.
             </p>
           </div>
           <input
             type="text"
             value={foodFilterQuery}
             onChange={(e) => setFoodFilterQuery(e.target.value)}
-            placeholder="Filter foods (e.g. Ragi, Dal, Idli, Oats)..."
+            placeholder="Filter reviewed foods or tags..."
             className="rounded-2xl border border-stone-300 bg-white px-4 py-2 text-xs w-64"
           />
         </div>
 
-        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {filteredFoods.slice(0, 12).map((f) => (
-            <div key={f.slug} className="space-y-2">
-              <FoodCard food={f} />
-              <button
-                type="button"
-                onClick={() => setSelectedFoodForCheck(f)}
-                className={`w-full rounded-xl py-2 text-xs font-bold transition ${
-                  selectedFoodForCheck?.slug === f.slug
-                    ? 'bg-emerald-800 text-white'
-                    : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
-                }`}
-              >
-                {selectedFoodForCheck?.slug === f.slug
-                  ? '✓ Currently Previewing Above'
-                  : 'Preview Against Condition Above ↑'}
-              </button>
+        {/* Relevance Category Filter Pills */}
+        {foods.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setRelevanceFilter('all')}
+              className={`rounded-full px-3.5 py-1.5 text-xs font-bold border transition ${
+                relevanceFilter === 'all'
+                  ? 'bg-stone-900 text-white border-stone-900'
+                  : 'bg-white text-stone-700 border-stone-200 hover:bg-stone-50'
+              }`}
+            >
+              All Reviewed ({foods.length})
+            </button>
+            {Object.entries(RELEVANCE_BADGE_STYLES).map(([typeKey, style]) => {
+              const count = relevanceCounts[typeKey] || 0;
+              if (count === 0) return null;
+              const active = relevanceFilter === typeKey;
+              return (
+                <button
+                  key={typeKey}
+                  type="button"
+                  onClick={() => setRelevanceFilter(active ? 'all' : typeKey)}
+                  className={`rounded-full px-3.5 py-1.5 text-xs font-bold border transition ${
+                    active
+                      ? 'bg-emerald-900 text-white border-emerald-900'
+                      : `${style.bg} ${style.border} ${style.text}`
+                  }`}
+                >
+                  {style.icon} {style.label} ({count})
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Empty State if No Reviewed Foods Exist */}
+        {foods.length === 0 ? (
+          <div
+            data-testid="empty-condition-foods"
+            className="rounded-3xl border border-stone-200 bg-stone-50 p-8 text-center space-y-2"
+          >
+            <div className="text-2xl">📋</div>
+            <div className="text-sm font-extrabold text-stone-900">
+              {recommendationData?.empty_state_message ||
+                'No sufficiently reviewed food recommendations are available for this condition yet.'}
             </div>
-          ))}
-        </div>
+            <p className="text-xs text-stone-600 max-w-xl mx-auto">
+              GharPlate only displays foods that have been explicitly mapped and reviewed against documented nutritional guidance for this condition.
+            </p>
+          </div>
+        ) : filteredFoods.length === 0 ? (
+          <div className="rounded-3xl border border-stone-200 bg-stone-50 p-6 text-center text-xs text-stone-600">
+            No reviewed foods match your current filter query. Try clearing the search filter above.
+          </div>
+        ) : (
+          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            {filteredFoods.map((item) => {
+              const badge =
+                RELEVANCE_BADGE_STYLES[item.relevance_type] ||
+                RELEVANCE_BADGE_STYLES.relevant_food_to_explore;
+              const dietBadge = formatDietaryBadge(item);
+
+              return (
+                <div
+                  key={item.slug}
+                  data-testid={`condition-food-card-${item.slug}`}
+                  className="flex flex-col justify-between rounded-3xl border border-stone-200/90 bg-white overflow-hidden shadow-sm hover:shadow-md transition"
+                >
+                  <div>
+                    <div className="relative">
+                      <FoodImage
+                        src={item.image_url}
+                        foodName={item.name_en}
+                        categorySlug={item.category_slug}
+                        aspectClass="aspect-[16/10]"
+                      />
+                      <div className="absolute top-3 left-3 flex flex-wrap gap-1.5">
+                        <span
+                          className={`rounded-full border px-2.5 py-1 text-[11px] font-extrabold shadow-sm ${badge.bg} ${badge.border} ${badge.text}`}
+                        >
+                          {badge.icon} {item.relevance_label || badge.label}
+                        </span>
+                      </div>
+                      <div className="absolute top-3 right-3">
+                        <span
+                          className={`rounded-full border px-2.5 py-1 text-[10px] font-extrabold shadow-sm ${dietBadge.className}`}
+                        >
+                          {dietBadge.label}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="p-5 space-y-3">
+                      <div>
+                        <div className="text-[11px] font-bold uppercase tracking-wider text-stone-400">
+                          {item.category}
+                        </div>
+                        <Link
+                          to={`/foods/${item.slug}`}
+                          className="mt-0.5 block text-lg font-black text-stone-900 hover:text-emerald-800"
+                        >
+                          {item.name_en}
+                        </Link>
+                      </div>
+
+                      {/* Evidence-based explanation for why this food appears */}
+                      <p className="text-xs text-stone-700 leading-relaxed">
+                        {item.reason}
+                      </p>
+
+                      {item.portion_guidance && (
+                        <div className="rounded-xl bg-stone-50 border border-stone-200/80 p-2.5 text-[11px] text-stone-700">
+                          <strong>Portion note:</strong> {item.portion_guidance}
+                        </div>
+                      )}
+
+                      {item.caution_notes && (
+                        <div className="rounded-xl bg-amber-50/80 border border-amber-200 p-2.5 text-[11px] text-amber-950">
+                          <strong>Consideration:</strong> {item.caution_notes}
+                        </div>
+                      )}
+
+                      {/* Key Nutrient Highlights (per 100g/ml) */}
+                      <div className="grid grid-cols-3 gap-1.5 pt-1">
+                        {Object.entries(item.nutrition_highlights)
+                          .slice(0, 6)
+                          .map(([nutCode, val]) => (
+                            <div
+                              key={nutCode}
+                              className="rounded-xl bg-stone-50 px-2.5 py-1.5 text-center border border-stone-100"
+                            >
+                              <div className="text-[10px] font-semibold text-stone-500 truncate">
+                                {nutCode
+                                  .replace('_kcal', ' kcal')
+                                  .replace('_g', ' (g)')
+                                  .replace('_mg', ' (mg)')
+                                  .replace('_mcg', ' (mcg)')
+                                  .replace('_', ' ')}
+                              </div>
+                              <div className="text-xs font-extrabold text-stone-900">
+                                {val !== null && val !== undefined ? val : 'Not measured'}
+                              </div>
+                            </div>
+                          ))}
+                      </div>
+
+                      {/* Relevant Food Characteristics / Tags */}
+                      {item.relevant_tags.length > 0 && (
+                        <div className="flex flex-wrap gap-1 pt-1">
+                          {item.relevant_tags.slice(0, 5).map((tag) => (
+                            <span
+                              key={tag}
+                              className="rounded-md bg-emerald-50/80 border border-emerald-200/70 px-2 py-0.5 text-[10px] font-semibold text-emerald-900"
+                            >
+                              {tag.replace(/_/g, ' ')}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Allergen Flags & Member Allergen/Intolerance Warnings */}
+                      {(item.allergen_flags.length > 0 ||
+                        item.allergen_warnings.length > 0 ||
+                        item.intolerance_warnings.length > 0 ||
+                        item.incomplete_ingredient_warning) && (
+                        <div className="space-y-1 pt-1">
+                          {item.allergen_flags.length > 0 && (
+                            <div className="text-[11px] font-semibold text-rose-800">
+                              Declared allergens: {item.allergen_flags.join(', ')}
+                            </div>
+                          )}
+                          {item.allergen_warnings.map((w, idx) => (
+                            <div
+                              key={idx}
+                              className="rounded-xl bg-rose-50 border border-rose-200 px-2.5 py-1.5 text-[11px] font-bold text-rose-900"
+                            >
+                              ⚠️ {w}
+                            </div>
+                          ))}
+                          {item.intolerance_warnings.map((w, idx) => (
+                            <div
+                              key={idx}
+                              className="rounded-xl bg-amber-50 border border-amber-200 px-2.5 py-1.5 text-[11px] font-semibold text-amber-950"
+                            >
+                              ℹ️ {w}
+                            </div>
+                          ))}
+                          {item.incomplete_ingredient_warning && (
+                            <div className="text-[10px] text-stone-500 italic">
+                              {item.incomplete_ingredient_warning}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Card Footer: Source Citation & Preview Action */}
+                  <div className="border-t border-stone-100 bg-stone-50/60 p-4 space-y-2.5">
+                    <div className="flex items-center justify-between text-[11px] text-stone-500">
+                      <span className="truncate max-w-[70%]" title={item.source.name}>
+                        Source: {item.source.name} ({item.source.year})
+                      </span>
+                      <Link
+                        to={`/foods/${item.slug}`}
+                        className="font-bold text-emerald-800 hover:underline"
+                      >
+                        Details →
+                      </Link>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setSelectedFoodForCheck(item)}
+                      className={`w-full rounded-xl py-2 text-xs font-bold transition ${
+                        selectedFoodForCheck?.slug === item.slug
+                          ? 'bg-emerald-800 text-white'
+                          : 'bg-white border border-stone-200 text-stone-700 hover:bg-stone-100'
+                      }`}
+                    >
+                      {selectedFoodForCheck?.slug === item.slug
+                        ? '✓ Currently Previewing Above'
+                        : 'Preview Rule Evaluation Above ↑'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </section>
 
       {/* Progressive Disclosure: Evidence, Portions & Rules Engine Details */}
