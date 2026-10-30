@@ -1,0 +1,15 @@
+{
+  "generated_at": "2026-10-30T15:26:56.167563+00:00",
+  "total_data_sources": 10,
+  "total_food_categories": 9,
+  "total_food_items": 76,
+  "newly_imported_foods": 0,
+  "total_aliases": 529,
+  "total_health_conditions": 24,
+  "total_nutrition_rules": 33,
+  "total_conflict_rules": 5,
+  "known_nutrient_values": 0,
+  "null_unmeasured_nutrient_values": 0,
+  "zero_replacement_for_missing": false,
+  "validation_status": "PASSED"
+}

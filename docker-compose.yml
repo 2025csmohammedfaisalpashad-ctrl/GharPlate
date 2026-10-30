@@ -1,0 +1,46 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: gharplate-backend
+    restart: unless-stopped
+    env_file:
+      - .env.example
+    environment:
+      - DATABASE_URL=sqlite:////app/data/gharplate.db
+      - CORS_ORIGINS=http://localhost:8080,http://localhost:5173,http://127.0.0.1:5173
+    volumes:
+      - gharplate_sqlite_data:/app/data
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+    networks:
+      - gharplate-net
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_API_BASE_URL: http://localhost:8000/api/v1
+    container_name: gharplate-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+    networks:
+      - gharplate-net
+
+volumes:
+  gharplate_sqlite_data:
+
+networks:
+  gharplate-net:
+    driver: bridge

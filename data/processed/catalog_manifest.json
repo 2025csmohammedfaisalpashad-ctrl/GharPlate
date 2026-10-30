@@ -1,0 +1,26 @@
+{
+  "sources": [
+    "ICMR_NIN_IFCT_2017",
+    "ICMR_NIN_DGI_2024",
+    "ICMR_T2DM_2018",
+    "WHO_SUGARS_SODIUM",
+    "FSSAI_LABELLING_2020",
+    "KDIGO_CKD_2024",
+    "WGO_GI_GUIDELINES",
+    "MOHFW_AMB_GUIDELINE",
+    "OPEN_FOOD_FACTS_INDIA"
+  ],
+  "categories": [
+    "cereals-millets",
+    "pulses-legumes",
+    "vegetables",
+    "fruits",
+    "dairy",
+    "protein-sources",
+    "nuts-seeds",
+    "indian-dishes",
+    "packaged-foods"
+  ],
+  "food_count": 76,
+  "condition_count": 24
+}
