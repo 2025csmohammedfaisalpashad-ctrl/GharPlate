@@ -1,7 +1,12 @@
 """
-Packaged Food Label OCR Scanner, Barcode Lookup, and Experimental Dish Recognition Service (Modules 6, 7 & 8).
-PRIVACY GUARANTEE: All uploaded images are processed strictly in RAM (`io.BytesIO`) and immediately purged.
-No uploaded images are ever written to disk, public directories, databases, or logs.
+Packaged Food Label OCR Scanner, Intelligent Multi-Source Barcode Lookup,
+and Experimental Dish Recognition Service (Modules 6, 7 & 8).
+
+PRIVACY & INTEGRITY GUARANTEES:
+1. All uploaded OCR label images are processed strictly in RAM (`io.BytesIO`) and immediately purged.
+2. NEVER inserts synthetic or hardcoded sample nutrition values when OCR fails or returns unreadable text.
+3. Barcode lookup evaluates local record completeness and queries external providers (Open Food Facts API v3,
+   USDA FoodData Central Branded Foods) when a local record is incomplete (such as Pineapple Cake 8906005618726).
 """
 
 import gc
@@ -10,11 +15,24 @@ import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
-import httpx
-from PIL import Image, ImageStat
+from PIL import Image, ImageFilter, ImageOps, ImageStat
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
+from app.integrations.normalizer import (
+    NormalizedExternalProduct,
+    check_allergen_consistency,
+    parse_and_clean_package_ingredients,
+    validate_and_normalize_barcode,
+)
+from app.integrations.provider_registry import (
+    ensure_baseline_local_provenance,
+    ensure_external_data_source,
+    evaluate_local_product_completeness,
+    merge_external_product_into_local,
+    query_external_providers_for_barcode,
+    record_field_provenance,
+)
 from app.models.entities import (
     DataSource,
     FoodAlias,
@@ -25,12 +43,15 @@ from app.models.entities import (
     ServingConversion,
 )
 from app.schemas.api_schemas import (
+    AllergenConsistencyOut,
     BarcodeLookupResponse,
     DishCandidateOut,
     DishRecognitionResponse,
     ManualProductCreateRequest,
     OCRFieldPrediction,
     OCRScanResponse,
+    ProductDataConflictOut,
+    ProviderAttemptOut,
 )
 from app.services.food_service import normalize_query, serialize_food_detail
 
@@ -66,6 +87,70 @@ def validate_and_inspect_image_in_memory(
         buf.close()
 
 
+def preprocess_label_image_for_ocr(img: Image.Image) -> Image.Image:
+    """
+    Applies EXIF transpose, grayscale conversion, contrast enhancement, and sharpening
+    in memory to improve OCR legibility on nutrition tables and ingredient panels.
+    """
+    transposed = ImageOps.exif_transpose(img)
+    gray = ImageOps.grayscale(transposed)
+    contrasted = ImageOps.autocontrast(gray, cutoff=1)
+    sharpened = contrasted.filter(ImageFilter.SHARPEN)
+    return sharpened
+
+
+def extract_text_from_image_bytes_in_memory(
+    file_bytes: bytes,
+) -> Tuple[str, str, Optional[str]]:
+    """
+    Attempts OCR extraction across upright and rotated orientations using pytesseract if installed.
+    Returns (extracted_text, engine_status, error_reason).
+    NEVER fabricates or substitutes sample text if OCR fails.
+    """
+    try:
+        import pytesseract  # type: ignore
+    except ImportError:
+        return (
+            "",
+            "engine_unavailable",
+            "Local Tesseract OCR engine (pytesseract / tesseract binary) is not installed in the runtime environment.",
+        )
+
+    buf = io.BytesIO(file_bytes)
+    try:
+        with Image.open(buf) as raw_img:
+            processed = preprocess_label_image_for_ocr(raw_img)
+            best_text = ""
+            # Try upright first, then 90 / 270 / 180 rotations if upright yields minimal text
+            for angle in (0, 90, 270, 180):
+                candidate_img = (
+                    processed if angle == 0 else processed.rotate(angle, expand=True)
+                )
+                txt = (pytesseract.image_to_string(candidate_img) or "").strip()
+                if len(txt) > len(best_text):
+                    best_text = txt
+                if len(best_text) >= 40 and any(
+                    kw in best_text.lower()
+                    for kw in ("energy", "protein", "carbohydrate", "ingredient", "kcal", "fat")
+                ):
+                    break
+            if not best_text.strip():
+                return (
+                    "",
+                    "no_text_detected",
+                    "No readable nutrition or ingredient text could be extracted from the image. Please upload a clearer, well-lit photograph or enter values manually.",
+                )
+            return best_text, "tesseract_ocr", None
+    except Exception as exc:
+        return (
+            "",
+            "engine_unavailable",
+            f"OCR engine could not process image ({exc.__class__.__name__}). Please upload a clearer photograph or enter values manually.",
+        )
+    finally:
+        buf.close()
+
+
 def clean_ocr_numeric_token(raw_token: str) -> Tuple[Optional[float], bool, Optional[float]]:
     """
     Detects OCR character errors such as 'O' for '0' or 'l'/'I' for '1'.
@@ -93,13 +178,76 @@ def clean_ocr_numeric_token(raw_token: str) -> Tuple[Optional[float], bool, Opti
         return None, True, None
 
 
-def parse_nutrition_label_text(raw_text: str) -> OCRScanResponse:
+def _build_empty_failed_ocr_fields() -> Dict[str, OCRFieldPrediction]:
+    """
+    Builds an honest empty field map (with extracted_value=None for every nutrient)
+    when OCR fails or detects no text. NEVER inserts synthetic nutrient numbers.
+    """
+    specs = [
+        ("product_name", "Product Name", None),
+        ("brand", "Brand", None),
+        ("serving_size", "Serving Size", "g/ml"),
+        ("net_quantity", "Net Quantity / Weight", "g/ml"),
+        ("energy_kcal", "Energy", "kcal"),
+        ("protein_g", "Protein", "g"),
+        ("carbs_g", "Total Carbohydrates", "g"),
+        ("sugars_total_g", "Total Sugars", "g"),
+        ("sugars_added_g", "Added Sugars", "g"),
+        ("fat_total_g", "Total Fat", "g"),
+        ("fat_saturated_g", "Saturated Fat", "g"),
+        ("fat_trans_g", "Trans Fat", "g"),
+        ("fibre_g", "Dietary Fibre", "g"),
+        ("sodium_mg", "Sodium", "mg"),
+        ("ingredients_text", "Ingredients List", None),
+        ("allergen_declarations", "Allergen Declaration", None),
+    ]
+    return {
+        code: OCRFieldPrediction(
+            field_name=label,
+            extracted_value=None,
+            unit=unit,
+            confidence=0.0,
+            validation_status="missing",
+            validation_message="Not extracted — enter manually from the physical package.",
+            proposed_correction=None,
+        )
+        for code, label, unit in specs
+    }
+
+
+def parse_nutrition_label_text(
+    raw_text: str,
+    ocr_status: str = "success",
+    ocr_engine: str = "text_parser",
+    ocr_error_reason: Optional[str] = None,
+) -> OCRScanResponse:
     """
     Parses FSSAI / Indian packaged food nutrition label text, validates units,
     checks per-serving vs per-100g confusion, impossible values (>100g per 100g),
-    and Atwater energy consistency (4*P + 4*C + 9*F).
+    Atwater energy consistency (4*P + 4*C + 9*F), and structured ingredient/allergen separation.
     """
     scan_id = f"ocr_{uuid.uuid4().hex[:10]}"
+    if not raw_text or not raw_text.strip():
+        return OCRScanResponse(
+            scan_id=scan_id,
+            ocr_status=ocr_status if ocr_status != "success" else "failed_no_text",
+            ocr_engine=ocr_engine,
+            ocr_error_reason=ocr_error_reason
+            or "No readable label text was detected. GharPlate never inserts synthetic fallback values.",
+            requires_manual_entry=True,
+            privacy_confirmation="Processed strictly in memory (RAM). Image bytes were purged immediately and never written to disk or database.",
+            raw_text="",
+            detected_basis="100g",
+            parsed_ingredients=None,
+            allergen_consistency=None,
+            fields=_build_empty_failed_ocr_fields(),
+            validation_warnings=[
+                ocr_error_reason
+                or "OCR could not extract text from the uploaded image. Please take a clearer photo or enter values manually below."
+            ],
+            requires_user_confirmation=True,
+        )
+
     text_lower = raw_text.lower()
 
     # Detect basis
@@ -123,10 +271,11 @@ def parse_nutrition_label_text(raw_text: str) -> OCRScanResponse:
 
     fields: Dict[str, OCRFieldPrediction] = {}
 
-    # Extract Product Name & Brand
+    # Extract Product Name, Brand, Serving Size, Net Quantity
     prod_match = re.search(r"product(?:\s*name)?\s*[:\-]\s*(.+)", raw_text, re.IGNORECASE)
     brand_match = re.search(r"brand\s*[:\-]\s*(.+)", raw_text, re.IGNORECASE)
     serv_match = re.search(r"serving\s*size\s*[:\-]?\s*([0-9]+\s*(?:g|ml))", raw_text, re.IGNORECASE)
+    parsed_ing = parse_and_clean_package_ingredients(raw_text)
 
     fields["product_name"] = OCRFieldPrediction(
         field_name="Product Name",
@@ -145,11 +294,18 @@ def parse_nutrition_label_text(raw_text: str) -> OCRScanResponse:
     )
     fields["serving_size"] = OCRFieldPrediction(
         field_name="Serving Size",
-        extracted_value=serv_match.group(1).strip() if serv_match else "30 g",
+        extracted_value=serv_match.group(1).strip() if serv_match else None,
         unit="g/ml",
-        confidence=0.85 if serv_match else 0.45,
+        confidence=0.85 if serv_match else 0.0,
         validation_status="valid" if serv_match else "warning",
-        validation_message=None if serv_match else "Serving size not explicitly found; defaulted to 30 g for review.",
+        validation_message=None if serv_match else "Serving size not explicitly found on label; please verify.",
+    )
+    fields["net_quantity"] = OCRFieldPrediction(
+        field_name="Net Quantity / Weight",
+        extracted_value=parsed_ing.net_weight,
+        unit="g/ml",
+        confidence=0.85 if parsed_ing.net_weight else 0.0,
+        validation_status="valid" if parsed_ing.net_weight else "missing",
     )
 
     nutrient_patterns = [
@@ -200,7 +356,6 @@ def parse_nutrition_label_text(raw_text: str) -> OCRScanResponse:
             continue
 
         assert parsed_val is not None
-        # Check unit mismatch (e.g. kJ instead of kcal, or g instead of mg for sodium)
         if code == "energy_kcal" and found_unit == "kj":
             kcal_conv = round(parsed_val / 4.184, 1)
             warnings.append(
@@ -296,31 +451,90 @@ def parse_nutrition_label_text(raw_text: str) -> OCRScanResponse:
                 f"Calorie-macronutrient mismatch: Declared Energy ({declared_kcal:.0f} kcal) differs significantly from Atwater estimate (~{estimated_kcal:.0f} kcal from protein, carbs, and fat)."
             )
 
-    # Extract ingredients and allergens
-    ing_match = re.search(r"ingredients?\s*[:\-]\s*([^\n]+)", raw_text, re.IGNORECASE)
-    all_match = re.search(r"allergen(?:s|\s*information|\s*advice)?\s*[:\-]\s*([^\n]+)", raw_text, re.IGNORECASE)
+    # Extract ingredients and allergens using improved multi-line and noisy-package parser
+    ing_match = re.search(
+        r"ingredients?\s*[:\-]\s*(.+?)(?=\n\s*(?:allergen|nutritional|per\s*100|storage|manufactured|marketed|$))",
+        raw_text,
+        re.IGNORECASE | re.DOTALL,
+    )
+    raw_ing_str = ing_match.group(1).strip() if ing_match else None
+    ing_analysis = parse_and_clean_package_ingredients(raw_ing_str or raw_text)
+    extracted_ing = (
+        ing_analysis.cleaned_ingredients
+        if (ing_match or "ins " in raw_text.lower() or "contains " in raw_text.lower())
+        else None
+    )
+
+    all_match = re.search(
+        r"allergen(?:s|\s*information|\s*advice)?\s*[:\-]\s*([^\n]+)",
+        raw_text,
+        re.IGNORECASE,
+    )
+    extracted_allergen_stmt = (
+        all_match.group(1).strip()
+        if all_match
+        else ing_analysis.allergen_declaration
+    )
+
+    warnings.extend(ing_analysis.ocr_uncertainty_notes)
+
+    consistency = check_allergen_consistency(
+        raw_text,
+        [],
+        allergen_declaration_complete=bool(extracted_ing or extracted_allergen_stmt),
+    )
 
     fields["ingredients_text"] = OCRFieldPrediction(
         field_name="Ingredients List",
-        extracted_value=ing_match.group(1).strip() if ing_match else None,
+        extracted_value=extracted_ing,
         unit=None,
-        confidence=0.88 if ing_match else 0.0,
-        validation_status="valid" if ing_match else "missing",
+        confidence=0.88 if extracted_ing else 0.0,
+        validation_status="valid" if extracted_ing else "missing",
     )
     fields["allergen_declarations"] = OCRFieldPrediction(
         field_name="Allergen Declaration",
-        extracted_value=all_match.group(1).strip() if all_match else None,
+        extracted_value=extracted_allergen_stmt,
         unit=None,
-        confidence=0.88 if all_match else 0.0,
-        validation_status="valid" if all_match else "warning",
-        validation_message=None if all_match else "No explicit allergen line found; cannot guarantee allergen absence.",
+        confidence=0.88 if extracted_allergen_stmt else 0.0,
+        validation_status="valid" if extracted_allergen_stmt else "warning",
+        validation_message=None
+        if extracted_allergen_stmt
+        else "No explicit allergen line found; cannot guarantee allergen absence.",
     )
+
+    has_any_extracted = bool(
+        extracted_nums or extracted_ing or extracted_allergen_stmt or prod_match
+    )
+    effective_status = ocr_status if has_any_extracted else "failed_no_text"
 
     return OCRScanResponse(
         scan_id=scan_id,
+        ocr_status=effective_status,
+        ocr_engine=ocr_engine,
+        ocr_error_reason=ocr_error_reason if not has_any_extracted else None,
+        requires_manual_entry=not has_any_extracted,
         privacy_confirmation="Processed strictly in memory (RAM). Image bytes were purged immediately and never written to disk or database.",
         raw_text=raw_text,
         detected_basis=detected_basis,
+        parsed_ingredients={
+            "cleaned_ingredients": extracted_ing,
+            "ingredient_items": ing_analysis.ingredient_items,
+            "ingredient_percentages": ing_analysis.ingredient_percentages,
+            "additives": ing_analysis.additives,
+            "allergen_declaration": extracted_allergen_stmt,
+            "label_warnings": ing_analysis.label_warnings,
+            "net_weight": ing_analysis.net_weight,
+            "manufacturer_info": ing_analysis.manufacturer_info,
+        },
+        allergen_consistency=AllergenConsistencyOut(
+            stored_allergen_tags=consistency.stored_allergen_tags,
+            declared_allergens=consistency.declared_allergens,
+            ingredient_inferred_allergens=consistency.ingredient_inferred_allergens,
+            missing_from_stored_tags=consistency.missing_from_stored_tags,
+            consistency_status=consistency.consistency_status,
+            consistency_warnings=consistency.consistency_warnings,
+            requires_manual_review=consistency.requires_manual_review,
+        ),
         fields=fields,
         validation_warnings=warnings,
         requires_user_confirmation=True,
@@ -328,148 +542,434 @@ def parse_nutrition_label_text(raw_text: str) -> OCRScanResponse:
 
 
 def process_uploaded_label_image(
-    file_bytes: bytes, content_type: Optional[str], hint_text: Optional[str] = None
+    file_bytes: bytes,
+    content_type: Optional[str],
+    hint_text: Optional[str] = None,
+    ingredients_image_bytes: Optional[bytes] = None,
+    ingredients_content_type: Optional[str] = None,
 ) -> OCRScanResponse:
-    width, height, _ = validate_and_inspect_image_in_memory(file_bytes, content_type)
-    extracted_text = ""
+    """
+    Processes one or more uploaded package label photographs (Nutrition panel + optional Ingredients panel)
+    strictly in RAM.
+    CRITICAL REGRESSION FIX:
+    Removed the hardcoded synthetic nutrition fallback (465 kcal, 7.4g protein, etc.) completely.
+    When OCR cannot read text and no user text is provided, returns an explicit failure state
+    with NULL/None fields and requests a clearer photograph or manual entry.
+    """
+    validate_and_inspect_image_in_memory(file_bytes, content_type)
+    extracted_segments: List[str] = []
 
-    # Attempt pytesseract if installed locally
-    try:
-        import pytesseract  # type: ignore
+    nut_text, engine_status, err_reason = extract_text_from_image_bytes_in_memory(file_bytes)
+    if nut_text.strip():
+        extracted_segments.append(nut_text.strip())
 
-        buf = io.BytesIO(file_bytes)
-        with Image.open(buf) as img:
-            extracted_text = pytesseract.image_to_string(img)
-        buf.close()
-    except Exception:
-        extracted_text = ""
+    if ingredients_image_bytes:
+        validate_and_inspect_image_in_memory(
+            ingredients_image_bytes, ingredients_content_type
+        )
+        ing_text, _, _ = extract_text_from_image_bytes_in_memory(ingredients_image_bytes)
+        if ing_text.strip():
+            extracted_segments.append(ing_text.strip())
+        del ingredients_image_bytes
 
-    # Explicitly purge image buffer reference
+    # Explicitly purge image buffer references from memory
     del file_bytes
     gc.collect()
 
     if hint_text and hint_text.strip():
-        extracted_text = f"{extracted_text}\n{hint_text}".strip()
+        extracted_segments.append(hint_text.strip())
+        if engine_status in ("engine_unavailable", "no_text_detected"):
+            engine_status = "user_assisted_text"
+            err_reason = None
 
-    if not extracted_text.strip():
-        extracted_text = (
-            f"Product Name: Uploaded Packaged Food Label ({width}x{height}px)\n"
-            "Serving Size: 30 g\n"
-            "Nutritional Information Per 100g:\n"
-            "Energy: 465 kcal\n"
-            "Protein: 7.4 g\n"
-            "Total Carbohydrates: 68.2 g\n"
-            "Total Sugars: 19.5 g\n"
-            "Added Sugars: 18.0 g\n"
-            "Total Fat: 18.2 g\n"
-            "Saturated Fat: 8.6 g\n"
-            "Trans Fat: 0.0 g\n"
-            "Dietary Fibre: 3.1 g\n"
-            "Sodium: 340 mg\n"
-            "Ingredients: Refined Wheat Flour (Maida), Sugar, Edible Vegetable Oil (Palm), Milk Solids, Iodised Salt.\n"
-            "Allergen Advice: Contains Wheat (Gluten) and Milk."
+    combined_text = "\n".join(extracted_segments).strip()
+
+    if not combined_text:
+        fail_status = (
+            "failed_engine_unavailable"
+            if engine_status == "engine_unavailable"
+            else "failed_no_text"
+        )
+        return parse_nutrition_label_text(
+            raw_text="",
+            ocr_status=fail_status,
+            ocr_engine=engine_status,
+            ocr_error_reason=err_reason
+            or "No readable nutrition or ingredient text was detected in the uploaded image. Please upload a clearer photo or enter values manually.",
         )
 
-    return parse_nutrition_label_text(extracted_text)
+    return parse_nutrition_label_text(
+        raw_text=combined_text,
+        ocr_status="success",
+        ocr_engine=engine_status,
+        ocr_error_reason=err_reason,
+    )
 
 
-def lookup_barcode(db: Session, barcode: str) -> BarcodeLookupResponse:
-    clean_code = re.sub(r"[^0-9A-Za-z]", "", barcode.strip())
+def _create_local_product_from_external(
+    db: Session, ext: NormalizedExternalProduct
+) -> FoodItem:
+    """
+    Saves a newly discovered verified exact-barcode external product into the local catalog
+    with full field-level provenance. Missing nutrients remain NULL.
+    """
+    clean_code = ext.barcode or "unknown"
+    name = ext.product_name or f"Packaged Product ({clean_code})"
+    brand = ext.brand or "External Verified Brand"
+    slug_base = re.sub(r"[^a-z0-9]+", "-", f"{brand}-{name}".lower()).strip("-")[:80]
+    slug = f"pkg-{slug_base}-{clean_code[-4:]}"
+    if db.query(FoodItem).filter(FoodItem.slug == slug).first():
+        slug = f"{slug}-{uuid.uuid4().hex[:4]}"
+
+    cat = db.query(FoodCategory).filter(FoodCategory.slug == "packaged-foods").first()
+    if not cat:
+        raise ValueError("Packaged foods category missing")
+
+    ext_src = ensure_external_data_source(
+        db,
+        provider_code=ext.provider_code,
+        provider_name=ext.provider_name,
+        url=ext.source_url,
+        license_notes=ext.license_attribution or "Open Product Database",
+    )
+
+    parsed_ing = parse_and_clean_package_ingredients(ext.ingredients_text)
+    allergens = sorted(
+        list(
+            set(ext.allergen_tags)
+            | set(
+                check_allergen_consistency(
+                    ext.ingredients_text, ext.allergen_tags, bool(ext.ingredients_text)
+                ).declared_allergens
+            )
+        )
+    )
+    has_non_veg = any(a in ("egg", "fish", "shellfish") for a in allergens)
+
+    food = FoodItem(
+        slug=slug,
+        name_en=name,
+        category_id=cat.id,
+        description=f"Packaged product ({brand}) retrieved via verified barcode lookup from {ext.provider_name}.",
+        image_url=ext.front_image_url or ext.image_url,
+        is_packaged=True,
+        brand=brand,
+        barcode=clean_code,
+        net_quantity=ext.quantity or parsed_ing.net_weight,
+        default_basis="100g",
+        standard_serving_name=ext.serving_size_label or "1 serving (30g)",
+        standard_serving_grams=ext.serving_size_grams or 30.0,
+        is_vegetarian=not has_non_veg,
+        is_vegan=(not has_non_veg) and ("milk" not in allergens),
+        allergen_tags=allergens,
+        intolerance_tags=[],
+        dietary_tags=["packaged_food"],
+        ingredients_text=ext.ingredients_text,
+        cleaned_ingredients_text=parsed_ing.cleaned_ingredients,
+        allergen_statement=parsed_ing.allergen_declaration,
+        manufacturer_info=parsed_ing.manufacturer_info,
+        allergen_declaration_complete=bool(ext.ingredients_text),
+        source_id=ext_src.id,
+        confidence_level="label_declared",
+        external_updated_at=datetime.now(timezone.utc),
+    )
+    db.add(food)
+    db.flush()
+
+    db.add(
+        FoodAlias(
+            food_id=food.id,
+            language="en",
+            alias_text=food.name_en,
+            normalized_text=normalize_query(food.name_en),
+            script_text=food.name_en,
+        )
+    )
+    db.add(
+        ServingConversion(
+            food_id=food.id,
+            unit_name="100g",
+            unit_label="100 g",
+            grams_equivalent=100.0,
+            is_default=False,
+        )
+    )
+    db.add(
+        ServingConversion(
+            food_id=food.id,
+            unit_name="standard_serving",
+            unit_label=food.standard_serving_name,
+            grams_equivalent=food.standard_serving_grams,
+            is_default=True,
+        )
+    )
+
+    all_nut_defs = db.query(NutrientDefinition).all()
+    for nd in all_nut_defs:
+        val = ext.nutrients_per_100.get(nd.code, None)
+        db.add(
+            FoodNutrientValue(
+                food_id=food.id,
+                nutrient_code=nd.code,
+                value=float(val) if val is not None else None,
+                basis="100g",
+                source_id=ext_src.id,
+                confidence_status=(
+                    "openfoodfacts"
+                    if val is not None and ext.provider_code == "OPEN_FOOD_FACTS"
+                    else ("fdc_supplemental" if val is not None else "not_measured")
+                ),
+            )
+        )
+        if val is not None:
+            record_field_provenance(
+                db,
+                food_id=food.id,
+                field_name=nd.code,
+                field_type="nutrient",
+                field_value=str(val),
+                source_code=ext.provider_code,
+                source_name=ext.provider_name,
+                source_url=ext.source_url,
+                source_record_id=ext.source_record_id,
+                confidence_status="external_verified_barcode",
+                review_status="confirmed",
+            )
+
+    if food.image_url:
+        record_field_provenance(
+            db,
+            food_id=food.id,
+            field_name="image_url",
+            field_type="image",
+            field_value=food.image_url,
+            source_code=ext.provider_code,
+            source_name=ext.provider_name,
+            source_url=ext.source_url,
+            source_record_id=ext.source_record_id,
+            confidence_status="external_verified_barcode",
+            review_status="confirmed",
+        )
+    if food.ingredients_text:
+        record_field_provenance(
+            db,
+            food_id=food.id,
+            field_name="ingredients_text",
+            field_type="ingredient",
+            field_value=food.cleaned_ingredients_text or food.ingredients_text,
+            source_code=ext.provider_code,
+            source_name=ext.provider_name,
+            source_url=ext.source_url,
+            source_record_id=ext.source_record_id,
+            confidence_status="external_verified_barcode",
+            review_status="confirmed",
+        )
+
+    db.commit()
+    db.refresh(food)
+    return food
+
+
+def lookup_barcode(
+    db: Session, barcode: str, force_refresh: bool = False
+) -> BarcodeLookupResponse:
+    """
+    12-Step Intelligent Multi-Source Barcode Lookup:
+    1. Validate and normalize barcode (EAN-8, UPC-A, EAN-13, GTIN-14).
+    2. Search local database using exact barcode.
+    3. Determine completeness of local record (`evaluate_local_product_completeness`).
+    4. Check when local external data was last refreshed.
+    5. If important fields are missing (e.g., Pineapple Cake 8906005618726 missing image_url and nutrients)
+       or cache is stale or force_refresh=True, query external providers (Open Food Facts API v3, USDA FDC).
+    6. Retrieve matching product information.
+    7. Compare local and external records (`verify_product_identity_match`).
+    8. Merge only compatible, verified missing fields (`merge_external_product_into_local`).
+    9. Identify and record conflicting values (`ProductDataConflict`).
+    10. Preserve field-level source attribution (`ProductFieldProvenance`).
+    11. Update local cache safely.
+    12. Return consolidated `BarcodeLookupResponse`.
+    """
     now = datetime.now(timezone.utc)
+    clean_code, is_valid, b_format, val_msg = validate_and_normalize_barcode(barcode)
 
-    # 1. Check local verified database first
+    if not is_valid:
+        return BarcodeLookupResponse(
+            barcode=clean_code or barcode.strip(),
+            barcode_format=b_format,
+            is_valid_barcode=False,
+            found=False,
+            source_origin="invalid_barcode",
+            retrieval_timestamp=now,
+            message=val_msg or f"Invalid barcode format '{barcode}'.",
+            fallback_actions=[
+                "Verify the 8, 12, 13, or 14-digit barcode printed below the package bars",
+                "Use the Nutrition Label OCR Scanner to scan the package nutrition table directly",
+            ],
+            product=None,
+        )
+
     local_food = (
         db.query(FoodItem)
         .options(
             joinedload(FoodItem.category),
             joinedload(FoodItem.source),
             joinedload(FoodItem.aliases),
-            joinedload(FoodItem.nutrient_values),
+            joinedload(FoodItem.nutrient_values).joinedload(FoodNutrientValue.source),
             joinedload(FoodItem.servings),
+            joinedload(FoodItem.field_provenance),
+            joinedload(FoodItem.data_conflicts),
         )
         .filter(FoodItem.barcode == clean_code)
         .first()
     )
+
+    provider_attempts_out: List[ProviderAttemptOut] = []
+    merged_fields: List[str] = []
+
     if local_food:
+        ensure_baseline_local_provenance(db, local_food)
+        completeness = evaluate_local_product_completeness(local_food)
+
+        # Do NOT stop at the first local match when the record is incomplete or force_refresh is requested!
+        if completeness["needs_enrichment"] or (completeness["is_stale"] and force_refresh) or force_refresh:
+            ext_prod, attempts = query_external_providers_for_barcode(
+                db, clean_code, force_refresh=force_refresh
+            )
+            provider_attempts_out = [
+                ProviderAttemptOut(
+                    provider_code=a.provider_code,
+                    provider_name=a.provider_name,
+                    status=a.status,
+                    http_status=a.http_status,
+                    message=a.message,
+                    from_cache=a.from_cache,
+                    retrieved_at=a.retrieved_at,
+                )
+                for a in attempts
+            ]
+            if ext_prod is not None:
+                merge_res = merge_external_product_into_local(db, local_food, ext_prod)
+                merged_fields = merge_res.get("merged_fields", [])
+                db.refresh(local_food)
+                completeness = evaluate_local_product_completeness(local_food)
+
+        detail_out = serialize_food_detail(db, local_food)
+        fallback_actions: List[str] = []
+        if not completeness["has_verified_image"]:
+            fallback_actions.append(
+                "Upload a front-of-package photograph with consent to display the actual product image"
+            )
+        if not completeness["has_minimum_nutrients"]:
+            fallback_actions.append(
+                "Scan the back-of-pack Nutrition Information panel with OCR to capture missing nutrient values"
+            )
+            fallback_actions.append(
+                "Enter declared per-100g nutrition values manually from the physical package"
+            )
+
+        origin = (
+            "local_enriched_external"
+            if merged_fields
+            else "local_verified_db"
+        )
+        msg = f"Found packaged product '{local_food.name_en}' ({local_food.brand or 'Unknown Brand'})."
+        if merged_fields:
+            msg += f" Enriched {len(merged_fields)} missing field(s) ({', '.join(merged_fields[:5])}) from verified external barcode match."
+        elif completeness["needs_enrichment"]:
+            missing_str = ", ".join(completeness["missing_domains"])
+            msg += f" Local record is incomplete (missing: {missing_str}) and external databases did not have additional verified data for barcode {clean_code}."
+
         return BarcodeLookupResponse(
             barcode=clean_code,
+            barcode_format=b_format,
+            is_valid_barcode=True,
             found=True,
-            source_origin="local_verified_db",
+            source_origin=origin,
             retrieval_timestamp=now,
-            message=f"Found verified packaged product '{local_food.name_en}' in GharPlate catalog.",
-            fallback_actions=[],
-            product=serialize_food_detail(db, local_food),
+            message=msg,
+            fallback_actions=fallback_actions,
+            completeness=completeness,
+            provider_attempts=provider_attempts_out,
+            merged_fields=merged_fields,
+            conflicts_requiring_review=[
+                ProductDataConflictOut.model_validate(c)
+                for c in (local_food.data_conflicts or [])
+            ],
+            product=detail_out,
         )
 
-    # 2. Optional Open Food Facts live lookup if enabled and reachable
-    if settings.ENABLE_EXTERNAL_BARCODE_LOOKUP and len(clean_code) >= 8:
-        try:
-            url = f"{settings.OPEN_FOOD_FACTS_API_URL}/{clean_code}.json"
-            headers = {"User-Agent": settings.OPEN_FOOD_FACTS_USER_AGENT}
-            with httpx.Client(timeout=2.5) as client:
-                resp = client.get(url, headers=headers)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if data.get("status") == 1 and data.get("product"):
-                        prod = data["product"]
-                        nutr = prod.get("nutriments", {})
-                        req_create = ManualProductCreateRequest(
-                            name_en=prod.get("product_name") or f"Packaged Product ({clean_code})",
-                            brand=prod.get("brands") or "Open Food Facts Listed Brand",
-                            barcode=clean_code,
-                            default_basis="100g",
-                            standard_serving_name=prod.get("serving_size") or "1 serving (30g)",
-                            standard_serving_grams=30.0,
-                            is_vegetarian=True,
-                            ingredients_text=prod.get("ingredients_text"),
-                            allergen_tags=[
-                                a.replace("en:", "") for a in prod.get("allergens_tags", [])
-                            ],
-                            allergen_declaration_complete=bool(prod.get("ingredients_text")),
-                            nutrients_per_100={
-                                "energy_kcal": nutr.get("energy-kcal_100g"),
-                                "protein_g": nutr.get("proteins_100g"),
-                                "carbs_g": nutr.get("carbohydrates_100g"),
-                                "sugars_total_g": nutr.get("sugars_100g"),
-                                "fat_total_g": nutr.get("fat_100g"),
-                                "fat_saturated_g": nutr.get("saturated-fat_100g"),
-                                "fibre_g": nutr.get("fiber_100g"),
-                                "sodium_mg": (
-                                    float(nutr["sodium_100g"]) * 1000.0
-                                    if nutr.get("sodium_100g") is not None
-                                    else None
-                                ),
-                            },
-                            source_type="open_food_facts_live",
-                            user_confirmed=True,
-                        )
-                        saved_detail = create_user_confirmed_product(db, req_create)
-                        return BarcodeLookupResponse(
-                            barcode=clean_code,
-                            found=True,
-                            source_origin="open_food_facts_live",
-                            retrieval_timestamp=now,
-                            message="Retrieved product record from Open Food Facts.",
-                            fallback_actions=["Review extracted fields", "Scan back-of-pack nutrition label"],
-                            product=saved_detail,
-                        )
-        except Exception:
-            pass
+    # Not in local DB — query external providers
+    ext_prod, attempts = query_external_providers_for_barcode(
+        db, clean_code, force_refresh=force_refresh
+    )
+    provider_attempts_out = [
+        ProviderAttemptOut(
+            provider_code=a.provider_code,
+            provider_name=a.provider_name,
+            status=a.status,
+            http_status=a.http_status,
+            message=a.message,
+            from_cache=a.from_cache,
+            retrieved_at=a.retrieved_at,
+        )
+        for a in attempts
+    ]
 
-    # 3. Clean Fallback when barcode is not found (never invent a product!)
+    if ext_prod is not None:
+        new_food = _create_local_product_from_external(db, ext_prod)
+        completeness = evaluate_local_product_completeness(new_food)
+        detail_out = serialize_food_detail(db, new_food)
+        origin = (
+            "open_food_facts_live"
+            if ext_prod.provider_code == "OPEN_FOOD_FACTS"
+            else "usda_fdc_live"
+        )
+        return BarcodeLookupResponse(
+            barcode=clean_code,
+            barcode_format=b_format,
+            is_valid_barcode=True,
+            found=True,
+            source_origin=origin,
+            retrieval_timestamp=now,
+            message=f"Retrieved '{new_food.name_en}' from {ext_prod.provider_name} by exact barcode match.",
+            fallback_actions=[
+                "Review extracted fields against your physical package",
+                "Scan nutrition panel if any nutrients are still unmeasured (NULL)",
+            ],
+            completeness=completeness,
+            provider_attempts=provider_attempts_out,
+            merged_fields=list(ext_prod.available_fields),
+            conflicts_requiring_review=[],
+            product=detail_out,
+        )
+
+    # Check if external lookup failed due to network/timeout/rate-limit vs genuine not_found
+    had_network_issue = any(
+        a.status in ("timeout", "network_error", "rate_limited", "http_error")
+        for a in provider_attempts_out
+    )
+    status_note = (
+        "External product database lookup encountered a network/rate-limit error; could not verify online catalog."
+        if had_network_issue
+        else f"No packaged product record found for barcode '{clean_code}' in GharPlate or external databases."
+    )
+
     return BarcodeLookupResponse(
         barcode=clean_code,
+        barcode_format=b_format,
+        is_valid_barcode=True,
         found=False,
-        source_origin="not_found",
+        source_origin="provider_error" if had_network_issue else "not_found",
         retrieval_timestamp=now,
-        message=(
-            f"No packaged product record found for barcode '{clean_code}'. "
-            "External databases do not cover every Indian retail SKU, and GharPlate never invents product data."
-        ),
+        message=f"{status_note} GharPlate never invents product data.",
         fallback_actions=[
             "Use Nutrition Label OCR Scanner to extract values from the package back panel",
             "Enter product nutrition values manually after reviewing the physical label",
         ],
+        completeness=None,
+        provider_attempts=provider_attempts_out,
+        merged_fields=[],
+        conflicts_requiring_review=[],
         product=None,
     )
 
@@ -477,11 +977,13 @@ def lookup_barcode(db: Session, barcode: str) -> BarcodeLookupResponse:
 def create_user_confirmed_product(
     db: Session, req: ManualProductCreateRequest
 ) -> Any:
+    """
+    Creates or updates a user-confirmed packaged product record.
+    If a product with the same `slug` or `barcode` already exists (such as Pineapple Cake 8906005618726),
+    updates its missing or user-confirmed fields safely while preserving provenance!
+    """
     if not req.user_confirmed:
         raise ValueError("User confirmation is required before saving OCR or manual product data.")
-
-    slug_base = re.sub(r"[^a-z0-9]+", "-", req.name_en.lower()).strip("-")
-    slug = f"pkg-{slug_base}-{uuid.uuid4().hex[:6]}"
 
     cat = db.query(FoodCategory).filter(FoodCategory.slug == "packaged-foods").first()
     if not cat:
@@ -504,14 +1006,119 @@ def create_user_confirmed_product(
         db.add(src)
         db.flush()
 
+    clean_barcode: Optional[str] = None
+    if req.barcode and req.barcode.strip():
+        norm_bc, _, _, _ = validate_and_normalize_barcode(req.barcode)
+        clean_barcode = norm_bc or req.barcode.strip()
+
+    # Check if updating an existing product by slug or barcode (prevents duplicate barcode IntegrityError!)
+    existing_food: Optional[FoodItem] = None
+    if req.slug:
+        existing_food = db.query(FoodItem).filter(FoodItem.slug == req.slug).first()
+    if not existing_food and clean_barcode:
+        existing_food = db.query(FoodItem).filter(FoodItem.barcode == clean_barcode).first()
+
+    parsed_ing = parse_and_clean_package_ingredients(req.ingredients_text)
+    consented_image_url = (
+        req.image_url.strip()
+        if (req.image_url and req.image_url.strip() and req.retain_front_image_consent)
+        else None
+    )
+
+    if existing_food:
+        food = existing_food
+        if req.name_en and req.name_en.strip():
+            food.name_en = req.name_en.strip()
+        if req.brand and req.brand.strip():
+            food.brand = req.brand.strip()
+        if clean_barcode:
+            food.barcode = clean_barcode
+        if req.net_quantity or parsed_ing.net_weight:
+            food.net_quantity = req.net_quantity or parsed_ing.net_weight
+        if consented_image_url:
+            food.image_url = consented_image_url
+            record_field_provenance(
+                db,
+                food_id=food.id,
+                field_name="image_url",
+                field_type="image",
+                field_value=consented_image_url[:120],
+                source_code=src.code,
+                source_name=src.name,
+                source_url=src.url,
+                source_record_id=food.barcode or food.slug,
+                confidence_status="user_confirmed",
+                review_status="confirmed",
+                notes="User-consented front-of-package display image.",
+            )
+        if req.ingredients_text:
+            food.ingredients_text = req.ingredients_text
+            food.cleaned_ingredients_text = parsed_ing.cleaned_ingredients
+            food.allergen_statement = parsed_ing.allergen_declaration
+            food.manufacturer_info = parsed_ing.manufacturer_info
+        if req.raw_ocr_text:
+            food.raw_ocr_text = req.raw_ocr_text
+        if req.allergen_tags:
+            food.allergen_tags = req.allergen_tags
+        food.allergen_declaration_complete = req.allergen_declaration_complete
+        food.standard_serving_name = req.standard_serving_name
+        food.standard_serving_grams = req.standard_serving_grams
+        food.is_vegetarian = req.is_vegetarian
+        food.is_vegan = req.is_vegetarian and (
+            "milk" not in [a.lower() for a in (food.allergen_tags or [])]
+        )
+
+        nv_by_code = {nv.nutrient_code: nv for nv in food.nutrient_values}
+        all_nut_defs = db.query(NutrientDefinition).all()
+        for nd in all_nut_defs:
+            if nd.code in req.nutrients_per_100 and req.nutrients_per_100[nd.code] is not None:
+                val = float(req.nutrients_per_100[nd.code])  # type: ignore[arg-type]
+                if nd.code in nv_by_code:
+                    nv_by_code[nd.code].value = val
+                    nv_by_code[nd.code].source_id = src.id
+                    nv_by_code[nd.code].confidence_status = "label_declared"
+                else:
+                    db.add(
+                        FoodNutrientValue(
+                            food_id=food.id,
+                            nutrient_code=nd.code,
+                            value=val,
+                            basis=food.default_basis,
+                            source_id=src.id,
+                            confidence_status="label_declared",
+                        )
+                    )
+                record_field_provenance(
+                    db,
+                    food_id=food.id,
+                    field_name=nd.code,
+                    field_type="nutrient",
+                    field_value=str(val),
+                    source_code=src.code,
+                    source_name=src.name,
+                    source_url=src.url,
+                    source_record_id=food.barcode or food.slug,
+                    confidence_status="user_confirmed",
+                    review_status="confirmed",
+                )
+        ensure_baseline_local_provenance(db, food)
+        db.commit()
+        db.refresh(food)
+        return serialize_food_detail(db, food)
+
+    slug_base = re.sub(r"[^a-z0-9]+", "-", req.name_en.lower()).strip("-")
+    slug = f"pkg-{slug_base}-{uuid.uuid4().hex[:6]}"
+
     food = FoodItem(
         slug=slug,
         name_en=req.name_en,
         category_id=cat.id,
         description=f"User-confirmed packaged product ({req.brand}).",
+        image_url=consented_image_url,
         is_packaged=True,
         brand=req.brand,
-        barcode=req.barcode if req.barcode else None,
+        barcode=clean_barcode,
+        net_quantity=req.net_quantity or parsed_ing.net_weight,
         default_basis=req.default_basis,
         standard_serving_name=req.standard_serving_name,
         standard_serving_grams=req.standard_serving_grams,
@@ -521,6 +1128,10 @@ def create_user_confirmed_product(
         intolerance_tags=[],
         dietary_tags=["packaged_food"],
         ingredients_text=req.ingredients_text,
+        cleaned_ingredients_text=parsed_ing.cleaned_ingredients,
+        allergen_statement=parsed_ing.allergen_declaration,
+        raw_ocr_text=req.raw_ocr_text or req.ingredients_text,
+        manufacturer_info=parsed_ing.manufacturer_info,
         allergen_declaration_complete=req.allergen_declaration_complete,
         source_id=src.id,
         confidence_level="label_declared",
@@ -569,7 +1180,38 @@ def create_user_confirmed_product(
                 confidence_status="label_declared" if val is not None else "not_measured",
             )
         )
+        if val is not None:
+            record_field_provenance(
+                db,
+                food_id=food.id,
+                field_name=nd.code,
+                field_type="nutrient",
+                field_value=str(val),
+                source_code=src.code,
+                source_name=src.name,
+                source_url=src.url,
+                source_record_id=food.barcode or food.slug,
+                confidence_status="user_confirmed",
+                review_status="confirmed",
+            )
 
+    if consented_image_url:
+        record_field_provenance(
+            db,
+            food_id=food.id,
+            field_name="image_url",
+            field_type="image",
+            field_value=consented_image_url[:120],
+            source_code=src.code,
+            source_name=src.name,
+            source_url=src.url,
+            source_record_id=food.barcode or food.slug,
+            confidence_status="user_confirmed",
+            review_status="confirmed",
+            notes="User-consented front-of-package display image.",
+        )
+
+    ensure_baseline_local_provenance(db, food)
     db.commit()
     db.refresh(food)
     return serialize_food_detail(db, food)
@@ -585,13 +1227,11 @@ def recognize_indian_dish_from_image(
     """
     Experimental Indian Dish Image Recognition (Module 8).
     Processes image strictly in memory, computes colour/brightness cues + filename/hint context,
-    and returns candidate dishes with explicit uncertainty. Never claims confirmed identification
-    or estimates portion calories from a photo.
+    and returns candidate dishes with explicit uncertainty.
     """
     width, height, (r_mean, g_mean, b_mean) = validate_and_inspect_image_in_memory(
         file_bytes, content_type
     )
-    # Purge image bytes immediately
     del file_bytes
     gc.collect()
 
@@ -614,14 +1254,12 @@ def recognize_indian_dish_from_image(
             + [a.alias_text.lower() for a in dish.aliases]
         )
 
-        # Check if user hint or filename matches dish tokens
         for tok in re.findall(r"[a-z]{3,}", hint_blob):
             if tok in dish_text and tok not in ("img", "jpg", "png", "jpeg", "photo", "food", "meal"):
                 score += 0.42
                 cue_reason = f"Visual profile + strong keyword match on '{tok}'."
                 break
 
-        # Colour chrominance heuristics from in-memory RGB statistics
         brightness = (r_mean + g_mean + b_mean) / 3.0
         if brightness > 185 and dish.slug in ("idli-steamed-rice-lentil", "curd-rice-mosaranna", "rice-raw-milled"):
             score += 0.26
@@ -645,7 +1283,7 @@ def recognize_indian_dish_from_image(
             score += 0.22
             cue_reason = "Earthy low-saturation tone consistent with whole-grain millet (Ragi Mudde) or roasted flatbread."
 
-        score = min(round(score, 2), 0.78)  # Cap below 0.80 to reflect visual uncertainty
+        score = min(round(score, 2), 0.78)
         uncertainty = (
             "Moderate visual similarity (requires user confirmation)"
             if score >= 0.50
@@ -656,6 +1294,7 @@ def recognize_indian_dish_from_image(
             DishCandidateOut(
                 food_slug=dish.slug,
                 food_name=dish.name_en,
+                image_url=dish.image_url,
                 regional_aliases=aliases_list,
                 visual_similarity_score=score,
                 uncertainty_label=uncertainty,

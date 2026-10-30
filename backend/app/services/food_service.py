@@ -3,16 +3,23 @@ import re
 from typing import Dict, List, Optional, Tuple
 from sqlalchemy.orm import Session, joinedload
 
-from app.db.seed_images import resolve_category_image_url, resolve_food_image_url
+from app.db.seed_images import (
+    FOOD_IMAGE_URLS,
+    resolve_category_image_url,
+    resolve_food_image_url,
+)
+from app.integrations.normalizer import (
+    check_allergen_consistency,
+    parse_and_clean_package_ingredients,
+)
 from app.models.entities import (
-    DataSource,
-    FoodAlias,
     FoodCategory,
     FoodItem,
     FoodNutrientValue,
     NutrientDefinition,
 )
 from app.schemas.api_schemas import (
+    AllergenConsistencyOut,
     DataSourceOut,
     FoodAliasOut,
     FoodCategoryOut,
@@ -20,12 +27,36 @@ from app.schemas.api_schemas import (
     FoodSearchResponse,
     FoodSummaryOut,
     NutrientValueOut,
+    ProductDataConflictOut,
+    ProductFieldProvenanceOut,
     ServingConversionOut,
 )
 
 
 def normalize_query(q: str) -> str:
     return re.sub(r"[^a-z0-9\u0900-\u097f\u0c80-\u0cff]+", " ", q.lower()).strip()
+
+
+def _resolve_display_image(food: FoodItem) -> Tuple[Optional[str], bool]:
+    """
+    CRITICAL HONESTY RULE:
+    For packaged products (`food.is_packaged == True`), NEVER substitute a generic category
+    illustration (`Muesli.jpg`) as if it were the actual product packaging!
+    Only return `image_url` if the product has a genuine stored `food.image_url` or an explicit
+    slug match in `FOOD_IMAGE_URLS`. Otherwise return `(None, False)`.
+    """
+    explicit_db_img = getattr(food, "image_url", None)
+    if explicit_db_img and explicit_db_img.strip():
+        return explicit_db_img.strip(), True
+
+    if food.is_packaged:
+        curated_pkg_img = FOOD_IMAGE_URLS.get(food.slug)
+        if curated_pkg_img:
+            return curated_pkg_img, True
+        return None, False
+
+    cat_slug = food.category.slug if food.category else "indian-dishes"
+    return resolve_food_image_url(food.slug, cat_slug), True
 
 
 def serialize_food_summary(food: FoodItem, total_nutrient_defs: int = 20) -> FoodSummaryOut:
@@ -63,9 +94,7 @@ def serialize_food_summary(food: FoodItem, total_nutrient_defs: int = 20) -> Foo
                 )
             )
 
-    img_url = getattr(food, "image_url", None) or resolve_food_image_url(
-        food.slug, food.category.slug
-    )
+    img_url, has_verified_img = _resolve_display_image(food)
 
     return FoodSummaryOut(
         id=food.id,
@@ -73,11 +102,13 @@ def serialize_food_summary(food: FoodItem, total_nutrient_defs: int = 20) -> Foo
         ifct_code=food.ifct_code,
         name_en=food.name_en,
         image_url=img_url,
+        has_verified_image=has_verified_img,
         category_slug=food.category.slug,
         category_name=food.category.name,
         is_packaged=food.is_packaged,
         brand=food.brand,
         barcode=food.barcode,
+        net_quantity=getattr(food, "net_quantity", None),
         default_basis=food.default_basis,
         standard_serving_name=food.standard_serving_name,
         standard_serving_grams=food.standard_serving_grams,
@@ -118,7 +149,7 @@ def serialize_food_detail(db: Session, food: FoodItem) -> FoodDetailOut:
             missing_codes.append(nd.code)
             val_serving = None
 
-        src = nv.source if nv is not None else food.source
+        src = nv.source if (nv is not None and nv.source is not None) else food.source
         nutrients_out.append(
             NutrientValueOut(
                 nutrient_code=nd.code,
@@ -153,10 +184,23 @@ def serialize_food_detail(db: Session, food: FoodItem) -> FoodDetailOut:
                 )
             )
 
+    parsed_ing = parse_and_clean_package_ingredients(food.ingredients_text)
+    consistency = check_allergen_consistency(
+        food.ingredients_text,
+        food.allergen_tags,
+        food.allergen_declaration_complete,
+    )
+
     if not food.allergen_declaration_complete or (food.is_packaged and not food.ingredients_text):
         allergen_disclaimer = (
             "IMPORTANT ALLERGEN NOTICE: Ingredient or cross-contamination data for this item is incomplete. "
             "GharPlate cannot establish whether this product is free from any allergen. Always inspect the physical package label."
+        )
+    elif consistency.requires_manual_review:
+        allergen_disclaimer = (
+            "ALLERGEN CONSISTENCY ALERT: Label ingredient/allergen text declares additional allergens ("
+            + ", ".join(consistency.missing_from_stored_tags)
+            + ") not present in stored allergen tags. Always verify the physical package label."
         )
     else:
         allergen_disclaimer = (
@@ -172,9 +216,10 @@ def serialize_food_detail(db: Session, food: FoodItem) -> FoodDetailOut:
         or resolve_category_image_url(food.category.slug),
         display_order=food.category.display_order,
     )
-    img_url = getattr(food, "image_url", None) or resolve_food_image_url(
-        food.slug, food.category.slug
-    )
+    img_url, has_verified_img = _resolve_display_image(food)
+
+    provenance_rows = getattr(food, "field_provenance", None) or []
+    conflict_rows = getattr(food, "data_conflicts", None) or []
 
     return FoodDetailOut(
         id=food.id,
@@ -182,6 +227,7 @@ def serialize_food_detail(db: Session, food: FoodItem) -> FoodDetailOut:
         ifct_code=food.ifct_code,
         name_en=food.name_en,
         image_url=img_url,
+        has_verified_image=has_verified_img,
         scientific_name=food.scientific_name,
         description=food.description,
         region_state=food.region_state,
@@ -189,6 +235,7 @@ def serialize_food_detail(db: Session, food: FoodItem) -> FoodDetailOut:
         is_packaged=food.is_packaged,
         brand=food.brand,
         barcode=food.barcode,
+        net_quantity=getattr(food, "net_quantity", None) or parsed_ing.net_weight,
         default_basis=food.default_basis,
         standard_serving_name=food.standard_serving_name,
         standard_serving_grams=food.standard_serving_grams,
@@ -198,8 +245,30 @@ def serialize_food_detail(db: Session, food: FoodItem) -> FoodDetailOut:
         intolerance_tags=food.intolerance_tags or [],
         dietary_tags=food.dietary_tags or [],
         ingredients_text=food.ingredients_text,
+        cleaned_ingredients_text=getattr(food, "cleaned_ingredients_text", None)
+        or parsed_ing.cleaned_ingredients,
+        ingredient_items=parsed_ing.ingredient_items,
+        ingredient_percentages=parsed_ing.ingredient_percentages,
+        additives=parsed_ing.additives,
+        allergen_statement=getattr(food, "allergen_statement", None)
+        or parsed_ing.allergen_declaration,
+        label_warnings=parsed_ing.label_warnings,
+        manufacturer_info=getattr(food, "manufacturer_info", None)
+        or parsed_ing.manufacturer_info,
+        lot_and_date_info=parsed_ing.lot_and_date_info,
+        ocr_uncertainty_notes=parsed_ing.ocr_uncertainty_notes,
+        raw_ocr_text=getattr(food, "raw_ocr_text", None) or food.ingredients_text,
         allergen_declaration_complete=food.allergen_declaration_complete,
         allergen_safety_disclaimer=allergen_disclaimer,
+        allergen_consistency=AllergenConsistencyOut(
+            stored_allergen_tags=consistency.stored_allergen_tags,
+            declared_allergens=consistency.declared_allergens,
+            ingredient_inferred_allergens=consistency.ingredient_inferred_allergens,
+            missing_from_stored_tags=consistency.missing_from_stored_tags,
+            consistency_status=consistency.consistency_status,
+            consistency_warnings=consistency.consistency_warnings,
+            requires_manual_review=consistency.requires_manual_review,
+        ),
         aliases=aliases_out,
         servings=[ServingConversionOut.model_validate(s) for s in food.servings],
         nutrients=nutrients_out,
@@ -209,7 +278,14 @@ def serialize_food_detail(db: Session, food: FoodItem) -> FoodDetailOut:
         confidence_level=food.confidence_level,
         conversion_methodology=food.conversion_methodology,
         date_imported=food.date_imported,
+        external_updated_at=getattr(food, "external_updated_at", None),
         source=DataSourceOut.model_validate(food.source),
+        field_provenance=[
+            ProductFieldProvenanceOut.model_validate(p) for p in provenance_rows
+        ],
+        data_conflicts=[
+            ProductDataConflictOut.model_validate(c) for c in conflict_rows
+        ],
     )
 
 
@@ -253,7 +329,11 @@ def search_foods(
                 filtered.append(f)
             elif nutrient_filter == "high_iron" and (nv_map.get("iron_mg") or 0) >= 3.0:
                 filtered.append(f)
-            elif nutrient_filter == "low_sodium" and nv_map.get("sodium_mg") is not None and nv_map["sodium_mg"] <= 50.0:
+            elif (
+                nutrient_filter == "low_sodium"
+                and nv_map.get("sodium_mg") is not None
+                and nv_map["sodium_mg"] <= 50.0
+            ):
                 filtered.append(f)
         all_candidates = filtered
 
@@ -268,13 +348,14 @@ def search_foods(
         for item in all_candidates:
             best_score = 0.0
             name_norm = normalize_query(item.name_en)
+            brand_norm = normalize_query(item.brand or "")
             all_vocab[name_norm] = item.name_en
 
-            if norm_q == name_norm or norm_q == item.slug.replace("-", " "):
+            if norm_q == name_norm or norm_q == item.slug.replace("-", " ") or (item.barcode and norm_q == item.barcode):
                 best_score = max(best_score, 100.0)
             elif name_norm.startswith(norm_q):
                 best_score = max(best_score, 90.0)
-            elif norm_q in name_norm:
+            elif norm_q in name_norm or (brand_norm and norm_q in f"{brand_norm} {name_norm}"):
                 best_score = max(best_score, 80.0)
 
             for al in item.aliases:
@@ -297,7 +378,8 @@ def search_foods(
 
             if tokens and best_score < 70.0:
                 searchable_blob = " ".join(
-                    [name_norm, item.category.name.lower()] + [a.normalized_text for a in item.aliases]
+                    [name_norm, brand_norm, item.category.name.lower()]
+                    + [a.normalized_text for a in item.aliases]
                 )
                 matched_tokens = sum(1 for t in tokens if t in searchable_blob)
                 if matched_tokens > 0:

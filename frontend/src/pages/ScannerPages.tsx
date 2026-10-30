@@ -1,8 +1,7 @@
-import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import React, { useEffect, useRef, useState } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ConfidenceBadge,
-  ExpandableSection,
   FoodImage,
 } from '../components/UIWidgets';
 import { api } from '../services/api';
@@ -14,10 +13,17 @@ import type {
 } from '../types/api';
 
 // ==========================================
-// PAGE 10: VISUAL STEP-BY-STEP PACKAGED FOOD LABEL SCANNER
+// PAGE 10: MULTI-PANEL PACKAGED FOOD LABEL OCR SCANNER
 // ==========================================
 export const FoodScannerPage: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  const prefillSlug = searchParams.get('slug') || '';
+  const prefillBarcode = searchParams.get('barcode') || '';
+  const prefillName = searchParams.get('name') || '';
+  const prefillBrand = searchParams.get('brand') || '';
+
   const [rawTextInput, setRawTextInput] = useState(
     `Product Name: Karnataka Roasted Millet Mixture
 Brand: Mysuru Home Foods
@@ -37,9 +43,15 @@ Ingredients: Roasted Ragi Flakes, Jowar Puffs, Groundnut (Peanuts), Roasted Gram
 Allergen Advice: Contains Peanuts.`
   );
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [ingredientsFile, setIngredientsFile] = useState<File | null>(null);
+  const [frontDisplayDataUrl, setFrontDisplayDataUrl] = useState<string | null>(null);
+  const [retainFrontImageConsent, setRetainFrontImageConsent] = useState(false);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const [useHintTextWithImage, setUseHintTextWithImage] = useState(false);
+
   const [scanResult, setScanResult] = useState<OCRScanResponse | null>(null);
   const [editedValues, setEditedValues] = useState<Record<string, string>>({});
+  const [barcodeInput, setBarcodeInput] = useState(prefillBarcode);
   const [savedProduct, setSavedProduct] = useState<FoodDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,6 +64,8 @@ Allergen Advice: Contains Peanuts.`
           ? String(pred.extracted_value)
           : '';
     });
+    if (prefillName && !next.product_name) next.product_name = prefillName;
+    if (prefillBrand && !next.brand) next.brand = prefillBrand;
     setEditedValues(next);
   };
 
@@ -65,6 +79,20 @@ Allergen Advice: Contains Peanuts.`
     }
   };
 
+  const handleFrontImageSelect = (file: File | null) => {
+    if (!file) {
+      setFrontDisplayDataUrl(null);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setFrontDisplayDataUrl(reader.result);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleImageScan = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedFile) {
@@ -75,7 +103,11 @@ Allergen Advice: Contains Peanuts.`
     setError(null);
     setSavedProduct(null);
     try {
-      const res = await api.scanLabelImage(selectedFile, rawTextInput);
+      const res = await api.scanLabelImage(
+        selectedFile,
+        useHintTextWithImage ? rawTextInput : undefined,
+        ingredientsFile
+      );
       setScanResult(res);
       populateEditState(res);
     } catch (err) {
@@ -132,17 +164,24 @@ Allergen Advice: Contains Peanuts.`
       const allergenRaw = editedValues.allergen_declarations || '';
       const allergens = allergenRaw
         .split(/[,;:]/)
-        .map((s) => s.replace(/contains/i, '').trim().toLowerCase())
+        .map((s) => s.replace(/contains/i, '').replace(/ingredients/i, '').trim().toLowerCase())
         .filter(Boolean);
 
       const saved = await api.confirmScannedProduct({
-        name_en: editedValues.product_name || 'User-Confirmed Packaged Food',
-        brand: editedValues.brand || 'Household Scanned Label',
+        slug: prefillSlug || undefined,
+        name_en: editedValues.product_name || prefillName || 'User-Confirmed Packaged Food',
+        brand: editedValues.brand || prefillBrand || 'Household Scanned Label',
+        barcode: barcodeInput.trim() || undefined,
+        net_quantity: editedValues.net_quantity || undefined,
+        image_url:
+          retainFrontImageConsent && frontDisplayDataUrl ? frontDisplayDataUrl : undefined,
+        retain_front_image_consent: retainFrontImageConsent,
         default_basis: scanResult.detected_basis === '100ml' ? '100ml' : '100g',
         standard_serving_name: editedValues.serving_size || '1 serving (30g)',
         standard_serving_grams: parseFloat(editedValues.serving_size || '30') || 30,
-        is_vegetarian: true,
+        is_vegetarian: !allergens.some((a) => a.includes('egg') || a.includes('fish')),
         ingredients_text: editedValues.ingredients_text || undefined,
+        raw_ocr_text: scanResult.raw_text || undefined,
         allergen_tags: allergens,
         allergen_declaration_complete: Boolean(editedValues.ingredients_text),
         nutrients_per_100: nutrientsPer100,
@@ -159,7 +198,6 @@ Allergen Advice: Contains Peanuts.`
 
   return (
     <div className="space-y-8">
-      {/* Visual 3-Step Header */}
       <div className="rounded-3xl border border-stone-200/90 bg-white p-6 sm:p-8 shadow-sm space-y-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
@@ -167,57 +205,125 @@ Allergen Advice: Contains Peanuts.`
               Scan a Packaged Food Label
             </h1>
             <p className="text-xs sm:text-sm text-stone-500">
-              Processed strictly in memory (RAM) and never stored on disk.
+              OCR label photos are processed strictly in RAM and purged immediately. GharPlate never inserts synthetic fallback nutrients.
             </p>
           </div>
           <div className="flex items-center gap-2 text-xs font-extrabold">
-            <span className="rounded-full bg-emerald-800 px-3 py-1 text-white">1. Upload Photo</span>
+            <span className="rounded-full bg-emerald-800 px-3 py-1 text-white">1. Upload Panels</span>
             <span>→</span>
-            <span className="rounded-full bg-emerald-100 px-3 py-1 text-emerald-950">2. Review Cards</span>
+            <span className="rounded-full bg-emerald-100 px-3 py-1 text-emerald-950">2. Review & Correct</span>
             <span>→</span>
             <span className="rounded-full bg-stone-100 px-3 py-1 text-stone-700">3. Confirm</span>
           </div>
         </div>
 
+        {(prefillName || prefillBarcode) && (
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3.5 text-xs text-emerald-950 flex flex-wrap items-center justify-between gap-2">
+            <span>
+              Enriching packaged product: <strong>{prefillName}</strong>{' '}
+              {prefillBrand ? `(${prefillBrand})` : ''}{' '}
+              {prefillBarcode ? `• Barcode #${prefillBarcode}` : ''}
+            </span>
+            {prefillSlug && (
+              <Link to={`/foods/${prefillSlug}`} className="font-bold underline">
+                ← Back to Product Page
+              </Link>
+            )}
+          </div>
+        )}
+
         <div className="grid gap-6 lg:grid-cols-12">
-          {/* Large Camera / Upload Dropzone */}
+          {/* Multi-Panel Camera / Upload Form */}
           <form
             onSubmit={(e) => void handleImageScan(e)}
-            className="lg:col-span-7 flex flex-col justify-between rounded-3xl border-2 border-dashed border-emerald-300 bg-emerald-50/40 p-6 text-center space-y-4"
+            className="lg:col-span-7 flex flex-col justify-between rounded-3xl border-2 border-dashed border-emerald-300 bg-emerald-50/40 p-6 space-y-4"
           >
             {imagePreviewUrl ? (
-              <div className="mx-auto max-h-56 overflow-hidden rounded-2xl border border-stone-200 bg-white p-2">
+              <div className="mx-auto max-h-52 overflow-hidden rounded-2xl border border-stone-200 bg-white p-2">
                 <img
                   src={imagePreviewUrl}
                   alt="Uploaded Nutrition Label Preview"
-                  className="mx-auto max-h-48 object-contain rounded-xl"
+                  className="mx-auto max-h-44 object-contain rounded-xl"
                 />
               </div>
             ) : (
-              <div className="py-6 space-y-2">
-                <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl bg-emerald-800 text-3xl text-white shadow">
+              <div className="py-4 text-center space-y-2">
+                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-3xl bg-emerald-800 text-2xl text-white shadow">
                   📸
                 </div>
                 <div className="text-base font-extrabold text-stone-900">
-                  Capture or Upload Nutrition Table Photo
+                  Upload Nutrition & Ingredient Panel Photos
                 </div>
-                <p className="text-xs text-stone-500 max-w-sm mx-auto">
-                  Supports JPEG, PNG, or WebP up to 5 MB. Keep the "Nutritional Information" box clearly visible.
+                <p className="text-xs text-stone-500 max-w-md mx-auto">
+                  Supports rotated or upright JPEG, PNG, or WebP up to 5 MB. If OCR cannot read the photo, GharPlate reports an explicit failure state rather than guessing numbers.
                 </p>
               </div>
             )}
 
-            <div className="flex flex-wrap items-center justify-center gap-3">
-              <label className="cursor-pointer rounded-2xl bg-white border border-stone-300 px-4 py-2.5 text-xs font-extrabold text-stone-800 shadow-sm hover:bg-stone-50">
-                Choose / Capture Photo
+            <div className="grid gap-3 sm:grid-cols-2 text-left text-xs">
+              <div className="rounded-2xl bg-white border border-stone-200 p-3 space-y-1.5">
+                <div className="font-extrabold text-stone-900">
+                  1. Nutrition Information Panel (Required)
+                </div>
                 <input
                   type="file"
                   accept="image/jpeg,image/png,image/webp"
                   capture="environment"
                   aria-label="Upload Nutrition Label Image"
                   onChange={(e) => handleFileChange(e.target.files?.[0] || null)}
-                  className="hidden"
+                  className="w-full text-xs"
                 />
+              </div>
+
+              <div className="rounded-2xl bg-white border border-stone-200 p-3 space-y-1.5">
+                <div className="font-extrabold text-stone-900">
+                  2. Ingredients & Allergen Panel (Optional)
+                </div>
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  capture="environment"
+                  aria-label="Upload Ingredients Panel Image"
+                  onChange={(e) => setIngredientsFile(e.target.files?.[0] || null)}
+                  className="w-full text-xs"
+                />
+              </div>
+            </div>
+
+            {/* Optional Consented Front-of-Package Display Image */}
+            <div className="rounded-2xl bg-white border border-stone-200 p-3 text-left text-xs space-y-2">
+              <div className="font-extrabold text-stone-900">
+                3. Optional: Front-of-Package Display Image (Only Saved With Consent)
+              </div>
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                aria-label="Upload Front Package Image"
+                onChange={(e) => handleFrontImageSelect(e.target.files?.[0] || null)}
+                className="w-full text-xs"
+              />
+              {frontDisplayDataUrl && (
+                <label className="inline-flex items-center gap-2 font-semibold text-emerald-900 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={retainFrontImageConsent}
+                    onChange={(e) => setRetainFrontImageConsent(e.target.checked)}
+                    className="rounded border-stone-300 text-emerald-800"
+                  />
+                  I explicitly consent to saving this front-of-package photo for product display.
+                </label>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+              <label className="inline-flex items-center gap-2 text-xs font-semibold text-stone-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={useHintTextWithImage}
+                  onChange={(e) => setUseHintTextWithImage(e.target.checked)}
+                  className="rounded border-stone-300 text-emerald-800"
+                />
+                Include transcription text box on the right as OCR assist
               </label>
 
               <button
@@ -234,13 +340,13 @@ Allergen Advice: Contains Peanuts.`
           <div className="lg:col-span-5 rounded-3xl border border-stone-200 bg-stone-50 p-5 flex flex-col justify-between space-y-3">
             <div>
               <div className="text-sm font-extrabold text-stone-900">
-                Try Instant Sample Label Extraction
+                Paste or Test Label Text Extraction
               </div>
               <p className="text-xs text-stone-500 mt-0.5">
                 Includes an intentional OCR character error (<code>48O kcal</code>) to demonstrate smart validation.
               </p>
               <textarea
-                rows={6}
+                rows={7}
                 aria-label="Raw Label Text Input"
                 value={rawTextInput}
                 onChange={(e) => setRawTextInput(e.target.value)}
@@ -277,10 +383,39 @@ Allergen Advice: Contains Peanuts.`
                 🔒 {scanResult.privacy_confirmation}
               </p>
             </div>
-            <span className="rounded-full bg-amber-100 px-3.5 py-1 text-xs font-extrabold text-amber-950">
-              Basis: {scanResult.detected_basis}
-            </span>
+            <div className="flex items-center gap-2">
+              {scanResult.ocr_status && scanResult.ocr_status !== 'success' && (
+                <span
+                  data-testid="ocr-failure-badge"
+                  className="rounded-full bg-rose-100 border border-rose-300 px-3 py-1 text-xs font-extrabold text-rose-900"
+                >
+                  OCR Status: {scanResult.ocr_status}
+                </span>
+              )}
+              <span className="rounded-full bg-amber-100 px-3.5 py-1 text-xs font-extrabold text-amber-950">
+                Basis: {scanResult.detected_basis}
+              </span>
+            </div>
           </div>
+
+          {/* Explicit Honest OCR Failure Banner (No Synthetic Fallback!) */}
+          {scanResult.ocr_status && scanResult.ocr_status !== 'success' && (
+            <div
+              data-testid="ocr-failure-notice"
+              className="rounded-2xl border border-rose-300 bg-rose-50 p-4 text-xs text-rose-950 space-y-1.5"
+            >
+              <div className="font-extrabold">
+                ⚠️ Automatic OCR Could Not Read Text from the Image
+              </div>
+              <p>
+                {scanResult.ocr_error_reason ||
+                  'The OCR engine is unavailable or the uploaded image was unreadable. GharPlate never inserts fake fallback nutrition values.'}
+              </p>
+              <p className="font-semibold">
+                Please upload a clearer photograph or enter the package values manually in the cards below.
+              </p>
+            </div>
+          )}
 
           {scanResult.validation_warnings.length > 0 && (
             <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-xs text-amber-950 space-y-1">
@@ -292,6 +427,20 @@ Allergen Advice: Contains Peanuts.`
           )}
 
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-2xl border border-stone-200 bg-stone-50/60 p-4 text-xs space-y-2">
+              <label htmlFor="ocr-barcode-input" className="font-extrabold text-stone-900 block">
+                Barcode (EAN / UPC)
+              </label>
+              <input
+                id="ocr-barcode-input"
+                type="text"
+                value={barcodeInput}
+                onChange={(e) => setBarcodeInput(e.target.value)}
+                placeholder="Optional 8–14 digit barcode"
+                className="w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm font-mono font-bold text-stone-900"
+              />
+            </div>
+
             {Object.entries(scanResult.fields).map(([key, pred]) => (
               <div
                 key={key}
@@ -346,7 +495,7 @@ Allergen Advice: Contains Peanuts.`
 
           <div className="flex flex-wrap items-center justify-between gap-4 border-t border-stone-100 pt-4">
             <span className="text-xs text-stone-500">
-              Step 3: Confirm the reviewed values to analyse this product against your household profiles.
+              Step 3: Confirm the reviewed values to save or update this packaged product record.
             </span>
             <button
               type="button"
@@ -378,58 +527,278 @@ Allergen Advice: Contains Peanuts.`
 };
 
 // ==========================================
-// PAGE 11: VISUAL BARCODE SCANNER & PRODUCT LOOKUP
+// PAGE 11: REAL CAMERA BARCODE SCANNER & MULTI-SOURCE PRODUCT LOOKUP
 // ==========================================
 export const BarcodeLookupPage: React.FC = () => {
-  const [barcode, setBarcode] = useState('8901491101813');
+  const [barcode, setBarcode] = useState('8906005618726');
   const [result, setResult] = useState<BarcodeLookupResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Live Camera Barcode Scanner States
+  const [cameraActive, setCameraActive] = useState(false);
+  const [cameraStatus, setCameraStatus] = useState<string>(
+    'Camera idle — click "Start Camera Barcode Scanner" to scan EAN-8, UPC-A, EAN-13, or GTIN-14.'
+  );
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [torchSupported, setTorchSupported] = useState(false);
+  const [torchOn, setTorchOn] = useState(false);
+
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const scanTimerRef = useRef<number | null>(null);
 
   const sampleBarcodes = [
+    { code: '8906005618726', label: 'Pineapple Cake (Winkles)' },
     { code: '8901491101813', label: 'Multigrain Muesli' },
     { code: '8901491100519', label: 'Plain Rolled Oats' },
     { code: '8901719101014', label: 'Glucose Biscuits' },
     { code: '8901058851458', label: 'Instant Noodles' },
-    { code: '8901764032103', label: 'Mango Beverage' },
     { code: '8909999000000', label: 'Unlisted SKU Fallback' },
   ];
 
-  const handleLookup = async (codeToLookup: string) => {
+  const stopCameraScanner = () => {
+    if (scanTimerRef.current !== null) {
+      window.clearInterval(scanTimerRef.current);
+      scanTimerRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setCameraActive(false);
+    setTorchOn(false);
+    setTorchSupported(false);
+  };
+
+  useEffect(() => {
+    return () => {
+      stopCameraScanner();
+    };
+  }, []);
+
+  const handleLookup = async (codeToLookup: string, forceRefresh = false) => {
+    const clean = codeToLookup.trim();
+    if (!clean) {
+      setError('Please enter or scan an 8 to 14 digit barcode.');
+      return;
+    }
     setLoading(true);
+    setError(null);
     try {
-      const res = await api.lookupBarcode(codeToLookup);
+      const res = await api.lookupBarcode(clean, forceRefresh);
       setResult(res);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Barcode lookup failed');
     } finally {
       setLoading(false);
     }
   };
 
+  const startCameraScanner = async () => {
+    setCameraError(null);
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setCameraError(
+        'Camera API (navigator.mediaDevices.getUserMedia) is not available in this browser context. Please use manual barcode entry.'
+      );
+      return;
+    }
+
+    try {
+      setCameraStatus('Requesting camera permission...');
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: false,
+      });
+
+      streamRef.current = stream;
+      setCameraActive(true);
+      setCameraStatus(
+        'Live camera active — hold EAN-8, UPC-A, EAN-13, or GTIN-14 barcode steady in frame.'
+      );
+
+      const videoTrack = stream.getVideoTracks()[0];
+      if (videoTrack && typeof videoTrack.getCapabilities === 'function') {
+        const caps = videoTrack.getCapabilities() as Record<string, unknown>;
+        if (caps && 'torch' in caps) {
+          setTorchSupported(true);
+        }
+      }
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play().catch(() => null);
+      }
+
+      // Use native BarcodeDetector where supported in browser
+      const BarcodeDetectorCtor = (
+        window as unknown as {
+          BarcodeDetector?: new (opts: { formats: string[] }) => {
+            detect: (
+              source: HTMLVideoElement
+            ) => Promise<{ rawValue: string; format: string }[]>;
+          };
+        }
+      ).BarcodeDetector;
+
+      if (BarcodeDetectorCtor) {
+        const detector = new BarcodeDetectorCtor({
+          formats: ['ean_13', 'ean_8', 'upc_a', 'itf', 'code_128'],
+        });
+        scanTimerRef.current = window.setInterval(async () => {
+          if (!videoRef.current || videoRef.current.readyState < 2) return;
+          try {
+            const barcodes = await detector.detect(videoRef.current);
+            if (barcodes && barcodes.length > 0) {
+              const detected = barcodes[0].rawValue.trim();
+              if (/^\d{8,14}$/.test(detected)) {
+                setBarcode(detected);
+                setCameraStatus(`Detected barcode: ${detected} (${barcodes[0].format})`);
+                stopCameraScanner();
+                void handleLookup(detected);
+              }
+            }
+          } catch {
+            // continue scanning next frame
+          }
+        }, 400);
+      } else {
+        setCameraStatus(
+          'Live camera preview active. Place barcode in frame or enter digits manually below.'
+        );
+      }
+    } catch (err) {
+      const errName = err instanceof Error ? err.name : 'CameraError';
+      if (errName === 'NotAllowedError' || errName === 'PermissionDeniedError') {
+        setCameraError(
+          'Camera permission was denied. Please allow camera access in your browser address bar or enter the barcode number manually.'
+        );
+      } else {
+        setCameraError(
+          `Could not start camera scanner (${err instanceof Error ? err.message : errName}). Please use manual barcode entry.`
+        );
+      }
+      stopCameraScanner();
+    }
+  };
+
+  const toggleTorch = async () => {
+    if (!streamRef.current) return;
+    const track = streamRef.current.getVideoTracks()[0];
+    if (!track || typeof track.applyConstraints !== 'function') return;
+    const nextTorch = !torchOn;
+    try {
+      await track.applyConstraints({
+        advanced: [{ torch: nextTorch } as unknown as MediaTrackConstraintSet],
+      });
+      setTorchOn(nextTorch);
+    } catch {
+      // ignore if hardware rejects torch constraint
+    }
+  };
+
   return (
     <div className="space-y-8">
-      <div className="rounded-3xl border border-stone-200/90 bg-white p-6 sm:p-8 shadow-sm grid gap-8 lg:grid-cols-12 items-center">
-        {/* Visual Barcode Viewfinder Card */}
-        <div className="lg:col-span-5 rounded-3xl bg-stone-900 p-6 text-center text-white space-y-3">
-          <div className="mx-auto flex h-28 w-48 flex-col items-center justify-center rounded-2xl border-2 border-dashed border-emerald-400 bg-stone-800/80">
-            <div className="font-mono text-2xl tracking-widest text-emerald-300">
-              ||| |||| || |||
-            </div>
-            <div className="mt-1 text-[11px] font-mono text-stone-300">{barcode}</div>
+      <div className="rounded-3xl border border-stone-200/90 bg-white p-6 sm:p-8 shadow-sm grid gap-8 lg:grid-cols-12 items-start">
+        {/* Left: Real Camera Barcode Scanner Viewfinder */}
+        <div className="lg:col-span-5 rounded-3xl bg-stone-900 p-5 text-center text-white space-y-4">
+          <div className="relative mx-auto overflow-hidden rounded-2xl border-2 border-emerald-400/80 bg-black aspect-[16/10] flex items-center justify-center">
+            {cameraActive ? (
+              <>
+                <video
+                  ref={videoRef}
+                  data-testid="live-barcode-video"
+                  playsInline
+                  muted
+                  className="h-full w-full object-cover"
+                />
+                <div className="pointer-events-none absolute inset-x-8 top-1/2 h-0.5 -translate-y-1/2 bg-emerald-400 shadow-[0_0_12px_#34d399]" />
+              </>
+            ) : (
+              <div className="p-4 space-y-2">
+                <div className="text-3xl">📷</div>
+                <div className="text-xs font-extrabold text-emerald-300">
+                  Live Camera Barcode Scanner
+                </div>
+                <div className="text-[11px] text-stone-400">
+                  Supports EAN-8, UPC-A, EAN-13 & GTIN-14
+                </div>
+              </div>
+            )}
           </div>
-          <div className="text-sm font-extrabold">Packaged Food Barcode Lookup</div>
-          <p className="text-xs text-stone-400">
-            Checks GharPlate’s verified Indian retail catalog + Open Food Facts.
+
+          <p data-testid="camera-scanner-status" className="text-xs text-stone-300">
+            {cameraStatus}
           </p>
+
+          {cameraError && (
+            <div
+              data-testid="camera-scanner-error"
+              className="rounded-2xl border border-rose-400/60 bg-rose-950/80 p-3 text-xs text-rose-200"
+            >
+              ⚠️ {cameraError}
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center justify-center gap-2.5">
+            {!cameraActive ? (
+              <button
+                type="button"
+                data-testid="start-camera-scanner-btn"
+                onClick={() => void startCameraScanner()}
+                className="rounded-2xl bg-emerald-500 px-5 py-2.5 text-xs font-extrabold text-stone-950 shadow hover:bg-emerald-400 transition"
+              >
+                📷 Start Camera Barcode Scanner
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  data-testid="stop-camera-scanner-btn"
+                  onClick={stopCameraScanner}
+                  className="rounded-2xl bg-rose-600 px-4 py-2 text-xs font-extrabold text-white hover:bg-rose-500"
+                >
+                  Stop Camera
+                </button>
+                {torchSupported && (
+                  <button
+                    type="button"
+                    onClick={() => void toggleTorch()}
+                    className="rounded-2xl bg-amber-400 px-4 py-2 text-xs font-extrabold text-stone-950"
+                  >
+                    {torchOn ? '🔦 Torch Off' : '🔦 Torch On'}
+                  </button>
+                )}
+              </>
+            )}
+          </div>
         </div>
 
-        {/* Manual Barcode Input & Sample Chips */}
+        {/* Right: Manual Barcode Input & Sample Chips */}
         <div className="lg:col-span-7 space-y-4">
-          <h1 className="text-2xl sm:text-3xl font-black text-stone-900">
-            Lookup Product by Barcode
-          </h1>
+          <div>
+            <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-extrabold text-emerald-900">
+              Multi-Source Barcode Intelligence (Local + Open Food Facts v3 + USDA FDC)
+            </span>
+            <h1 className="mt-2 text-2xl sm:text-3xl font-black text-stone-900">
+              Lookup or Enrich Product by Barcode
+            </h1>
+            <p className="mt-1 text-xs text-stone-500">
+              Checks GharPlate’s local database first, evaluates field completeness, and automatically queries Open Food Facts & USDA FoodData Central when images or nutrients are missing.
+            </p>
+          </div>
+
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              void handleLookup(barcode);
+              void handleLookup(barcode, false);
             }}
             className="flex flex-col sm:flex-row gap-2.5"
           >
@@ -437,7 +806,7 @@ export const BarcodeLookupPage: React.FC = () => {
               type="text"
               value={barcode}
               onChange={(e) => setBarcode(e.target.value)}
-              placeholder="Enter 8–13 digit EAN/UPC barcode..."
+              placeholder="Enter 8, 12, 13, or 14 digit EAN/UPC/GTIN barcode..."
               aria-label="Barcode Input"
               className="flex-1 rounded-2xl border border-stone-300 px-4 py-3 text-sm font-mono font-bold"
             />
@@ -448,10 +817,26 @@ export const BarcodeLookupPage: React.FC = () => {
             >
               {loading ? 'Searching...' : 'Search Barcode'}
             </button>
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => void handleLookup(barcode, true)}
+              className="rounded-2xl border border-stone-300 bg-stone-50 px-4 py-3 text-xs font-bold text-stone-800 hover:bg-stone-100"
+            >
+              🔄 Force Online Refresh
+            </button>
           </form>
 
+          {error && (
+            <div className="rounded-2xl border border-rose-300 bg-rose-50 p-3 text-xs font-bold text-rose-900">
+              {error}
+            </div>
+          )}
+
           <div className="space-y-1.5">
-            <div className="text-xs font-bold text-stone-500">Tap a sample barcode to test:</div>
+            <div className="text-xs font-bold text-stone-500">
+              Tap a sample barcode to test (includes Pineapple Cake `8906005618726`):
+            </div>
             <div className="flex flex-wrap gap-2">
               {sampleBarcodes.map((b) => (
                 <button
@@ -463,7 +848,7 @@ export const BarcodeLookupPage: React.FC = () => {
                   }}
                   className="rounded-xl border border-stone-200 bg-stone-50 px-3 py-1.5 text-xs font-bold text-stone-700 hover:border-emerald-600 hover:bg-emerald-50"
                 >
-                  🏷️ {b.label} ({b.code.slice(-4)})
+                  🏷️ {b.label} ({b.code})
                 </button>
               ))}
             </div>
@@ -472,7 +857,7 @@ export const BarcodeLookupPage: React.FC = () => {
       </div>
 
       {result && (
-        <div className="rounded-3xl border border-stone-200/90 bg-white p-6 shadow-sm">
+        <div className="rounded-3xl border border-stone-200/90 bg-white p-6 shadow-sm space-y-5">
           {result.found && result.product ? (
             <div className="grid gap-6 sm:grid-cols-12 items-center">
               <div className="sm:col-span-4">
@@ -480,37 +865,79 @@ export const BarcodeLookupPage: React.FC = () => {
                   src={result.product.image_url}
                   foodName={result.product.name_en}
                   categorySlug="packaged-foods"
+                  isPackaged={result.product.is_packaged}
+                  hasVerifiedImage={
+                    result.product.has_verified_image ?? Boolean(result.product.image_url)
+                  }
                   aspectClass="aspect-[16/10] rounded-2xl"
                 />
               </div>
               <div className="sm:col-span-8 space-y-3">
-                <div className="flex items-center justify-between">
-                  <ConfidenceBadge status="label_declared" />
-                  <span className="font-mono text-xs text-stone-400">#{result.barcode}</span>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <ConfidenceBadge status={result.product.confidence_level || 'label_declared'} />
+                  <span className="font-mono text-xs font-bold text-stone-600">
+                    {result.barcode_format || 'EAN-13'}: #{result.barcode}
+                  </span>
                 </div>
                 <h2 className="text-xl font-black text-stone-900">
-                  {result.product.name_en}
+                  {result.product.name_en}{' '}
+                  {result.product.brand ? `— ${result.product.brand}` : ''}
                 </h2>
+                <p className="text-xs text-stone-700">{result.message}</p>
                 <p className="text-xs text-stone-600">
                   Brand: <strong>{result.product.brand}</strong> • Serving:{' '}
-                  <strong>{result.product.standard_serving_name}</strong>
+                  <strong>{result.product.standard_serving_name}</strong> • Completeness:{' '}
+                  <strong>{result.product.completeness_pct}% ({result.product.available_nutrient_count}/20 nutrients)</strong>
                 </p>
-                <div className="pt-2">
+
+                {result.provider_attempts && result.provider_attempts.length > 0 && (
+                  <div className="rounded-2xl bg-stone-50 border border-stone-200 p-3 text-xs space-y-1">
+                    <div className="font-extrabold text-stone-800">
+                      External Provider Enrichment Checks:
+                    </div>
+                    {result.provider_attempts.map((att, idx) => (
+                      <div key={idx} className="text-stone-600">
+                        • <strong>{att.provider_name}:</strong>{' '}
+                        <span className="font-mono">{att.status}</span> — {att.message}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex flex-wrap gap-3 pt-2">
                   <Link
                     to={`/foods/${result.product.slug}`}
                     className="inline-block rounded-2xl bg-emerald-800 px-5 py-2.5 text-xs font-extrabold text-white shadow hover:bg-emerald-700"
                   >
-                    View Nutrition & Health Considerations →
+                    Open Full Product & Ingredients Page →
                   </Link>
+                  {result.product.available_nutrient_count === 0 && (
+                    <Link
+                      to={`/scanner?slug=${encodeURIComponent(result.product.slug)}&barcode=${encodeURIComponent(result.barcode)}&name=${encodeURIComponent(result.product.name_en)}&brand=${encodeURIComponent(result.product.brand || '')}`}
+                      className="inline-block rounded-2xl bg-stone-900 px-5 py-2.5 text-xs font-extrabold text-white hover:bg-stone-800"
+                    >
+                      📸 Scan Nutrition Panel for {result.product.name_en} →
+                    </Link>
+                  )}
                 </div>
               </div>
             </div>
           ) : (
             <div className="space-y-3 text-xs">
               <div className="text-base font-extrabold text-stone-900">{result.message}</div>
+              {result.provider_attempts && result.provider_attempts.length > 0 && (
+                <div className="rounded-2xl bg-stone-50 border border-stone-200 p-3 space-y-1">
+                  {result.provider_attempts.map((att, idx) => (
+                    <div key={idx}>
+                      • <strong>{att.provider_name}:</strong>{' '}
+                      <span className="font-mono">{att.status}</span> — {att.message}
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="flex flex-wrap gap-3 pt-2">
                 <Link
-                  to="/scanner"
+                  to={`/scanner?barcode=${encodeURIComponent(result.barcode)}`}
                   className="rounded-2xl bg-emerald-800 px-5 py-2.5 font-extrabold text-white"
                 >
                   📸 Scan Nutrition Label Instead →
@@ -685,7 +1112,7 @@ export const FoodRecognitionPage: React.FC = () => {
                           to={`/foods/${cand.food_slug}`}
                           className="font-extrabold text-emerald-800 underline"
                         >
-                          View Nutrition →
+                          Open Nutrition →
                         </Link>
                       )}
                     </div>
@@ -694,15 +1121,6 @@ export const FoodRecognitionPage: React.FC = () => {
               );
             })}
           </div>
-
-          <ExpandableSection
-            title="About Experimental Dish Recognition & Safeguards"
-            subtitle="Why GharPlate asks you to confirm visual candidates"
-          >
-            <p className="text-xs text-stone-600 leading-relaxed">
-              {result.experimental_disclaimer}
-            </p>
-          </ExpandableSection>
         </section>
       )}
     </div>

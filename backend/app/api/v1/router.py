@@ -4,11 +4,18 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.session import get_db
+from app.integrations.normalizer import check_allergen_consistency
+from app.integrations.provider_registry import (
+    ensure_baseline_local_provenance,
+    evaluate_local_product_completeness,
+    search_multi_source_external_products,
+)
 from app.models.entities import (
     ConditionConflictRule,
     DataSource,
     FoodCategory,
     FoodItem,
+    FoodNutrientValue,
     HealthCondition,
     Household,
     HouseholdMember,
@@ -17,11 +24,17 @@ from app.models.entities import (
 )
 from app.rules.guidance_engine import evaluate_food_guidance
 from app.schemas.api_schemas import (
+    AllergenConsistencyOut,
+    AssistantChatRequest,
+    AssistantChatResponse,
+    AssistantStatusResponse,
     BarcodeLookupResponse,
     ConditionConflictOut,
     ConditionFoodRecommendationResponse,
     DataSourceOut,
     DishRecognitionResponse,
+    ExternalProductCandidateOut,
+    ExternalProductSearchResponse,
     FoodCategoryOut,
     FoodDetailOut,
     FoodSearchResponse,
@@ -41,6 +54,11 @@ from app.schemas.api_schemas import (
     OCRTextParseRequest,
     ProductComparisonRequest,
     ProductComparisonResponse,
+    ProductDataConflictOut,
+    ProductEnrichRequest,
+    ProductFieldProvenanceOut,
+    ProductProvenanceResponse,
+    ProviderAttemptOut,
     RecipeCreateRequest,
     RecipeDetailOut,
 )
@@ -60,13 +78,18 @@ from app.services.ocr_barcode_service import (
     process_uploaded_label_image,
     recognize_indian_dish_from_image,
 )
+from app.services.ollama_assistant_service import (
+    chat_with_gharplate_assistant,
+    discover_ollama_models,
+    get_ollama_assistant_status,
+)
 from app.services.recipe_service import create_or_update_recipe, serialize_recipe_detail
 
 api_router = APIRouter()
 
 PRIVACY_NOTICE_TEXT = (
     "Convenience Browser Identifier Only: Your household token is a randomly generated UUID stored locally in your browser. "
-    "It is NOT strong authentication or identity verification. Uploaded food or label images are processed strictly in memory and never stored."
+    "It is NOT strong authentication or identity verification. Uploaded food or label images are processed strictly in memory and never stored without explicit consent."
 )
 
 
@@ -81,7 +104,7 @@ def health_check(db: Session = Depends(get_db)):
     return {
         "status": "healthy",
         "service": "GharPlate API",
-        "version": "1.0.0",
+        "version": "2.0.0",
         "database_connected": True,
         "counts": {
             "foods": food_count,
@@ -146,14 +169,18 @@ def get_food_detail(slug: str, db: Session = Depends(get_db)):
             joinedload(FoodItem.category),
             joinedload(FoodItem.source),
             joinedload(FoodItem.aliases),
-            joinedload(FoodItem.nutrient_values),
+            joinedload(FoodItem.nutrient_values).joinedload(FoodNutrientValue.source),
             joinedload(FoodItem.servings),
+            joinedload(FoodItem.field_provenance),
+            joinedload(FoodItem.data_conflicts),
         )
         .filter(FoodItem.slug == slug)
         .first()
     )
     if not food:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Food '{slug}' not found")
+    if food.is_packaged:
+        ensure_baseline_local_provenance(db, food)
     return serialize_food_detail(db, food)
 
 
@@ -561,25 +588,36 @@ def delete_recipe(recipe_id: int, db: Session = Depends(get_db)):
 
 
 # ==========================================
-# 6. OCR SCANNER, BARCODE & DISH RECOGNITION
+# 6. OCR SCANNER, BARCODE & MULTI-SOURCE PRODUCT INTELLIGENCE
 # ==========================================
 @api_router.post("/scan/ocr-text", response_model=OCRScanResponse, tags=["Scanner & OCR"])
 def parse_ocr_label_text_endpoint(req: OCRTextParseRequest):
     return parse_nutrition_label_text(req.raw_label_text)
 
 
+@api_router.post("/scan/ocr", response_model=OCRScanResponse, tags=["Scanner & OCR"])
 @api_router.post("/scan/ocr-image", response_model=OCRScanResponse, tags=["Scanner & OCR"])
 async def scan_nutrition_label_image(
     file: UploadFile = File(...),
+    ingredients_file: Optional[UploadFile] = File(default=None),
     hint_text: Optional[str] = Form(default=None),
 ):
     raw_bytes = await file.read()
+    ing_bytes = await ingredients_file.read() if ingredients_file is not None else None
     try:
-        return process_uploaded_label_image(raw_bytes, file.content_type, hint_text=hint_text)
+        return process_uploaded_label_image(
+            file_bytes=raw_bytes,
+            content_type=file.content_type,
+            hint_text=hint_text,
+            ingredients_image_bytes=ing_bytes,
+            ingredients_content_type=ingredients_file.content_type if ingredients_file else None,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     finally:
         await file.close()
+        if ingredients_file is not None:
+            await ingredients_file.close()
 
 
 @api_router.post("/scan/confirm-product", response_model=FoodDetailOut, tags=["Scanner & OCR"])
@@ -593,8 +631,151 @@ def confirm_and_save_product(
 
 
 @api_router.get("/scan/barcode/{barcode}", response_model=BarcodeLookupResponse, tags=["Barcode Lookup"])
-def get_product_by_barcode(barcode: str, db: Session = Depends(get_db)):
-    return lookup_barcode(db, barcode)
+def get_product_by_barcode(
+    barcode: str,
+    force_refresh: bool = Query(default=False, description="Force fresh external provider lookup"),
+    db: Session = Depends(get_db),
+):
+    return lookup_barcode(db, barcode, force_refresh=force_refresh)
+
+
+@api_router.get("/products/search", response_model=ExternalProductSearchResponse, tags=["Product Intelligence"])
+def search_products_multi_source(
+    q: str = Query(..., min_length=1, description="Product name or barcode query"),
+    brand: Optional[str] = Query(default=None, description="Optional brand filter"),
+    include_external: bool = Query(default=True, description="Query Open Food Facts & USDA FDC"),
+    db: Session = Depends(get_db),
+):
+    local_res = search_foods(db=db, q=q, page_size=8)
+    cands_out: List[ExternalProductCandidateOut] = []
+    attempts_out: List[ProviderAttemptOut] = []
+
+    if include_external:
+        ext_cands, ext_attempts = search_multi_source_external_products(
+            db, query=q, brand=brand, page_size=5
+        )
+        cands_out = [
+            ExternalProductCandidateOut(
+                provider_code=c.provider_code,
+                provider_name=c.provider_name,
+                source_url=c.source_url,
+                source_record_id=c.source_record_id,
+                barcode=c.barcode,
+                product_name=c.product_name,
+                brand=c.brand,
+                quantity=c.quantity,
+                serving_size_label=c.serving_size_label,
+                image_url=c.image_url,
+                ingredients_text=c.ingredients_text,
+                allergen_tags=c.allergen_tags,
+                nutrients_per_100=c.nutrients_per_100,
+                available_fields=c.available_fields,
+                missing_fields=c.missing_fields,
+                is_branded_packaged=c.is_branded_packaged,
+                retrieved_at=c.retrieved_at,
+                license_attribution=c.license_attribution,
+            )
+            for c in ext_cands
+        ]
+        attempts_out = [
+            ProviderAttemptOut(
+                provider_code=a.provider_code,
+                provider_name=a.provider_name,
+                status=a.status,
+                http_status=a.http_status,
+                message=a.message,
+                from_cache=a.from_cache,
+                retrieved_at=a.retrieved_at,
+            )
+            for a in ext_attempts
+        ]
+
+    return ExternalProductSearchResponse(
+        query=q,
+        brand=brand,
+        local_matches=local_res.items,
+        external_candidates=cands_out,
+        provider_attempts=attempts_out,
+    )
+
+
+@api_router.post("/products/enrich", response_model=BarcodeLookupResponse, tags=["Product Intelligence"])
+def enrich_product_endpoint(
+    req: ProductEnrichRequest, db: Session = Depends(get_db)
+):
+    target_barcode = req.barcode
+    if not target_barcode and req.food_slug:
+        food = db.query(FoodItem).filter(FoodItem.slug == req.food_slug).first()
+        if not food:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Product '{req.food_slug}' not found",
+            )
+        target_barcode = food.barcode
+        if not target_barcode:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Product '{req.food_slug}' does not have a barcode to query external databases.",
+            )
+    if not target_barcode:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Provide either 'barcode' or 'food_slug' to enrich a packaged product.",
+        )
+    return lookup_barcode(db, target_barcode, force_refresh=req.force_refresh)
+
+
+@api_router.get(
+    "/products/{slug}/provenance",
+    response_model=ProductProvenanceResponse,
+    tags=["Product Intelligence"],
+)
+def get_product_provenance_endpoint(slug: str, db: Session = Depends(get_db)):
+    food = (
+        db.query(FoodItem)
+        .options(
+            joinedload(FoodItem.source),
+            joinedload(FoodItem.nutrient_values),
+            joinedload(FoodItem.field_provenance),
+            joinedload(FoodItem.data_conflicts),
+        )
+        .filter(FoodItem.slug == slug)
+        .first()
+    )
+    if not food:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Product '{slug}' not found"
+        )
+    ensure_baseline_local_provenance(db, food)
+    comp = evaluate_local_product_completeness(food)
+    consistency = check_allergen_consistency(
+        food.ingredients_text,
+        food.allergen_tags,
+        food.allergen_declaration_complete,
+    )
+    return ProductProvenanceResponse(
+        food_slug=food.slug,
+        food_name=food.name_en,
+        barcode=food.barcode,
+        completeness=comp,
+        allergen_consistency=AllergenConsistencyOut(
+            stored_allergen_tags=consistency.stored_allergen_tags,
+            declared_allergens=consistency.declared_allergens,
+            ingredient_inferred_allergens=consistency.ingredient_inferred_allergens,
+            missing_from_stored_tags=consistency.missing_from_stored_tags,
+            consistency_status=consistency.consistency_status,
+            consistency_warnings=consistency.consistency_warnings,
+            requires_manual_review=consistency.requires_manual_review,
+        ),
+        field_provenance=[
+            ProductFieldProvenanceOut.model_validate(p)
+            for p in (food.field_provenance or [])
+        ],
+        data_conflicts=[
+            ProductDataConflictOut.model_validate(c)
+            for c in (food.data_conflicts or [])
+        ],
+    )
 
 
 @api_router.post("/scan/recognize-dish", response_model=DishRecognitionResponse, tags=["Dish Recognition"])
@@ -636,3 +817,30 @@ def suggest_meals_endpoint(
     req: MealSuggestionRequest, db: Session = Depends(get_db)
 ):
     return generate_meal_suggestions(db, req)
+
+
+# ==========================================
+# 8. LOCAL OLLAMA-POWERED GHARPLATE AI ASSISTANT
+# ==========================================
+@api_router.get("/assistant/status", response_model=AssistantStatusResponse, tags=["AI Assistant"])
+def assistant_status_endpoint(model: Optional[str] = Query(default=None)):
+    return get_ollama_assistant_status(requested_model=model)
+
+
+@api_router.get("/assistant/models", tags=["AI Assistant"])
+def assistant_models_endpoint():
+    reachable, installed, err_msg = discover_ollama_models()
+    return {
+        "ollama_reachable": reachable,
+        "ollama_base_url": settings.OLLAMA_BASE_URL,
+        "installed_models": installed,
+        "configured_model": settings.OLLAMA_MODEL or None,
+        "error_message": err_msg,
+    }
+
+
+@api_router.post("/assistant/chat", response_model=AssistantChatResponse, tags=["AI Assistant"])
+def assistant_chat_endpoint(
+    req: AssistantChatRequest, db: Session = Depends(get_db)
+):
+    return chat_with_gharplate_assistant(db, req)

@@ -7,13 +7,18 @@ import {
 } from '../utils/visualAssets';
 
 /**
- * Responsive, lazy-loaded Food Photograph component with loading placeholder
- * and automatic fallback to a clearly labeled botanical/culinary illustration.
+ * Responsive, lazy-loaded Food Photograph component with loading placeholder.
+ * CRITICAL HONESTY RULE FOR PACKAGED PRODUCTS:
+ * When `isPackaged === true` and `(!src || hasVerifiedImage === false)`,
+ * renders an explicit "No verified product image available" state rather than
+ * displaying a generic category illustration as if it were the actual product packaging.
  */
 export const FoodImage: React.FC<{
   src?: string | null;
   foodName: string;
   categorySlug?: string;
+  isPackaged?: boolean;
+  hasVerifiedImage?: boolean;
   className?: string;
   aspectClass?: string;
   showBadge?: boolean;
@@ -21,12 +26,36 @@ export const FoodImage: React.FC<{
   src,
   foodName,
   categorySlug = 'indian-dishes',
+  isPackaged = false,
+  hasVerifiedImage = true,
   className = '',
   aspectClass = 'aspect-[16/10]',
   showBadge = false,
 }) => {
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
+
+  const isUnverifiedPackagedImage =
+    isPackaged && (!src || !hasVerifiedImage || failed);
+
+  if (isUnverifiedPackagedImage) {
+    return (
+      <div
+        data-testid="no-verified-product-image"
+        className={`relative flex flex-col items-center justify-center bg-stone-100 border-b border-stone-200/80 p-6 text-center ${aspectClass} ${className}`}
+      >
+        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-stone-200/90 text-2xl text-stone-600 shadow-inner">
+          📦
+        </div>
+        <div className="mt-2.5 text-xs font-extrabold text-stone-800">
+          No verified product image available
+        </div>
+        <p className="mt-1 text-[11px] text-stone-500 max-w-[230px] leading-snug">
+          GharPlate does not substitute generic food photos for actual retail packaging.
+        </p>
+      </div>
+    );
+  }
 
   const catVisual = CATEGORY_VISUALS[categorySlug] || CATEGORY_VISUALS['indian-dishes'];
   const primarySrc = src || catVisual.photoUrl;
@@ -58,7 +87,11 @@ export const FoodImage: React.FC<{
       />
       {showBadge && (
         <span className="absolute bottom-2.5 right-2.5 rounded-full bg-stone-900/75 px-2.5 py-0.5 text-[10px] font-semibold text-white backdrop-blur-sm">
-          {failed ? 'Illustrated Reference' : 'Food Reference Photo'}
+          {failed
+            ? 'Illustrated Reference'
+            : isPackaged
+            ? 'Verified Package Photo'
+            : 'Food Reference Photo'}
         </span>
       )}
     </div>
@@ -106,7 +139,7 @@ export const MedicalSafetyBanner: React.FC<{ compact?: boolean }> = ({ compact =
       </div>
       {expanded && (
         <p className="mt-2 border-t border-stone-100 pt-2 text-[11px] text-stone-600 leading-relaxed">
-          GharPlate presents verified food composition data from ICMR-NIN IFCT 2017, Dietary Guidelines for Indians 2024, WHO, KDIGO, WGO, and FSSAI. Missing nutrients are always shown as NULL (never assumed zero). Always consult a qualified doctor or registered dietitian for personal medical decisions.
+          GharPlate presents verified food composition data from ICMR-NIN IFCT 2017, Dietary Guidelines for Indians 2024, WHO, KDIGO, WGO, FSSAI, Open Food Facts, and USDA FoodData Central. Missing nutrients are always shown as NULL (never assumed zero). Always consult a qualified doctor or registered dietitian for personal medical decisions.
         </p>
       )}
     </div>
@@ -118,6 +151,8 @@ export const ConfidenceBadge: React.FC<{ status: string }> = ({ status }) => {
     high: 'bg-emerald-50 text-emerald-900 border-emerald-200',
     verified_ifct: 'bg-emerald-50 text-emerald-900 border-emerald-200',
     label_declared: 'bg-sky-50 text-sky-900 border-sky-200',
+    openfoodfacts: 'bg-teal-50 text-teal-900 border-teal-200',
+    fdc_supplemental: 'bg-indigo-50 text-indigo-900 border-indigo-200',
     user_entered: 'bg-amber-50 text-amber-900 border-amber-200',
     not_measured: 'bg-stone-100 text-stone-500 border-stone-200',
   };
@@ -125,6 +160,8 @@ export const ConfidenceBadge: React.FC<{ status: string }> = ({ status }) => {
     high: 'ICMR-NIN Verified',
     verified_ifct: 'IFCT 2017 / DGI 2024',
     label_declared: 'Label Declared',
+    openfoodfacts: 'Open Food Facts Verified',
+    fdc_supplemental: 'USDA FDC Verified',
     user_entered: 'User Confirmed',
     not_measured: 'Not Measured (NULL)',
   };
@@ -223,6 +260,8 @@ export const FoodCard: React.FC<{
             src={food.image_url}
             foodName={food.name_en}
             categorySlug={food.category_slug}
+            isPackaged={food.is_packaged}
+            hasVerifiedImage={food.has_verified_image ?? Boolean(food.image_url)}
             aspectClass="h-16 w-20 shrink-0 rounded-xl"
           />
           <div className="min-w-0">
@@ -230,6 +269,11 @@ export const FoodCard: React.FC<{
               <span className="text-[11px] font-semibold text-emerald-800">
                 {food.category_name}
               </span>
+              {food.barcode && (
+                <span className="font-mono text-[10px] text-stone-400">
+                  #{food.barcode}
+                </span>
+              )}
               <span
                 title={food.is_vegetarian ? 'Vegetarian' : 'Non-Vegetarian'}
                 className={`inline-block h-2.5 w-2.5 rounded-full ${
@@ -254,10 +298,10 @@ export const FoodCard: React.FC<{
         <div className="flex items-center gap-4 shrink-0">
           <div className="hidden sm:flex items-center gap-3 text-xs">
             <span className="rounded-xl bg-stone-100 px-3 py-1.5 font-semibold text-stone-800">
-              {kcal !== null && kcal !== undefined ? `${kcal} kcal` : 'NULL kcal'}
+              {kcal !== null && kcal !== undefined ? `${kcal} kcal` : 'Not captured'}
             </span>
             <span className="rounded-xl bg-emerald-50 px-3 py-1.5 font-semibold text-emerald-900">
-              {prot !== null && prot !== undefined ? `${prot}g Protein` : 'NULL Protein'}
+              {prot !== null && prot !== undefined ? `${prot}g Protein` : 'Not captured'}
             </span>
           </div>
           <span className="rounded-xl bg-emerald-800 px-3.5 py-2 text-xs font-bold text-white group-hover:bg-emerald-700 transition">
@@ -278,6 +322,8 @@ export const FoodCard: React.FC<{
           src={food.image_url}
           foodName={food.name_en}
           categorySlug={food.category_slug}
+          isPackaged={food.is_packaged}
+          hasVerifiedImage={food.has_verified_image ?? Boolean(food.image_url)}
           aspectClass="aspect-[16/10]"
         />
         <div className="absolute top-3 left-3 flex items-center gap-1.5">
@@ -309,7 +355,11 @@ export const FoodCard: React.FC<{
           <h3 className="text-lg font-extrabold text-stone-900 group-hover:text-emerald-800 line-clamp-1">
             {food.name_en}
           </h3>
-          {food.aliases.length > 0 ? (
+          {food.brand ? (
+            <p className="mt-0.5 text-xs font-semibold text-stone-500 line-clamp-1">
+              {food.brand} {food.barcode ? `• #${food.barcode}` : ''}
+            </p>
+          ) : food.aliases.length > 0 ? (
             <p className="mt-0.5 text-xs text-stone-500 line-clamp-1">
               {food.aliases
                 .slice(0, 3)
@@ -327,7 +377,7 @@ export const FoodCard: React.FC<{
                 Energy / {food.default_basis}
               </div>
               <div className="text-sm font-extrabold text-stone-900">
-                {kcal !== null && kcal !== undefined ? `${kcal} kcal` : 'NULL'}
+                {kcal !== null && kcal !== undefined ? `${kcal} kcal` : 'Not captured'}
               </div>
             </div>
             <div className="flex-1 rounded-2xl bg-emerald-50/70 px-3 py-2 border border-emerald-100">
@@ -341,7 +391,7 @@ export const FoodCard: React.FC<{
                   ? `${fibre} g`
                   : prot !== null && prot !== undefined
                   ? `${prot} g`
-                  : 'NULL'}
+                  : 'Not captured'}
               </div>
             </div>
           </div>
@@ -412,7 +462,6 @@ export const MacroDistributionBarChart: React.FC<{
     },
   ];
 
-  // SVG Donut calculation
   const radius = 42;
   const circumference = 2 * Math.PI * radius;
   let cumulativePct = 0;
@@ -436,7 +485,6 @@ export const MacroDistributionBarChart: React.FC<{
       </div>
 
       <div className="mt-5 grid items-center gap-6 sm:grid-cols-12">
-        {/* Left: Interactive SVG Donut Ring */}
         <div className="sm:col-span-5 flex flex-col items-center justify-center">
           <div className="relative h-36 w-36 flex items-center justify-center">
             <svg viewBox="0 0 110 110" className="h-full w-full -rotate-90">
@@ -475,7 +523,9 @@ export const MacroDistributionBarChart: React.FC<{
               <span className="text-xl font-extrabold text-stone-900">
                 {energyKcal !== undefined && energyKcal !== null
                   ? Math.round(energyKcal)
-                  : Math.round(p * 4 + c * 4 + f * 9)}
+                  : p > 0 || c > 0 || f > 0
+                  ? Math.round(p * 4 + c * 4 + f * 9)
+                  : '—'}
               </span>
               <span className="text-[10px] font-bold uppercase tracking-wider text-stone-500">
                 kcal
@@ -484,7 +534,6 @@ export const MacroDistributionBarChart: React.FC<{
           </div>
         </div>
 
-        {/* Right: Horizontal Visual Bars */}
         <div className="sm:col-span-7 space-y-3.5">
           {items.map((item) => {
             const pct =
@@ -501,7 +550,7 @@ export const MacroDistributionBarChart: React.FC<{
                   <span>
                     {item.value !== null && item.value !== undefined
                       ? `${item.value} ${item.unit}`
-                      : 'NULL (Unavailable)'}
+                      : 'Not captured'}
                   </span>
                 </div>
                 <div className="mt-1.5 h-2.5 w-full overflow-hidden rounded-full bg-stone-100">
@@ -568,11 +617,7 @@ export const ExpandableSection: React.FC<{
 };
 
 /**
- * Progressive-Disclosure Condition Observation Card with:
- * - Level 1: Visual badge + condition name + measured nutrient pill
- * - Level 2: Concise 1-2 sentence explanation
- * - Level 3 ("Why am I seeing this?"): Individualisation context
- * - Level 4 ("View evidence and details"): Rule ID, evidence status, and source citation link
+ * Progressive-Disclosure Condition Observation Card.
  */
 export const ObservationCard: React.FC<{ obs: GuidanceObservation }> = ({ obs }) => {
   const [showWhy, setShowWhy] = useState(false);
@@ -587,7 +632,6 @@ export const ObservationCard: React.FC<{ obs: GuidanceObservation }> = ({ obs })
         </span>
       </div>
 
-      {/* Measured Value Pill if applicable */}
       {obs.nutrient_name && (
         <div className="mt-3 inline-flex items-center gap-2 rounded-xl bg-stone-50 border border-stone-200/80 px-3 py-1.5 text-xs">
           <span className="font-semibold text-stone-600">{obs.nutrient_name}:</span>
@@ -600,10 +644,8 @@ export const ObservationCard: React.FC<{ obs: GuidanceObservation }> = ({ obs })
         </div>
       )}
 
-      {/* Short Plain-Language Explanation */}
       <p className="mt-3 text-sm text-stone-800 leading-relaxed">{obs.explanation}</p>
 
-      {/* Progressive Disclosure Actions */}
       <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-stone-100 pt-3 text-xs">
         <div className="flex flex-wrap items-center gap-3">
           <button

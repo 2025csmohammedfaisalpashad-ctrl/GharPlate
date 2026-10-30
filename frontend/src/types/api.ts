@@ -50,17 +50,56 @@ export interface NutrientValue {
   measurement_notes?: string | null;
 }
 
+export interface AllergenConsistency {
+  stored_allergen_tags: string[];
+  declared_allergens: string[];
+  ingredient_inferred_allergens: string[];
+  missing_from_stored_tags: string[];
+  consistency_status: string;
+  consistency_warnings: string[];
+  requires_manual_review: boolean;
+}
+
+export interface ProductFieldProvenance {
+  id: number;
+  field_name: string;
+  field_type: string;
+  field_value?: string | null;
+  source_code: string;
+  source_name: string;
+  source_url?: string | null;
+  source_record_id?: string | null;
+  confidence_status: string;
+  review_status: string;
+  retrieved_at: string;
+  notes?: string | null;
+}
+
+export interface ProductDataConflict {
+  id: number;
+  field_name: string;
+  local_value?: string | null;
+  local_source: string;
+  external_value?: string | null;
+  external_source: string;
+  external_source_url?: string | null;
+  resolution_status: string;
+  detected_at: string;
+}
+
 export interface FoodSummary {
   id: number;
   slug: string;
   ifct_code?: string | null;
   name_en: string;
   image_url?: string | null;
+  has_verified_image?: boolean;
   category_slug: string;
   category_name: string;
   is_packaged: boolean;
   brand?: string | null;
   barcode?: string | null;
+  net_quantity?: string | null;
   default_basis: string;
   standard_serving_name: string;
   standard_serving_grams: number;
@@ -83,6 +122,7 @@ export interface FoodDetail {
   ifct_code?: string | null;
   name_en: string;
   image_url?: string | null;
+  has_verified_image?: boolean;
   scientific_name?: string | null;
   description: string;
   region_state?: string | null;
@@ -90,6 +130,7 @@ export interface FoodDetail {
   is_packaged: boolean;
   brand?: string | null;
   barcode?: string | null;
+  net_quantity?: string | null;
   default_basis: string;
   standard_serving_name: string;
   standard_serving_grams: number;
@@ -99,8 +140,19 @@ export interface FoodDetail {
   intolerance_tags: string[];
   dietary_tags: string[];
   ingredients_text?: string | null;
+  cleaned_ingredients_text?: string | null;
+  ingredient_items?: string[];
+  ingredient_percentages?: string[];
+  additives?: string[];
+  allergen_statement?: string | null;
+  label_warnings?: string[];
+  manufacturer_info?: string | null;
+  lot_and_date_info?: string | null;
+  ocr_uncertainty_notes?: string[];
+  raw_ocr_text?: string | null;
   allergen_declaration_complete: boolean;
   allergen_safety_disclaimer: string;
+  allergen_consistency?: AllergenConsistency | null;
   aliases: FoodAlias[];
   servings: ServingConversion[];
   nutrients: NutrientValue[];
@@ -110,7 +162,10 @@ export interface FoodDetail {
   confidence_level: string;
   conversion_methodology?: string | null;
   date_imported: string;
+  external_updated_at?: string | null;
   source: DataSource;
+  field_provenance?: ProductFieldProvenance[];
+  data_conflicts?: ProductDataConflict[];
 }
 
 export interface FoodSearchResponse {
@@ -154,10 +209,12 @@ export interface HealthConditionSummary {
   applicable_age_groups: string[];
   nutritional_meaning: string;
   relevant_nutrients: string[];
-  source_name: string;
+  source_name: str;
   source_url: string;
   publication_year: number;
 }
+
+type str = string;
 
 export interface HealthConditionDetail extends Omit<HealthConditionSummary, 'condition_group_name'> {
   condition_group_name: string;
@@ -378,22 +435,102 @@ export interface OCRFieldPrediction {
 
 export interface OCRScanResponse {
   scan_id: string;
+  ocr_status?: string;
+  ocr_engine?: string;
+  ocr_error_reason?: string | null;
+  requires_manual_entry?: boolean;
   privacy_confirmation: string;
   raw_text: string;
   detected_basis: string;
+  parsed_ingredients?: {
+    cleaned_ingredients?: string | null;
+    ingredient_items?: string[];
+    ingredient_percentages?: string[];
+    additives?: string[];
+    allergen_declaration?: string | null;
+    label_warnings?: string[];
+    net_weight?: string | null;
+    manufacturer_info?: string | null;
+  } | null;
+  allergen_consistency?: AllergenConsistency | null;
   fields: Record<string, OCRFieldPrediction>;
   validation_warnings: string[];
   requires_user_confirmation: boolean;
 }
 
+export interface ProviderAttempt {
+  provider_code: string;
+  provider_name: string;
+  status: string;
+  http_status?: number | null;
+  message: string;
+  from_cache: boolean;
+  retrieved_at: string;
+}
+
 export interface BarcodeLookupResponse {
   barcode: string;
+  barcode_format?: string;
+  is_valid_barcode?: boolean;
   found: boolean;
   source_origin: string;
   retrieval_timestamp: string;
   message: string;
   fallback_actions: string[];
+  completeness?: {
+    has_verified_image: boolean;
+    has_ingredients: boolean;
+    has_minimum_nutrients: boolean;
+    available_key_nutrients: string[];
+    missing_key_nutrients: string[];
+    total_available_nutrients: number;
+    missing_domains: string[];
+    is_stale: boolean;
+    needs_enrichment: boolean;
+  } | null;
+  provider_attempts?: ProviderAttempt[];
+  merged_fields?: string[];
+  conflicts_requiring_review?: ProductDataConflict[];
   product?: FoodDetail | null;
+}
+
+export interface ExternalProductCandidate {
+  provider_code: string;
+  provider_name: string;
+  source_url: string;
+  source_record_id: string;
+  barcode?: string | null;
+  product_name?: string | null;
+  brand?: string | null;
+  quantity?: string | null;
+  serving_size_label?: string | null;
+  image_url?: string | null;
+  ingredients_text?: string | null;
+  allergen_tags: string[];
+  nutrients_per_100: Record<string, number | null>;
+  available_fields: string[];
+  missing_fields: string[];
+  is_branded_packaged: boolean;
+  retrieved_at: string;
+  license_attribution: string;
+}
+
+export interface ExternalProductSearchResponse {
+  query: string;
+  brand?: string | null;
+  local_matches: FoodSummary[];
+  external_candidates: ExternalProductCandidate[];
+  provider_attempts: ProviderAttempt[];
+}
+
+export interface ProductProvenanceResponse {
+  food_slug: string;
+  food_name: string;
+  barcode?: string | null;
+  completeness: Record<string, unknown>;
+  allergen_consistency: AllergenConsistency;
+  field_provenance: ProductFieldProvenance[];
+  data_conflicts: ProductDataConflict[];
 }
 
 export interface DishCandidate {
@@ -468,4 +605,62 @@ export interface MealSuggestionResponse {
   has_conflicting_conditions: boolean;
   conflict_warnings: ConditionConflict[];
   suggestions: MealSuggestionCard[];
+}
+
+// ==========================================
+// LOCAL OLLAMA AI ASSISTANT TYPES
+// ==========================================
+export interface AssistantPageContext {
+  current_path?: string | null;
+  food_slug?: string | null;
+  barcode?: string | null;
+  condition_code?: string | null;
+  household_token?: string | null;
+  member_id?: number | null;
+}
+
+export interface AssistantChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface AssistantToolExecutionTrace {
+  tool_name: string;
+  arguments: Record<string, unknown>;
+  status: string;
+  summary: string;
+  source_type: string;
+}
+
+export interface AssistantSourceReference {
+  title: string;
+  source_type: string;
+  url?: string | null;
+  retrieved_at?: string | null;
+  verification_status: string;
+}
+
+export interface AssistantChatResponse {
+  reply: string;
+  mode_used: string;
+  model_used: string;
+  ollama_connected: boolean;
+  used_fallback_synthesis: boolean;
+  tool_traces: AssistantToolExecutionTrace[];
+  sources: AssistantSourceReference[];
+  suggested_followups: string[];
+  medical_disclaimer: string;
+}
+
+export interface AssistantStatusResponse {
+  enabled: boolean;
+  ollama_base_url: string;
+  ollama_reachable: boolean;
+  configured_model?: string | null;
+  active_model?: string | null;
+  installed_models: string[];
+  status_message: string;
+  remediation_command?: string | null;
+  available_modes: { id: string; label: string; description: string }[];
+  allowlisted_tools: string[];
 }

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useHousehold } from '../hooks/useHousehold';
+import { AssistantDrawer } from './AssistantDrawer';
 import { MedicalSafetyBanner } from './UIWidgets';
 
 interface NavGroup {
@@ -131,6 +132,14 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
           {/* Right: Active Member Pill Switcher & Scan Shortcut */}
           <div className="flex items-center gap-2.5">
             <Link
+              to="/barcode"
+              className="hidden sm:inline-flex items-center gap-1.5 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-xs font-bold text-stone-800 hover:bg-stone-100 transition"
+            >
+              <span>🏷️</span>
+              <span>Barcode</span>
+            </Link>
+
+            <Link
               to="/scanner"
               className="hidden sm:inline-flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2 text-xs font-bold text-emerald-900 hover:bg-emerald-100 transition"
             >
@@ -197,7 +206,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
             <div className="flex items-center gap-4 text-xs font-semibold text-stone-500">
               <Link to="/foods" className="hover:text-emerald-800">Foods</Link>
               <Link to="/conditions" className="hover:text-emerald-800">Conditions</Link>
-              <Link to="/recipes/calculator" className="hover:text-emerald-800">Recipe Calculator</Link>
+              <Link to="/barcode" className="hover:text-emerald-800">Barcode Scanner</Link>
               <Link to="/compare" className="hover:text-emerald-800">Compare Products</Link>
             </div>
           </div>
@@ -248,6 +257,9 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
         </div>
       </main>
 
+      {/* Floating Ask GharPlate Local Ollama AI Assistant Drawer */}
+      <AssistantDrawer />
+
       {/* Mobile Fixed Bottom Navigation Bar for Primary Actions */}
       <nav
         aria-label="Mobile Bottom Navigation"
@@ -257,7 +269,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
           { label: 'Home', to: '/', icon: '🏠' },
           { label: 'Foods', to: '/foods', icon: '🌾' },
           { label: 'Conditions', to: '/conditions', icon: '❤️' },
-          { label: 'Scan', to: '/scanner', icon: '📸' },
+          { label: 'Barcode', to: '/barcode', icon: '🏷️' },
           { label: 'Household', to: '/household', icon: '🏡' },
         ].map((item) => (
           <NavLink
@@ -284,7 +296,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               GharPlate — Indian Household Food Intelligence
             </p>
             <p className="mt-0.5 text-stone-500">
-              Powered by ICMR-NIN IFCT 2017, Dietary Guidelines for Indians 2024, WHO, KDIGO, WGO & FSSAI data.
+              Powered by ICMR-NIN IFCT 2017, Dietary Guidelines for Indians 2024, Open Food Facts, USDA FDC, WHO, KDIGO & FSSAI data.
             </p>
           </div>
           <div className="flex flex-wrap gap-4 font-bold text-emerald-800">

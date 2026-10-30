@@ -10,21 +10,52 @@ DEFAULT_SQLITE_PATH = BACKEND_DIR / "gharplate.db"
 class Settings(BaseSettings):
     APP_NAME: str = "GharPlate"
     APP_ENV: str = "development"
-    APP_VERSION: str = "1.0.0"
+    APP_VERSION: str = "2.0.0"
     API_V1_STR: str = "/api/v1"
     DEBUG: bool = False
 
     DATABASE_URL: str = os.getenv("DATABASE_URL", f"sqlite:///{DEFAULT_SQLITE_PATH}")
 
-    CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://localhost:8080"
+    CORS_ORIGINS: str = (
+        "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://localhost:8080"
+    )
     MAX_UPLOAD_SIZE_BYTES: int = 5 * 1024 * 1024  # 5 MB strict limit
     ALLOWED_IMAGE_MIMES: str = "image/jpeg,image/png,image/webp"
 
-    OPEN_FOOD_FACTS_API_URL: str = "https://world.openfoodfacts.org/api/v2/product"
-    OPEN_FOOD_FACTS_USER_AGENT: str = (
-        "GharPlate/1.0 (https://github.com/gharplate/gharplate; educational-nutrition-platform)"
-    )
+    # Local Ollama AI Assistant
+    ENABLE_LOCAL_AI_ASSISTANT: bool = True
+    OLLAMA_BASE_URL: str = "http://127.0.0.1:11434"
+    OLLAMA_MODEL: str = ""
+    OLLAMA_TIMEOUT_SECONDS: int = 120
+
+    # Open Food Facts (Primary packaged barcode & product discovery provider — API v3 primary)
     ENABLE_EXTERNAL_BARCODE_LOOKUP: bool = True
+    OPEN_FOOD_FACTS_API_V3_URL: str = "https://world.openfoodfacts.org/api/v3/product"
+    OPEN_FOOD_FACTS_API_URL: str = "https://world.openfoodfacts.org/api/v2/product"
+    OPEN_FOOD_FACTS_SEARCH_URL: str = "https://world.openfoodfacts.org/cgi/search.pl"
+    OPEN_FOOD_FACTS_USER_AGENT: str = (
+        "GharPlate/2.0 (https://github.com/gharplate/gharplate; educational-nutrition-platform)"
+    )
+    OPEN_FOOD_FACTS_CACHE_HOURS: int = 168
+    OPEN_FOOD_FACTS_TIMEOUT_SECONDS: float = 6.0
+
+    # USDA FoodData Central (Supplemental generic & branded food composition provider)
+    ENABLE_FOODDATA_CENTRAL: bool = True
+    FDC_API_KEY: str = ""
+    FDC_API_BASE_URL: str = "https://api.nal.usda.gov/fdc/v1"
+    FDC_TIMEOUT_SECONDS: float = 6.0
+
+    # External Web Search Provider Adapter (Brave Search / Tavily)
+    ENABLE_EXTERNAL_WEB_SEARCH: bool = False
+    WEB_SEARCH_PROVIDER: str = ""  # "brave", "tavily", or ""
+    BRAVE_SEARCH_API_KEY: str = ""
+    TAVILY_API_KEY: str = ""
+    WEB_SEARCH_TIMEOUT_SECONDS: float = 8.0
+
+    # Data Caching & Rate Limiting
+    ENABLE_PRODUCT_CACHE: bool = True
+    PRODUCT_CACHE_HOURS: int = 168
+    EXTERNAL_PROVIDER_MIN_INTERVAL_SECONDS: float = 0.5
 
     VISION_PROVIDER: str = "heuristic_local"
     GEMINI_API_KEY: str = ""

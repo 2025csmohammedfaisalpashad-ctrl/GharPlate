@@ -63,17 +63,60 @@ class NutrientValueOut(BaseModel):
     measurement_notes: Optional[str] = None
 
 
+class AllergenConsistencyOut(BaseModel):
+    stored_allergen_tags: List[str] = Field(default_factory=list)
+    declared_allergens: List[str] = Field(default_factory=list)
+    ingredient_inferred_allergens: List[str] = Field(default_factory=list)
+    missing_from_stored_tags: List[str] = Field(default_factory=list)
+    consistency_status: str = "consistent"
+    consistency_warnings: List[str] = Field(default_factory=list)
+    requires_manual_review: bool = False
+
+
+class ProductFieldProvenanceOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    field_name: str
+    field_type: str
+    field_value: Optional[str] = None
+    source_code: str
+    source_name: str
+    source_url: Optional[str] = None
+    source_record_id: Optional[str] = None
+    confidence_status: str
+    review_status: str
+    retrieved_at: datetime
+    notes: Optional[str] = None
+
+
+class ProductDataConflictOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    field_name: str
+    local_value: Optional[str] = None
+    local_source: str
+    external_value: Optional[str] = None
+    external_source: str
+    external_source_url: Optional[str] = None
+    resolution_status: str
+    detected_at: datetime
+
+
 class FoodSummaryOut(BaseModel):
     id: int
     slug: str
     ifct_code: Optional[str] = None
     name_en: str
     image_url: Optional[str] = None
+    has_verified_image: bool = True
     category_slug: str
     category_name: str
     is_packaged: bool
     brand: Optional[str] = None
     barcode: Optional[str] = None
+    net_quantity: Optional[str] = None
     default_basis: str
     standard_serving_name: str
     standard_serving_grams: float
@@ -96,6 +139,7 @@ class FoodDetailOut(BaseModel):
     ifct_code: Optional[str] = None
     name_en: str
     image_url: Optional[str] = None
+    has_verified_image: bool = True
     scientific_name: Optional[str] = None
     description: str
     region_state: Optional[str] = None
@@ -103,6 +147,7 @@ class FoodDetailOut(BaseModel):
     is_packaged: bool
     brand: Optional[str] = None
     barcode: Optional[str] = None
+    net_quantity: Optional[str] = None
     default_basis: str
     standard_serving_name: str
     standard_serving_grams: float
@@ -112,8 +157,19 @@ class FoodDetailOut(BaseModel):
     intolerance_tags: List[str]
     dietary_tags: List[str]
     ingredients_text: Optional[str] = None
+    cleaned_ingredients_text: Optional[str] = None
+    ingredient_items: List[str] = Field(default_factory=list)
+    ingredient_percentages: List[str] = Field(default_factory=list)
+    additives: List[str] = Field(default_factory=list)
+    allergen_statement: Optional[str] = None
+    label_warnings: List[str] = Field(default_factory=list)
+    manufacturer_info: Optional[str] = None
+    lot_and_date_info: Optional[str] = None
+    ocr_uncertainty_notes: List[str] = Field(default_factory=list)
+    raw_ocr_text: Optional[str] = None
     allergen_declaration_complete: bool
     allergen_safety_disclaimer: str
+    allergen_consistency: Optional[AllergenConsistencyOut] = None
     aliases: List[FoodAliasOut]
     servings: List[ServingConversionOut]
     nutrients: List[NutrientValueOut]
@@ -123,7 +179,10 @@ class FoodDetailOut(BaseModel):
     confidence_level: str
     conversion_methodology: Optional[str] = None
     date_imported: datetime
+    external_updated_at: Optional[datetime] = None
     source: DataSourceOut
+    field_provenance: List[ProductFieldProvenanceOut] = Field(default_factory=list)
+    data_conflicts: List[ProductDataConflictOut] = Field(default_factory=list)
 
 
 class FoodSearchResponse(BaseModel):
@@ -439,9 +498,15 @@ class OCRFieldPrediction(BaseModel):
 
 class OCRScanResponse(BaseModel):
     scan_id: str
+    ocr_status: str = "success"  # success, partial, failed_no_text, failed_engine_unavailable
+    ocr_engine: str = "tesseract_or_text_parser"
+    ocr_error_reason: Optional[str] = None
+    requires_manual_entry: bool = False
     privacy_confirmation: str
     raw_text: str
     detected_basis: str
+    parsed_ingredients: Optional[Dict[str, Any]] = None
+    allergen_consistency: Optional[AllergenConsistencyOut] = None
     fields: Dict[str, OCRFieldPrediction]
     validation_warnings: List[str]
     requires_user_confirmation: bool
@@ -452,14 +517,19 @@ class OCRTextParseRequest(BaseModel):
 
 
 class ManualProductCreateRequest(BaseModel):
+    slug: Optional[str] = None
     name_en: str = Field(..., min_length=2, max_length=200)
     brand: str = Field(default="Generic / Household Verified", max_length=150)
     barcode: Optional[str] = None
+    net_quantity: Optional[str] = None
+    image_url: Optional[str] = None
+    retain_front_image_consent: bool = False
     default_basis: str = "100g"
     standard_serving_name: str = "1 serving (30g)"
     standard_serving_grams: float = Field(default=30.0, gt=0)
     is_vegetarian: bool = True
     ingredients_text: Optional[str] = None
+    raw_ocr_text: Optional[str] = None
     allergen_tags: List[str] = Field(default_factory=list)
     allergen_declaration_complete: bool = False
     nutrients_per_100: Dict[str, Optional[float]] = Field(default_factory=dict)
@@ -467,14 +537,75 @@ class ManualProductCreateRequest(BaseModel):
     user_confirmed: bool = True
 
 
+class ProviderAttemptOut(BaseModel):
+    provider_code: str
+    provider_name: str
+    status: str
+    http_status: Optional[int] = None
+    message: str
+    from_cache: bool = False
+    retrieved_at: datetime
+
+
 class BarcodeLookupResponse(BaseModel):
     barcode: str
+    barcode_format: str = "EAN-13"
+    is_valid_barcode: bool = True
     found: bool
-    source_origin: str  # local_verified_db, open_food_facts_live, not_found
+    source_origin: str  # local_verified_db, local_enriched_external, open_food_facts_live, usda_fdc_live, not_found, invalid_barcode
     retrieval_timestamp: datetime
     message: str
     fallback_actions: List[str]
+    completeness: Optional[Dict[str, Any]] = None
+    provider_attempts: List[ProviderAttemptOut] = Field(default_factory=list)
+    merged_fields: List[str] = Field(default_factory=list)
+    conflicts_requiring_review: List[ProductDataConflictOut] = Field(default_factory=list)
     product: Optional[FoodDetailOut] = None
+
+
+class ExternalProductCandidateOut(BaseModel):
+    provider_code: str
+    provider_name: str
+    source_url: str
+    source_record_id: str
+    barcode: Optional[str] = None
+    product_name: Optional[str] = None
+    brand: Optional[str] = None
+    quantity: Optional[str] = None
+    serving_size_label: Optional[str] = None
+    image_url: Optional[str] = None
+    ingredients_text: Optional[str] = None
+    allergen_tags: List[str] = Field(default_factory=list)
+    nutrients_per_100: Dict[str, Optional[float]] = Field(default_factory=dict)
+    available_fields: List[str] = Field(default_factory=list)
+    missing_fields: List[str] = Field(default_factory=list)
+    is_branded_packaged: bool = True
+    retrieved_at: datetime
+    license_attribution: str
+
+
+class ExternalProductSearchResponse(BaseModel):
+    query: str
+    brand: Optional[str] = None
+    local_matches: List[FoodSummaryOut] = Field(default_factory=list)
+    external_candidates: List[ExternalProductCandidateOut] = Field(default_factory=list)
+    provider_attempts: List[ProviderAttemptOut] = Field(default_factory=list)
+
+
+class ProductEnrichRequest(BaseModel):
+    food_slug: Optional[str] = None
+    barcode: Optional[str] = None
+    force_refresh: bool = False
+
+
+class ProductProvenanceResponse(BaseModel):
+    food_slug: str
+    food_name: str
+    barcode: Optional[str] = None
+    completeness: Dict[str, Any]
+    allergen_consistency: AllergenConsistencyOut
+    field_provenance: List[ProductFieldProvenanceOut]
+    data_conflicts: List[ProductDataConflictOut]
 
 
 class DishCandidateOut(BaseModel):
@@ -566,3 +697,72 @@ class MealSuggestionResponse(BaseModel):
     has_conflicting_conditions: bool
     conflict_warnings: List[ConditionConflictOut]
     suggestions: List[MealSuggestionCard]
+
+
+# ==========================================
+# LOCAL OLLAMA AI ASSISTANT SCHEMAS
+# ==========================================
+class AssistantPageContext(BaseModel):
+    current_path: Optional[str] = None
+    food_slug: Optional[str] = None
+    barcode: Optional[str] = None
+    condition_code: Optional[str] = None
+    household_token: Optional[str] = None
+    member_id: Optional[int] = None
+
+
+class AssistantChatMessage(BaseModel):
+    role: str  # "user" or "assistant"
+    content: str
+
+
+class AssistantChatRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=2000)
+    mode: str = Field(
+        default="automatic",
+        description="Search mode: 'database_only' (My GharPlate Database), 'automatic' (Automatic), or 'online_search' (Search Online)",
+    )
+    model: Optional[str] = None
+    history: List[AssistantChatMessage] = Field(default_factory=list)
+    context: Optional[AssistantPageContext] = None
+
+
+class AssistantToolExecutionTrace(BaseModel):
+    tool_name: str
+    arguments: Dict[str, Any]
+    status: str  # success, error, blocked
+    summary: str
+    source_type: str  # local_database, external_provider, web_search, guidance_engine
+
+
+class AssistantSourceReference(BaseModel):
+    title: str
+    source_type: str  # local_database, open_food_facts, usda_fdc, web_search, clinical_guideline
+    url: Optional[str] = None
+    retrieved_at: Optional[str] = None
+    verification_status: str
+
+
+class AssistantChatResponse(BaseModel):
+    reply: str
+    mode_used: str
+    model_used: str
+    ollama_connected: bool
+    used_fallback_synthesis: bool = False
+    tool_traces: List[AssistantToolExecutionTrace] = Field(default_factory=list)
+    sources: List[AssistantSourceReference] = Field(default_factory=list)
+    suggested_followups: List[str] = Field(default_factory=list)
+    medical_disclaimer: str
+
+
+class AssistantStatusResponse(BaseModel):
+    enabled: bool
+    ollama_base_url: str
+    ollama_reachable: bool
+    configured_model: Optional[str] = None
+    active_model: Optional[str] = None
+    installed_models: List[str] = Field(default_factory=list)
+    status_message: str
+    remediation_command: Optional[str] = None
+    available_modes: List[Dict[str, str]] = Field(default_factory=list)
+    allowlisted_tools: List[str] = Field(default_factory=list)

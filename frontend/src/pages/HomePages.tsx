@@ -11,6 +11,7 @@ import {
 import { useHousehold } from '../hooks/useHousehold';
 import { api } from '../services/api';
 import type {
+  BarcodeLookupResponse,
   FoodCategory,
   FoodDetail,
   FoodSearchResponse,
@@ -86,7 +87,7 @@ export const HomePage: React.FC = () => {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search Ragi, Aloo, Avalakki, Idli, Almonds, Paneer..."
+                placeholder="Search Ragi, Aloo, Avalakki, Pineapple Cake, Paneer..."
                 aria-label="Search Indian Foods"
                 className="flex-1 rounded-2xl border-0 bg-white px-5 py-3.5 text-sm font-medium text-stone-900 placeholder-stone-400 shadow-inner focus:outline-none focus:ring-2 focus:ring-amber-400"
               />
@@ -105,6 +106,12 @@ export const HomePage: React.FC = () => {
                 className="rounded-2xl bg-white px-5 py-2.5 text-xs font-extrabold text-emerald-950 shadow hover:bg-emerald-50 transition"
               >
                 Explore Food Catalog →
+              </Link>
+              <Link
+                to="/barcode"
+                className="rounded-2xl border border-emerald-500/60 bg-emerald-800/50 px-5 py-2.5 text-xs font-bold text-white hover:bg-emerald-800 transition"
+              >
+                🏷️ Scan Barcode
               </Link>
               <Link
                 to="/scanner"
@@ -264,15 +271,15 @@ export const HomePage: React.FC = () => {
               color: 'bg-rose-50 border-rose-200 text-rose-950',
             },
             {
-              title: 'Calculate Recipe',
-              sub: 'Visual cooking helper',
-              icon: '🍲',
-              to: '/recipes/calculator',
+              title: 'Scan Barcode',
+              sub: 'Live camera & GTIN',
+              icon: '🏷️',
+              to: '/barcode',
               color: 'bg-amber-50 border-amber-200 text-amber-950',
             },
             {
               title: 'Scan Food Label',
-              sub: 'Instant OCR check',
+              sub: 'Multi-panel OCR',
               icon: '📸',
               to: '/scanner',
               color: 'bg-sky-50 border-sky-200 text-sky-950',
@@ -387,57 +394,6 @@ export const HomePage: React.FC = () => {
           </div>
         </section>
       )}
-
-      {/* F. BITE-SIZED EDUCATIONAL INSIGHTS — Interactive Cards */}
-      <section className="space-y-4">
-        <h2 className="text-xl font-black text-stone-900">Everyday Nutrition Insights</h2>
-        <div className="grid gap-4 sm:grid-cols-3">
-          {[
-            {
-              badge: 'Sugar Check',
-              title: 'Compare sugar per 100 g, not just per biscuit.',
-              caption:
-                'Small serving sizes can hide high added sugar. Normalising to 100 g makes packaged comparisons fair.',
-              cta: 'Compare Packaged Products →',
-              to: '/compare',
-              bg: 'bg-amber-50/90 border-amber-200',
-            },
-            {
-              badge: 'Portion Awareness',
-              title: 'Check serving size before comparing meals.',
-              caption:
-                '1 katori of cooked dal or 1 medium roti changes total carbohydrates and sodium significantly.',
-              cta: 'Try Recipe & Serving Calculator →',
-              to: '/recipes/calculator',
-              bg: 'bg-emerald-50/90 border-emerald-200',
-            },
-            {
-              badge: 'Fibre Discovery',
-              title: 'Explore the fibre content of everyday Indian grains.',
-              caption:
-                'Whole millets like Ragi (11.2g fibre/100g) and Jowar (10.2g/100g) offer 3–4× the fibre of milled white rice.',
-              cta: 'Browse High-Fibre Foods →',
-              to: '/foods?nutrient=high_fibre',
-              bg: 'bg-sky-50/90 border-sky-200',
-            },
-          ].map((ins) => (
-            <Link
-              key={ins.title}
-              to={ins.to}
-              className={`flex flex-col justify-between rounded-3xl border p-5 shadow-sm transition hover:shadow-md ${ins.bg}`}
-            >
-              <div>
-                <span className="inline-block rounded-full bg-white/90 px-3 py-0.5 text-[11px] font-bold text-stone-800 shadow-sm">
-                  {ins.badge}
-                </span>
-                <h3 className="mt-3 text-base font-extrabold text-stone-900">{ins.title}</h3>
-                <p className="mt-1.5 text-xs text-stone-700 leading-relaxed">{ins.caption}</p>
-              </div>
-              <span className="mt-4 text-xs font-extrabold text-emerald-900">{ins.cta}</span>
-            </Link>
-          ))}
-        </div>
-      </section>
     </div>
   );
 };
@@ -507,17 +463,15 @@ export const FoodExplorerPage: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Search & Visual Filter Header */}
       <div className="rounded-3xl border border-stone-200/90 bg-white p-6 shadow-sm space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-black text-stone-900">Explore Indian Foods</h1>
             <p className="text-xs text-stone-500">
-              Search in English, Hindi, or Kannada (e.g., Aloo, Eerulli, Avalakki, Baale Hannu, Ragi)
+              Search in English, Hindi, Kannada, or Barcode (e.g., Aloo, Avalakki, Ragi, Pineapple Cake, 8906005618726)
             </p>
           </div>
 
-          {/* Grid vs Compact List Switcher */}
           <div className="inline-flex rounded-xl bg-stone-100 p-1 text-xs font-bold">
             <button
               type="button"
@@ -540,7 +494,6 @@ export const FoodExplorerPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Search Input + Quick Sort/Filter Controls */}
         <form onSubmit={handleSearchSubmit} className="grid gap-3 sm:grid-cols-12">
           <div className="sm:col-span-6">
             <input
@@ -550,7 +503,7 @@ export const FoodExplorerPage: React.FC = () => {
                 setQuery(e.target.value);
                 setPage(1);
               }}
-              placeholder="Search food name or regional alias (e.g. Ragi, Avalakki, Paneer, Idli)..."
+              placeholder="Search food name, brand, regional alias, or barcode..."
               aria-label="Food Search Input"
               className="w-full rounded-2xl border border-stone-300 px-4 py-2.5 text-sm focus:border-emerald-600 focus:outline-none"
             />
@@ -591,7 +544,6 @@ export const FoodExplorerPage: React.FC = () => {
           </div>
         </form>
 
-        {/* Visual Category Pill Selector */}
         <div className="flex flex-wrap items-center gap-2 pt-1">
           <button
             type="button"
@@ -644,7 +596,6 @@ export const FoodExplorerPage: React.FC = () => {
           </label>
         </div>
 
-        {/* Recent Searches */}
         {searchHistory.length > 0 && !query && (
           <div className="flex flex-wrap items-center gap-1.5 pt-1 text-xs">
             <span className="text-stone-400 font-medium">Quick search:</span>
@@ -665,7 +616,6 @@ export const FoodExplorerPage: React.FC = () => {
         )}
       </div>
 
-      {/* Fuzzy Search Suggestions */}
       {results && results.suggestions.length > 0 && query.trim() && (
         <div className="flex flex-wrap items-center gap-2 text-xs text-stone-600">
           <span className="font-bold">Did you mean:</span>
@@ -682,7 +632,6 @@ export const FoodExplorerPage: React.FC = () => {
         </div>
       )}
 
-      {/* Food Cards Grid / List */}
       {loading ? (
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {[1, 2, 3, 4, 5, 6].map((n) => (
@@ -744,7 +693,7 @@ export const FoodExplorerPage: React.FC = () => {
           <div className="text-3xl">🔍</div>
           <h3 className="text-base font-extrabold text-stone-900">No matching foods found</h3>
           <p className="text-xs text-stone-500">
-            Try resetting filters or scan a packaged food nutrition label directly.
+            Try resetting filters, looking up a barcode, or scanning a packaged food nutrition label directly.
           </p>
           <div className="flex justify-center gap-3 pt-2">
             <button
@@ -760,6 +709,12 @@ export const FoodExplorerPage: React.FC = () => {
               Reset Filters
             </button>
             <Link
+              to="/barcode"
+              className="rounded-xl bg-amber-400 px-4 py-2 text-xs font-extrabold text-stone-950"
+            >
+              🏷️ Lookup Barcode
+            </Link>
+            <Link
               to="/scanner"
               className="rounded-xl bg-emerald-800 px-4 py-2 text-xs font-bold text-white"
             >
@@ -773,7 +728,7 @@ export const FoodExplorerPage: React.FC = () => {
 };
 
 // ==========================================
-// PAGE 3: REDESIGNED FOOD DETAIL PAGE (Visual & Progressive Disclosure)
+// PAGE 3: REDESIGNED FOOD & PACKAGED PRODUCT DETAIL PAGE
 // ==========================================
 export const FoodDetailPage: React.FC = () => {
   const { slug } = useParams<{ slug: string }>();
@@ -790,6 +745,18 @@ export const FoodDetailPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Packaged Product Intelligence & Enrichment States
+  const [copiedBarcode, setCopiedBarcode] = useState(false);
+  const [showAllIngredients, setShowAllIngredients] = useState(false);
+  const [showRawPackageText, setShowRawPackageText] = useState(false);
+  const [enrichLoading, setEnrichLoading] = useState(false);
+  const [enrichResult, setEnrichResult] = useState<BarcodeLookupResponse | null>(null);
+  const [showManualEntry, setShowManualEntry] = useState(false);
+  const [manualNutrients, setManualNutrients] = useState<Record<string, string>>({});
+  const [consentedFrontImageUrl, setConsentedFrontImageUrl] = useState('');
+  const [frontImageConsent, setFrontImageConsent] = useState(false);
+  const [savingManual, setSavingManual] = useState(false);
+
   useEffect(() => {
     void api.getConditions().then(setConditions).catch(() => null);
   }, []);
@@ -804,6 +771,8 @@ export const FoodDetailPage: React.FC = () => {
     if (!slug) return;
     setLoading(true);
     setError(null);
+    setEnrichResult(null);
+    setShowManualEntry(false);
     api
       .getFoodDetail(slug)
       .then((res) => {
@@ -852,6 +821,89 @@ export const FoodDetailPage: React.FC = () => {
     );
   }
 
+  const handleCopyBarcode = () => {
+    if (!food.barcode) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      void navigator.clipboard.writeText(food.barcode);
+    }
+    setCopiedBarcode(true);
+    setTimeout(() => setCopiedBarcode(false), 2000);
+  };
+
+  const handleEnrichOnline = async () => {
+    setEnrichLoading(true);
+    try {
+      const res = await api.enrichProduct({
+        food_slug: food.slug,
+        barcode: food.barcode || undefined,
+        force_refresh: true,
+      });
+      setEnrichResult(res);
+      if (res.product) {
+        setFood(res.product);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setEnrichLoading(false);
+    }
+  };
+
+  const handleFrontImageFile = (file: File | null) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setConsentedFrontImageUrl(reader.result);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSaveManualEnrichment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingManual(true);
+    try {
+      const nutMap: Record<string, number | null> = {};
+      Object.entries(manualNutrients).forEach(([code, rawVal]) => {
+        const trimmed = rawVal.trim();
+        if (trimmed !== '') {
+          const num = Number(trimmed);
+          if (Number.isFinite(num) && num >= 0) {
+            nutMap[code] = num;
+          }
+        }
+      });
+
+      const updated = await api.confirmScannedProduct({
+        slug: food.slug,
+        name_en: food.name_en,
+        brand: food.brand || 'Household Verified Brand',
+        barcode: food.barcode || undefined,
+        net_quantity: food.net_quantity || undefined,
+        image_url:
+          frontImageConsent && consentedFrontImageUrl
+            ? consentedFrontImageUrl
+            : food.image_url || undefined,
+        retain_front_image_consent: frontImageConsent,
+        default_basis: food.default_basis,
+        standard_serving_name: food.standard_serving_name,
+        standard_serving_grams: food.standard_serving_grams,
+        is_vegetarian: food.is_vegetarian,
+        ingredients_text: food.ingredients_text || undefined,
+        allergen_tags: food.allergen_tags,
+        allergen_declaration_complete: food.allergen_declaration_complete,
+        nutrients_per_100: nutMap,
+        source_type: 'user_entered',
+        user_confirmed: true,
+      });
+      setFood(updated);
+      setShowManualEntry(false);
+    } finally {
+      setSavingManual(false);
+    }
+  };
+
   const selectedServingObj =
     food.servings.find((s) => s.unit_name === servingUnit) || food.servings[0];
   const activeGrams =
@@ -876,6 +928,10 @@ export const FoodDetailPage: React.FC = () => {
   const vitaminsAndMinerals = food.nutrients.filter(
     (n) => n.category === 'mineral' || n.category === 'vitamin'
   );
+  const ingredientItems = food.ingredient_items || [];
+  const visibleIngredientItems = showAllIngredients
+    ? ingredientItems
+    : ingredientItems.slice(0, 10);
 
   return (
     <div className="space-y-8">
@@ -895,15 +951,17 @@ export const FoodDetailPage: React.FC = () => {
         <span className="text-stone-800 font-semibold">{food.name_en}</span>
       </nav>
 
-      {/* LEVEL 1: FIRST VISIBLE SECTION — Large Food Photo + Highlights + Basis Switch */}
+      {/* LEVEL 1: HERO SECTION — Product Photo + Barcode + Brand + Quantity + Serving Switch */}
       <section className="overflow-hidden rounded-[2rem] border border-stone-200/90 bg-white shadow-sm">
         <div className="grid lg:grid-cols-12">
-          {/* Large Food Photograph */}
-          <div className="lg:col-span-5 relative">
+          {/* Left: Food / Package Photograph (Honest State When Missing) */}
+          <div className="lg:col-span-5 relative flex flex-col justify-between bg-stone-100">
             <FoodImage
               src={food.image_url}
               foodName={food.name_en}
               categorySlug={food.category.slug}
+              isPackaged={food.is_packaged}
+              hasVerifiedImage={food.has_verified_image ?? Boolean(food.image_url)}
               aspectClass="h-64 sm:h-80 lg:h-full w-full"
               showBadge
             />
@@ -920,9 +978,24 @@ export const FoodDetailPage: React.FC = () => {
                 {food.is_vegetarian ? 'Vegetarian' : 'Non-Vegetarian'}
               </span>
             </div>
+
+            {food.is_packaged && (!food.image_url || food.has_verified_image === false) && (
+              <div className="p-4 bg-stone-50 border-t border-stone-200 flex flex-wrap items-center justify-between gap-2 text-xs">
+                <span className="font-semibold text-stone-600">
+                  Have the physical package?
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowManualEntry(true)}
+                  className="rounded-xl bg-stone-900 px-3 py-1.5 font-extrabold text-white hover:bg-emerald-800 transition"
+                >
+                  📷 Upload Package Photo (With Consent)
+                </button>
+              </div>
+            )}
           </div>
 
-          {/* Right: Food Identity, Serving Switch & 5 Key Nutrient Cards */}
+          {/* Right: Product Identity, Barcode, Metadata & Nutrient Highlights */}
           <div className="lg:col-span-7 p-6 sm:p-8 flex flex-col justify-between space-y-6">
             <div>
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -939,10 +1012,64 @@ export const FoodDetailPage: React.FC = () => {
 
               <h1 className="mt-2.5 text-2xl sm:text-3xl font-black text-stone-900">
                 {food.name_en}
+                {food.brand ? (
+                  <span className="ml-2 text-lg sm:text-xl font-bold text-emerald-800">
+                    — {food.brand}
+                  </span>
+                ) : null}
               </h1>
               <p className="mt-1.5 text-sm text-stone-600 leading-relaxed">
                 {food.description}
               </p>
+
+              {/* Packaged Product Metadata Bar: Barcode, Copy Action, Brand, Quantity, Serving */}
+              {(food.is_packaged || food.barcode || food.brand || food.net_quantity) && (
+                <div
+                  data-testid="packaged-metadata-bar"
+                  className="mt-4 flex flex-wrap items-center gap-2.5 rounded-2xl border border-stone-200 bg-stone-50/90 p-3.5 text-xs"
+                >
+                  {food.barcode && (
+                    <div className="inline-flex items-center gap-2 rounded-xl bg-white border border-stone-300 px-3 py-1.5 shadow-2xs">
+                      <span className="text-stone-500 font-bold">Barcode:</span>
+                      <span
+                        data-testid="product-barcode-value"
+                        className="font-mono font-black text-stone-900 tracking-wider"
+                      >
+                        {food.barcode}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleCopyBarcode}
+                        aria-label="Copy Barcode"
+                        className="rounded-lg bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[11px] font-extrabold text-emerald-900 hover:bg-emerald-100"
+                      >
+                        {copiedBarcode ? '✓ Copied' : 'Copy'}
+                      </button>
+                    </div>
+                  )}
+
+                  {food.brand && (
+                    <div className="rounded-xl bg-white border border-stone-200 px-3 py-1.5">
+                      <span className="text-stone-500 font-semibold">Brand: </span>
+                      <strong className="text-stone-900">{food.brand}</strong>
+                    </div>
+                  )}
+
+                  {food.net_quantity && (
+                    <div className="rounded-xl bg-white border border-stone-200 px-3 py-1.5">
+                      <span className="text-stone-500 font-semibold">Net Quantity: </span>
+                      <strong className="text-stone-900">{food.net_quantity}</strong>
+                    </div>
+                  )}
+
+                  <div className="rounded-xl bg-white border border-stone-200 px-3 py-1.5">
+                    <span className="text-stone-500 font-semibold">Serving Size: </span>
+                    <strong className="text-stone-900">
+                      {food.standard_serving_name} ({food.standard_serving_grams}g)
+                    </strong>
+                  </div>
+                </div>
+              )}
 
               {/* Interactive Switch: Selected Serving vs Per 100g */}
               <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-stone-50 p-3 border border-stone-200/80">
@@ -1006,35 +1133,375 @@ export const FoodDetailPage: React.FC = () => {
                 )}
               </div>
 
-              {/* 5 Visual Nutrient Cards */}
-              <div className="mt-5 grid grid-cols-2 sm:grid-cols-5 gap-2.5">
-                {[
-                  { label: 'Calories', val: getScaled('energy_kcal'), unit: 'kcal', bg: 'bg-stone-100 text-stone-900' },
-                  { label: 'Protein', val: getScaled('protein_g'), unit: 'g', bg: 'bg-emerald-50 text-emerald-950' },
-                  { label: 'Carbs', val: getScaled('carbs_g'), unit: 'g', bg: 'bg-amber-50 text-amber-950' },
-                  { label: 'Total Fat', val: getScaled('fat_total_g'), unit: 'g', bg: 'bg-orange-50 text-orange-950' },
-                  { label: 'Fibre', val: getScaled('fibre_g'), unit: 'g', bg: 'bg-teal-50 text-teal-950' },
-                ].map((stat) => (
-                  <div
-                    key={stat.label}
-                    className={`rounded-2xl p-3 text-center ${stat.bg}`}
-                  >
-                    <div className="text-[11px] font-bold opacity-75">{stat.label}</div>
-                    <div className="mt-1 text-lg font-black">
-                      {stat.val !== null ? `${stat.val} ${stat.unit}` : 'NULL'}
+              {/* Nutrition Highlights OR Actionable Missing-Nutrition Banner (No Wall of NULLs!) */}
+              {food.available_nutrient_count === 0 ? (
+                <div
+                  data-testid="missing-nutrition-action-card"
+                  className="mt-5 rounded-3xl border border-amber-300 bg-amber-50/90 p-5 space-y-3"
+                >
+                  <div className="flex items-start gap-3">
+                    <span className="text-2xl">📋</span>
+                    <div>
+                      <h2 className="text-sm sm:text-base font-extrabold text-amber-950">
+                        Nutrition values have not yet been captured for this product.
+                      </h2>
+                      <p className="mt-0.5 text-xs text-amber-900/90 leading-relaxed">
+                        Ingredients and barcode are recorded, but the per-100g nutrition panel has not been verified yet. GharPlate never invents nutrient numbers or substitutes generic food data.
+                      </p>
                     </div>
                   </div>
-                ))}
-              </div>
+
+                  <div className="flex flex-wrap items-center gap-2.5 pt-1">
+                    <button
+                      type="button"
+                      disabled={enrichLoading}
+                      onClick={() => void handleEnrichOnline()}
+                      className="rounded-2xl bg-emerald-800 px-4 py-2.5 text-xs font-extrabold text-white shadow-xs hover:bg-emerald-700 disabled:opacity-50"
+                    >
+                      {enrichLoading ? 'Checking Online Databases...' : '🌐 Search Online Databases'}
+                    </button>
+                    <Link
+                      to={`/scanner?slug=${encodeURIComponent(food.slug)}&barcode=${encodeURIComponent(food.barcode || '')}&name=${encodeURIComponent(food.name_en)}&brand=${encodeURIComponent(food.brand || '')}`}
+                      className="rounded-2xl bg-stone-900 px-4 py-2.5 text-xs font-extrabold text-white shadow-xs hover:bg-stone-800"
+                    >
+                      📸 Scan Nutrition Label
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => setShowManualEntry(!showManualEntry)}
+                      className="rounded-2xl border border-amber-400 bg-white px-4 py-2.5 text-xs font-extrabold text-amber-950 hover:bg-amber-100"
+                    >
+                      ✏️ Enter Values Manually
+                    </button>
+                  </div>
+
+                  {enrichResult && (
+                    <div className="rounded-2xl border border-amber-200 bg-white p-3.5 text-xs text-stone-700 space-y-1.5">
+                      <div className="font-bold text-stone-900">{enrichResult.message}</div>
+                      {enrichResult.provider_attempts &&
+                        enrichResult.provider_attempts.map((att, idx) => (
+                          <div key={idx} className="text-[11px] text-stone-600">
+                            • <strong>{att.provider_name}:</strong>{' '}
+                            <span className="font-mono">{att.status}</span> — {att.message}
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="mt-5 grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+                  {[
+                    { label: 'Calories', val: getScaled('energy_kcal'), unit: 'kcal', bg: 'bg-stone-100 text-stone-900' },
+                    { label: 'Protein', val: getScaled('protein_g'), unit: 'g', bg: 'bg-emerald-50 text-emerald-950' },
+                    { label: 'Carbs', val: getScaled('carbs_g'), unit: 'g', bg: 'bg-amber-50 text-amber-950' },
+                    { label: 'Total Fat', val: getScaled('fat_total_g'), unit: 'g', bg: 'bg-orange-50 text-orange-950' },
+                    { label: 'Fibre', val: getScaled('fibre_g'), unit: 'g', bg: 'bg-teal-50 text-teal-950' },
+                  ].map((stat) => (
+                    <div
+                      key={stat.label}
+                      className={`rounded-2xl p-3 text-center ${stat.bg}`}
+                    >
+                      <div className="text-[11px] font-bold opacity-75">{stat.label}</div>
+                      <div className="mt-1 text-lg font-black">
+                        {stat.val !== null ? `${stat.val} ${stat.unit}` : 'Not declared'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="flex flex-wrap items-center justify-between gap-2 border-t border-stone-100 pt-4 text-xs text-stone-500">
               <span>Standard Serving: <strong>{food.standard_serving_name}</strong></span>
-              <span>Data Completeness: <strong>{food.completeness_pct}% ({food.available_nutrient_count}/20 nutrients)</strong></span>
+              <span>
+                Data Completeness:{' '}
+                <strong>
+                  {food.completeness_pct}% ({food.available_nutrient_count}/20 nutrients)
+                </strong>
+              </span>
             </div>
           </div>
         </div>
       </section>
+
+      {/* INLINE MANUAL NUTRITION & CONSENTED PACKAGE PHOTO EDITOR */}
+      {showManualEntry && (
+        <section className="rounded-3xl border border-emerald-300 bg-white p-6 shadow-md space-y-5">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-black text-stone-900">
+                Update Confirmed Package Values for {food.name_en}
+              </h2>
+              <p className="text-xs text-stone-500">
+                Enter values per {food.default_basis} as printed on the physical package nutrition table. Leave unmeasured fields blank (stored as NULL).
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowManualEntry(false)}
+              className="rounded-xl bg-stone-100 px-3 py-1.5 text-xs font-bold text-stone-700"
+            >
+              Close ✕
+            </button>
+          </div>
+
+          <form onSubmit={(e) => void handleSaveManualEnrichment(e)} className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
+              {[
+                { code: 'energy_kcal', label: 'Energy (kcal)' },
+                { code: 'protein_g', label: 'Protein (g)' },
+                { code: 'carbs_g', label: 'Carbohydrates (g)' },
+                { code: 'sugars_total_g', label: 'Total Sugars (g)' },
+                { code: 'sugars_added_g', label: 'Added Sugars (g)' },
+                { code: 'fat_total_g', label: 'Total Fat (g)' },
+                { code: 'fat_saturated_g', label: 'Saturated Fat (g)' },
+                { code: 'fat_trans_g', label: 'Trans Fat (g)' },
+                { code: 'fibre_g', label: 'Dietary Fibre (g)' },
+                { code: 'sodium_mg', label: 'Sodium (mg)' },
+              ].map((field) => (
+                <div key={field.code} className="space-y-1 text-xs">
+                  <label className="font-bold text-stone-700">{field.label}</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="NULL"
+                    value={manualNutrients[field.code] || ''}
+                    onChange={(e) =>
+                      setManualNutrients((prev) => ({
+                        ...prev,
+                        [field.code]: e.target.value,
+                      }))
+                    }
+                    className="w-full rounded-xl border border-stone-300 px-3 py-2 font-mono text-xs"
+                  />
+                </div>
+              ))}
+            </div>
+
+            {/* Optional Consented Front-of-Package Image Upload */}
+            <div className="rounded-2xl border border-stone-200 bg-stone-50 p-4 space-y-2 text-xs">
+              <div className="font-extrabold text-stone-900">
+                Optional: Front-of-Package Product Display Image (Requires Explicit Consent)
+              </div>
+              <div className="flex flex-wrap items-center gap-4">
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={(e) => handleFrontImageFile(e.target.files?.[0] || null)}
+                  className="text-xs"
+                />
+                <label className="inline-flex items-center gap-2 font-semibold text-stone-800 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={frontImageConsent}
+                    onChange={(e) => setFrontImageConsent(e.target.checked)}
+                    className="rounded border-stone-300 text-emerald-800"
+                  />
+                  I consent to saving this front-of-package photograph as the catalog display image for {food.name_en}.
+                </label>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3">
+              <button
+                type="submit"
+                disabled={savingManual}
+                className="rounded-2xl bg-emerald-800 px-6 py-2.5 text-xs font-extrabold text-white shadow hover:bg-emerald-700"
+              >
+                {savingManual ? 'Saving...' : '✓ Confirm & Save Package Data'}
+              </button>
+            </div>
+          </form>
+        </section>
+      )}
+
+      {/* PROMINENT VISIBLE INGREDIENTS, ALLERGENS & PACKAGE DECLARATIONS SECTION */}
+      {(food.is_packaged ||
+        food.ingredients_text ||
+        food.allergen_tags.length > 0 ||
+        (food.allergen_consistency &&
+          food.allergen_consistency.declared_allergens.length > 0)) && (
+        <section
+          data-testid="visible-ingredients-allergens-section"
+          className="rounded-3xl border border-stone-200/90 bg-white p-6 sm:p-8 shadow-sm space-y-5"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-stone-100 pb-4">
+            <div>
+              <h2 className="text-xl font-black text-stone-900">
+                Ingredients, Allergens & Label Declarations
+              </h2>
+              <p className="text-xs text-stone-500">
+                Source: <strong>{food.source.name}</strong> ({food.confidence_level.replace('_', ' ')})
+              </p>
+            </div>
+            {food.raw_ocr_text && food.cleaned_ingredients_text && (
+              <button
+                type="button"
+                onClick={() => setShowRawPackageText(!showRawPackageText)}
+                className="rounded-xl border border-stone-300 bg-stone-50 px-3.5 py-1.5 text-xs font-bold text-stone-700 hover:bg-stone-100"
+              >
+                {showRawPackageText ? 'Show Cleaned Ingredients' : 'View Original Raw Package Text'}
+              </button>
+            )}
+          </div>
+
+          {/* Allergen Consistency Alert (e.g. Soy declared in text vs stored allergen_tags) */}
+          {food.allergen_consistency &&
+            food.allergen_consistency.consistency_warnings.length > 0 && (
+              <div
+                data-testid="allergen-consistency-alert"
+                className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-xs text-amber-950 space-y-1.5"
+              >
+                <div className="font-extrabold flex items-center gap-1.5">
+                  <span>⚠️</span>
+                  <span>Allergen Consistency & Completeness Check</span>
+                </div>
+                {food.allergen_consistency.consistency_warnings.map((w, idx) => (
+                  <p key={idx}>• {w}</p>
+                ))}
+              </div>
+            )}
+
+          {/* Cleaned Ingredient Statement & Scannable Ingredient Chips */}
+          {food.ingredients_text ? (
+            <div className="space-y-3">
+              <div className="text-xs font-extrabold uppercase tracking-wider text-stone-400">
+                {showRawPackageText
+                  ? 'Original Unmodified Package / OCR Text:'
+                  : 'Cleaned Ingredient Statement:'}
+              </div>
+              <div className="rounded-2xl bg-stone-50 border border-stone-200/80 p-4 text-xs sm:text-sm text-stone-800 leading-relaxed font-medium">
+                {showRawPackageText
+                  ? food.raw_ocr_text || food.ingredients_text
+                  : food.cleaned_ingredients_text || food.ingredients_text}
+              </div>
+
+              {ingredientItems.length > 0 && !showRawPackageText && (
+                <div className="space-y-2">
+                  <div className="flex flex-wrap gap-1.5">
+                    {visibleIngredientItems.map((item, idx) => (
+                      <span
+                        key={idx}
+                        className="rounded-xl border border-stone-200 bg-white px-3 py-1 text-xs font-semibold text-stone-800 shadow-2xs"
+                      >
+                        {item}
+                      </span>
+                    ))}
+                  </div>
+                  {ingredientItems.length > 10 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAllIngredients(!showAllIngredients)}
+                      className="text-xs font-extrabold text-emerald-800 hover:underline"
+                    >
+                      {showAllIngredients
+                        ? 'Show fewer ingredients ▴'
+                        : `Expand all ${ingredientItems.length} ingredients ▾`}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="rounded-2xl bg-stone-50 p-4 text-xs text-stone-500">
+              No ingredient list has been captured for this item yet.
+            </div>
+          )}
+
+          {/* Allergen Declarations, Percentages, Additives & Label Warnings */}
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 text-xs">
+            <div className="rounded-2xl border border-rose-200 bg-rose-50/60 p-4 space-y-2">
+              <div className="font-extrabold text-rose-950">Declared Allergens</div>
+              {food.allergen_statement && (
+                <p className="font-bold text-rose-900">{food.allergen_statement}</p>
+              )}
+              <div className="flex flex-wrap gap-1.5">
+                {Array.from(
+                  new Set([
+                    ...(food.allergen_tags || []),
+                    ...(food.allergen_consistency?.declared_allergens || []),
+                  ])
+                ).map((al) => {
+                  const isMissingTag =
+                    food.allergen_consistency?.missing_from_stored_tags.includes(al);
+                  return (
+                    <span
+                      key={al}
+                      className={`rounded-full px-2.5 py-0.5 text-[11px] font-extrabold ${
+                        isMissingTag
+                          ? 'bg-amber-200 text-amber-950 border border-amber-400'
+                          : 'bg-rose-200/80 text-rose-950'
+                      }`}
+                    >
+                      {al} {isMissingTag ? '(Detected in label text)' : ''}
+                    </span>
+                  );
+                })}
+              </div>
+              <p className="text-[11px] text-rose-800 pt-1">
+                {food.allergen_safety_disclaimer}
+              </p>
+            </div>
+
+            {(food.additives && food.additives.length > 0) ||
+            (food.ingredient_percentages && food.ingredient_percentages.length > 0) ? (
+              <div className="rounded-2xl border border-stone-200 bg-stone-50 p-4 space-y-2">
+                <div className="font-extrabold text-stone-900">
+                  Additives (INS) & Characterising Percentages
+                </div>
+                {food.ingredient_percentages && food.ingredient_percentages.length > 0 && (
+                  <div className="text-stone-700">
+                    <strong>Declared %:</strong> {food.ingredient_percentages.join(' • ')}
+                  </div>
+                )}
+                {food.additives && food.additives.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {food.additives.slice(0, 12).map((add) => (
+                      <span
+                        key={add}
+                        className="rounded-md bg-white border border-stone-200 px-2 py-0.5 font-mono text-[10px] font-semibold text-stone-700"
+                      >
+                        {add}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : null}
+
+            {(food.label_warnings && food.label_warnings.length > 0) ||
+            food.manufacturer_info ||
+            (food.ocr_uncertainty_notes && food.ocr_uncertainty_notes.length > 0) ? (
+              <div className="rounded-2xl border border-stone-200 bg-stone-50 p-4 space-y-2">
+                <div className="font-extrabold text-stone-900">
+                  Package Warnings & Manufacturer Info
+                </div>
+                {food.label_warnings &&
+                  food.label_warnings.map((lw, i) => (
+                    <div
+                      key={i}
+                      className="rounded-xl bg-amber-100/80 px-2.5 py-1.5 font-bold text-amber-950"
+                    >
+                      ⚠️ {lw}
+                    </div>
+                  ))}
+                {food.manufacturer_info && (
+                  <p className="text-[11px] text-stone-600">
+                    <strong>Manufacturer:</strong> {food.manufacturer_info}
+                  </p>
+                )}
+                {food.ocr_uncertainty_notes &&
+                  food.ocr_uncertainty_notes.map((note, idx) => (
+                    <p key={idx} className="text-[11px] text-stone-500 italic">
+                      ℹ️ {note}
+                    </p>
+                  ))}
+              </div>
+            ) : null}
+          </div>
+        </section>
+      )}
 
       {/* LEVEL 2: VISUAL NUTRITION CHART & PERSONALISED CONDITION GUIDANCE */}
       <section className="grid gap-6 lg:grid-cols-12">
@@ -1074,7 +1541,6 @@ export const FoodDetailPage: React.FC = () => {
             </Link>
           </div>
 
-          {/* Interactive Condition Chips */}
           <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto p-1">
             {conditions.map((c) => {
               const active = selectedConditions.includes(c.code);
@@ -1167,7 +1633,7 @@ export const FoodDetailPage: React.FC = () => {
                 >
                   <div className="text-stone-500 font-medium">{vm.nutrient_name}</div>
                   <div className="mt-1 text-base font-extrabold text-stone-900">
-                    {val !== null ? `${val} ${vm.unit}` : 'NULL (Not Measured)'}
+                    {val !== null ? `${val} ${vm.unit}` : 'Not captured (NULL)'}
                   </div>
                 </div>
               );
@@ -1221,6 +1687,63 @@ export const FoodDetailPage: React.FC = () => {
           </div>
         </ExpandableSection>
 
+        {/* Field-Level Provenance & Conflict Audit Trail */}
+        {((food.field_provenance && food.field_provenance.length > 0) ||
+          (food.data_conflicts && food.data_conflicts.length > 0)) && (
+          <ExpandableSection
+            title="Field-Level Data Provenance & Multi-Source Audit Trail"
+            subtitle="Source attribution, retrieval timestamps, and any external data conflicts"
+            badge={`${food.field_provenance?.length || 0} tracked fields`}
+          >
+            <div className="space-y-4 text-xs">
+              {food.data_conflicts && food.data_conflicts.length > 0 && (
+                <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 space-y-2">
+                  <div className="font-extrabold text-amber-950">
+                    ⚠️ External Data Conflicts Requiring Review (Local Values Preserved)
+                  </div>
+                  {food.data_conflicts.map((conf) => (
+                    <div key={conf.id} className="border-t border-amber-200/80 pt-2">
+                      <div>
+                        <strong>Field:</strong> <code>{conf.field_name}</code>
+                      </div>
+                      <div>
+                        <strong>Local ({conf.local_source}):</strong> {conf.local_value}
+                      </div>
+                      <div>
+                        <strong>External ({conf.external_source}):</strong> {conf.external_value}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {food.field_provenance && food.field_provenance.length > 0 && (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {food.field_provenance.map((p) => (
+                    <div
+                      key={p.id}
+                      className="rounded-xl border border-stone-200 bg-stone-50 p-3 space-y-1"
+                    >
+                      <div className="flex items-center justify-between font-bold text-stone-900">
+                        <span>{p.field_name}</span>
+                        <span className="rounded-md bg-emerald-100 px-2 py-0.5 text-[10px] text-emerald-900">
+                          {p.review_status}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-stone-600">
+                        Source: <strong>{p.source_name}</strong> ({p.confidence_status})
+                      </div>
+                      {p.notes && (
+                        <div className="text-[11px] text-stone-500">{p.notes}</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </ExpandableSection>
+        )}
+
         <ExpandableSection
           title="Regional Names (English, Hindi & Kannada)"
           subtitle="Searchable local household names and scripts"
@@ -1239,29 +1762,6 @@ export const FoodDetailPage: React.FC = () => {
                   : ''}
               </span>
             ))}
-          </div>
-        </ExpandableSection>
-
-        <ExpandableSection
-          title="Allergens, Intolerances & Ingredients"
-          subtitle="Data-based allergen indications (distinct from digestive intolerances)"
-        >
-          <div className="space-y-2 text-xs text-stone-700">
-            <div>
-              <strong>Declared Allergen Indications: </strong>
-              {food.allergen_tags.length > 0 ? food.allergen_tags.join(', ') : 'None listed'}
-            </div>
-            <div>
-              <strong>Digestive Intolerance Markers: </strong>
-              {food.intolerance_tags.length > 0 ? food.intolerance_tags.join(', ') : 'None listed'}
-            </div>
-            {food.ingredients_text && (
-              <div>
-                <strong>Declared Ingredients: </strong>
-                {food.ingredients_text}
-              </div>
-            )}
-            <p className="text-amber-900 font-medium">{food.allergen_safety_disclaimer}</p>
           </div>
         </ExpandableSection>
 

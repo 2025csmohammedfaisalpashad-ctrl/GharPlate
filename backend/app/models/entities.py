@@ -107,6 +107,7 @@ class FoodItem(Base):
     is_packaged: Mapped[bool] = mapped_column(Boolean, default=False, index=True, nullable=False)
     brand: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
     barcode: Mapped[Optional[str]] = mapped_column(String(64), unique=True, index=True, nullable=True)
+    net_quantity: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
 
     default_basis: Mapped[str] = mapped_column(String(20), default="100g", nullable=False)  # 100g or 100ml
     standard_serving_name: Mapped[str] = mapped_column(String(100), default="1 standard serving", nullable=False)
@@ -118,6 +119,10 @@ class FoodItem(Base):
     intolerance_tags: Mapped[List[str]] = mapped_column(JSON, default=list, nullable=False)
     dietary_tags: Mapped[List[str]] = mapped_column(JSON, default=list, nullable=False)
     ingredients_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    cleaned_ingredients_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    allergen_statement: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    raw_ocr_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    manufacturer_info: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     allergen_declaration_complete: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     source_id: Mapped[int] = mapped_column(
@@ -128,6 +133,7 @@ class FoodItem(Base):
     )  # high, medium, label_declared, user_entered, incomplete
     conversion_methodology: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     date_imported: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+    external_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     category: Mapped["FoodCategory"] = relationship("FoodCategory", back_populates="foods")
     source: Mapped["DataSource"] = relationship("DataSource")
@@ -146,6 +152,98 @@ class FoodItem(Base):
     condition_mappings: Mapped[List["ConditionFoodMapping"]] = relationship(
         "ConditionFoodMapping", back_populates="food", cascade="all, delete-orphan"
     )
+    field_provenance: Mapped[List["ProductFieldProvenance"]] = relationship(
+        "ProductFieldProvenance", back_populates="food", cascade="all, delete-orphan"
+    )
+    data_conflicts: Mapped[List["ProductDataConflict"]] = relationship(
+        "ProductDataConflict", back_populates="food", cascade="all, delete-orphan"
+    )
+
+
+class ProductFieldProvenance(Base):
+    """
+    Stores field-level data provenance for packaged products and foods.
+    Preserves field value, data source, source record identifier, confidence, retrieval date, and review status.
+    """
+    __tablename__ = "product_field_provenance"
+    __table_args__ = (
+        UniqueConstraint("food_id", "field_name", "source_code", name="uq_product_field_provenance"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    food_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("food_items.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    field_name: Mapped[str] = mapped_column(
+        String(100), nullable=False, index=True
+    )  # e.g., "image_url", "ingredients_text", "allergen_tags", "energy_kcal", "protein_g"
+    field_type: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="metadata"
+    )  # metadata, ingredient, allergen, nutrient, image
+    field_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    source_code: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    source_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    source_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    source_record_id: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    confidence_status: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="user_confirmed"
+    )  # user_confirmed, external_verified_barcode, ocr_extracted, verified_ifct, fdc_supplemental
+    review_status: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="confirmed"
+    )  # confirmed, pending_user_review, auto_merged_missing
+    retrieved_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    food: Mapped["FoodItem"] = relationship("FoodItem", back_populates="field_provenance")
+
+
+class ProductDataConflict(Base):
+    """
+    Records conflicts between local user-confirmed/stored data and external provider records
+    so nothing is silently overwritten and conflicts are surfaced for user review.
+    """
+    __tablename__ = "product_data_conflicts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    food_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("food_items.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    field_name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    local_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    local_source: Mapped[str] = mapped_column(String(150), nullable=False)
+    external_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    external_source: Mapped[str] = mapped_column(String(150), nullable=False)
+    external_source_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    resolution_status: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="requires_user_review"
+    )  # requires_user_review, kept_local, accepted_external
+    detected_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+
+    food: Mapped["FoodItem"] = relationship("FoodItem", back_populates="data_conflicts")
+
+
+class ExternalLookupCache(Base):
+    """
+    Persistent SQLite cache for Open Food Facts, USDA FoodData Central, and External Web Search responses.
+    Prevents repeated remote API calls for the same barcode or search query.
+    """
+    __tablename__ = "external_lookup_cache"
+    __table_args__ = (
+        UniqueConstraint("cache_key", name="uq_external_lookup_cache_key"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    cache_key: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    provider_name: Mapped[str] = mapped_column(String(80), index=True, nullable=False)
+    lookup_type: Mapped[str] = mapped_column(String(60), index=True, nullable=False)  # barcode, search, detail
+    query_value: Mapped[str] = mapped_column(String(255), index=True, nullable=False)
+    http_status: Mapped[int] = mapped_column(Integer, nullable=False, default=200)
+    response_status: Mapped[str] = mapped_column(
+        String(60), nullable=False, default="ok"
+    )  # found, not_found, error, rate_limited
+    payload_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    retrieved_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
 class FoodAlias(Base):
@@ -286,12 +384,6 @@ class ConditionFoodMapping(Base):
         Integer, ForeignKey("food_items.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
-    # Allowed relevance_category values:
-    # - "relevant_to_explore" ("Relevant food to explore")
-    # - "portion_sensitive" ("Portion-sensitive")
-    # - "nutrient_to_monitor" ("Nutrient to monitor")
-    # - "individualised_advice_required" ("Individualised advice required")
-    # - "insufficient_information" ("Insufficient information")
     relevance_category: Mapped[str] = mapped_column(
         String(60), nullable=False, index=True, default="relevant_to_explore"
     )

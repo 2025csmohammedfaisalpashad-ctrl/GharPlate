@@ -1,9 +1,14 @@
 /// <reference types="vite/client" />
 import type {
+  AssistantChatMessage,
+  AssistantChatResponse,
+  AssistantPageContext,
+  AssistantStatusResponse,
   BarcodeLookupResponse,
   ConditionFoodRecommendationResponse,
   DataSource,
   DishRecognitionResponse,
+  ExternalProductSearchResponse,
   FoodCategory,
   FoodDetail,
   FoodSearchResponse,
@@ -15,6 +20,7 @@ import type {
   MealSuggestionResponse,
   OCRScanResponse,
   ProductComparisonResponse,
+  ProductProvenanceResponse,
   RecipeDetail,
   RecipeIngredientInput,
 } from '../types/api';
@@ -211,9 +217,10 @@ export const api = {
       body: JSON.stringify({ raw_label_text }),
     }),
 
-  scanLabelImage: (file: File, hint_text?: string) => {
+  scanLabelImage: (file: File, hint_text?: string, ingredientsFile?: File | null) => {
     const fd = new FormData();
     fd.append('file', file);
+    if (ingredientsFile) fd.append('ingredients_file', ingredientsFile);
     if (hint_text) fd.append('hint_text', hint_text);
     return request<OCRScanResponse>('/scan/ocr-image', {
       method: 'POST',
@@ -222,14 +229,19 @@ export const api = {
   },
 
   confirmScannedProduct: (payload: {
+    slug?: string;
     name_en: string;
     brand: string;
     barcode?: string;
+    net_quantity?: string;
+    image_url?: string;
+    retain_front_image_consent?: boolean;
     default_basis: string;
     standard_serving_name: string;
     standard_serving_grams: number;
     is_vegetarian: boolean;
     ingredients_text?: string;
+    raw_ocr_text?: string;
     allergen_tags: string[];
     allergen_declaration_complete: boolean;
     nutrients_per_100: Record<string, number | null>;
@@ -241,8 +253,29 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  lookupBarcode: (barcode: string) =>
-    request<BarcodeLookupResponse>(`/scan/barcode/${encodeURIComponent(barcode)}`),
+  lookupBarcode: (barcode: string, forceRefresh = false) =>
+    request<BarcodeLookupResponse>(
+      `/scan/barcode/${encodeURIComponent(barcode)}${forceRefresh ? '?force_refresh=true' : ''}`
+    ),
+
+  searchProductsMultiSource: (q: string, brand?: string, includeExternal = true) => {
+    const sp = new URLSearchParams({ q, include_external: String(includeExternal) });
+    if (brand) sp.set('brand', brand);
+    return request<ExternalProductSearchResponse>(`/products/search?${sp.toString()}`);
+  },
+
+  enrichProduct: (payload: {
+    food_slug?: string;
+    barcode?: string;
+    force_refresh?: boolean;
+  }) =>
+    request<BarcodeLookupResponse>('/products/enrich', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  getProductProvenance: (slug: string) =>
+    request<ProductProvenanceResponse>(`/products/${encodeURIComponent(slug)}/provenance`),
 
   recognizeDish: (file: File, user_hint?: string) => {
     const fd = new FormData();
@@ -275,6 +308,33 @@ export const api = {
     age_group: string;
   }) =>
     request<MealSuggestionResponse>('/meals/suggestions', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  // Local Ollama AI Assistant Endpoints
+  getAssistantStatus: (model?: string) =>
+    request<AssistantStatusResponse>(
+      `/assistant/status${model ? `?model=${encodeURIComponent(model)}` : ''}`
+    ),
+
+  getAssistantModels: () =>
+    request<{
+      ollama_reachable: boolean;
+      ollama_base_url: string;
+      installed_models: string[];
+      configured_model?: string | null;
+      error_message?: string | null;
+    }>('/assistant/models'),
+
+  chatWithAssistant: (payload: {
+    message: string;
+    mode: string;
+    model?: string;
+    history: AssistantChatMessage[];
+    context?: AssistantPageContext;
+  }) =>
+    request<AssistantChatResponse>('/assistant/chat', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),

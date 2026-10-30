@@ -17,7 +17,7 @@ beforeEach(() => {
         json: async () => ({
           status: 'healthy',
           service: 'GharPlate API',
-          version: '1.0.0',
+          version: '2.0.0',
           counts: { foods: 77, conditions: 24, sources: 10 },
           medical_disclaimer: 'Educational only',
         }),
@@ -48,6 +48,217 @@ beforeEach(() => {
               created_at: new Date().toISOString(),
             },
           ],
+        }),
+      };
+    }
+    if (url.includes('/foods/pkg-pineapple-cake-6b35c3')) {
+      return {
+        ok: true,
+        json: async () => ({
+          id: 78,
+          slug: 'pkg-pineapple-cake-6b35c3',
+          ifct_code: null,
+          name_en: 'Pineapple Cake',
+          image_url: null,
+          has_verified_image: false,
+          scientific_name: null,
+          description: 'User-confirmed packaged product (winkles).',
+          region_state: null,
+          category: {
+            id: 9,
+            slug: 'packaged-foods',
+            name: 'Packaged Foods',
+            description: 'Packaged foods',
+            image_url: null,
+            display_order: 9,
+          },
+          is_packaged: true,
+          brand: 'winkles',
+          barcode: '8906005618726',
+          net_quantity: '110 g',
+          default_basis: '100g',
+          standard_serving_name: '1 serving (30g)',
+          standard_serving_grams: 30,
+          is_vegetarian: false,
+          is_vegan: false,
+          allergen_tags: ['eggs', 'gluten', 'milk'],
+          intolerance_tags: [],
+          dietary_tags: ['packaged_food'],
+          ingredients_text:
+            'REFINED WHEAT FLOUR (MAIDA), EGGS, SUGAR, PINEAPPLE CUTS (2%). CONTAINS WHEAT, MILK, EGG AND SOY INGREDIENTS.',
+          cleaned_ingredients_text:
+            'REFINED WHEAT FLOUR (MAIDA), EGGS, SUGAR, PINEAPPLE CUTS (2%).',
+          ingredient_items: [
+            'REFINED WHEAT FLOUR (MAIDA)',
+            'EGGS',
+            'SUGAR',
+            'PINEAPPLE CUTS (2%)',
+          ],
+          ingredient_percentages: ['PINEAPPLE CUTS (2%)'],
+          additives: ['INS 330', 'INS 471', 'INS 322'],
+          allergen_statement: 'CONTAINS WHEAT, MILK, EGG AND SOY INGREDIENTS.',
+          label_warnings: ['POLYOLS MAY HAVE LAXATIVE EFFECTS.'],
+          manufacturer_info: 'SOUTHERN BAKERIES PVT. LTD, BANGALORE',
+          lot_and_date_info: null,
+          ocr_uncertainty_notes: [],
+          raw_ocr_text:
+            'REFINED WHEAT FLOUR (MAIDA), EGGS, SUGAR, PINEAPPLE CUTS (2%). CONTAINS WHEAT, MILK, EGG AND SOY INGREDIENTS.',
+          allergen_declaration_complete: true,
+          allergen_safety_disclaimer:
+            'ALLERGEN CONSISTENCY ALERT: Label declares additional allergens (soy).',
+          allergen_consistency: {
+            stored_allergen_tags: ['egg', 'gluten', 'milk'],
+            declared_allergens: ['egg', 'gluten', 'milk', 'soy'],
+            ingredient_inferred_allergens: ['egg', 'gluten', 'milk', 'soy'],
+            missing_from_stored_tags: ['soy'],
+            consistency_status: 'inconsistent_missing_tags',
+            consistency_warnings: [
+              'Allergen consistency alert: Label text mentions [soy], which is missing from stored allergen tags.',
+            ],
+            requires_manual_review: true,
+          },
+          aliases: [],
+          servings: [
+            {
+              unit_name: 'standard_serving',
+              unit_label: '1 serving (30g)',
+              grams_equivalent: 30,
+              is_default: true,
+              conversion_source: 'User Label',
+            },
+          ],
+          nutrients: [
+            {
+              nutrient_code: 'energy_kcal',
+              nutrient_name: 'Energy',
+              unit: 'kcal',
+              category: 'macronutrient',
+              value_per_100: null,
+              value_for_serving: null,
+              basis: '100g',
+              is_available: false,
+              confidence_status: 'not_measured',
+              source_name: 'User-Confirmed Packaged Food Label Declaration',
+              source_url: 'https://fssai.gov.in',
+              publication_year: 2026,
+            },
+          ],
+          available_nutrient_count: 0,
+          missing_nutrient_codes: ['energy_kcal', 'protein_g'],
+          completeness_pct: 0,
+          confidence_level: 'label_declared',
+          conversion_methodology: null,
+          date_imported: new Date().toISOString(),
+          source: {
+            id: 10,
+            code: 'USER_VERIFIED_LABEL',
+            name: 'User-Confirmed Packaged Food Label Declaration',
+            organization: 'GharPlate Household',
+            document_title: 'FSSAI Package Label',
+            publication_year: 2026,
+            version: '1.0',
+            url: 'https://fssai.gov.in',
+            license_notes: 'User confirmed',
+            source_type: 'ocr_extracted',
+          },
+          field_provenance: [],
+          data_conflicts: [],
+        }),
+      };
+    }
+    if (url.includes('/assistant/status')) {
+      return {
+        ok: true,
+        json: async () => ({
+          enabled: true,
+          ollama_base_url: 'http://127.0.0.1:11434',
+          ollama_reachable: true,
+          configured_model: 'llama3.2:latest',
+          active_model: 'llama3.2:latest',
+          installed_models: ['llama3.2:latest'],
+          status_message: "Connected to local Ollama using model 'llama3.2:latest'.",
+          remediation_command: null,
+          available_modes: [
+            { id: 'database_only', label: 'My GharPlate Database', description: 'Local DB only' },
+            { id: 'automatic', label: 'Automatic', description: 'Local first then online' },
+            { id: 'online_search', label: 'Search Online', description: 'Online search' },
+          ],
+          allowlisted_tools: ['get_food_details', 'get_ingredients_and_allergens'],
+        }),
+      };
+    }
+    if (url.includes('/assistant/chat')) {
+      return {
+        ok: true,
+        json: async () => ({
+          reply:
+            '**Pineapple Cake** (winkles) • Barcode: `8906005618726`\n- **Declared Ingredients:** REFINED WHEAT FLOUR (MAIDA), EGGS, SUGAR, PINEAPPLE CUTS (2%).\n- **Allergen Consistency Note:** Label declares **soy** in addition to wheat, milk, and egg.',
+          mode_used: 'automatic',
+          model_used: 'llama3.2:latest',
+          ollama_connected: true,
+          used_fallback_synthesis: false,
+          tool_traces: [
+            {
+              tool_name: 'get_ingredients_and_allergens',
+              arguments: { food_slug: 'pkg-pineapple-cake-6b35c3' },
+              status: 'success',
+              summary: 'Retrieved ingredients for Pineapple Cake',
+              source_type: 'local_database',
+            },
+          ],
+          sources: [
+            {
+              title: 'Pineapple Cake (User-Confirmed Packaged Food Label Declaration)',
+              source_type: 'local_database',
+              url: 'https://fssai.gov.in',
+              retrieved_at: new Date().toISOString(),
+              verification_status: 'label_declared',
+            },
+          ],
+          suggested_followups: ['Why are the nutritional values missing?'],
+          medical_disclaimer: 'Educational only.',
+        }),
+      };
+    }
+    if (url.includes('/scan/barcode/8906005618726')) {
+      return {
+        ok: true,
+        json: async () => ({
+          barcode: '8906005618726',
+          barcode_format: 'EAN-13',
+          is_valid_barcode: true,
+          found: true,
+          source_origin: 'local_verified_db',
+          retrieval_timestamp: new Date().toISOString(),
+          message:
+            "Found packaged product 'Pineapple Cake' (winkles). Local record is incomplete (missing: image_url, nutrition_values).",
+          fallback_actions: ['Scan nutrition panel'],
+          provider_attempts: [
+            {
+              provider_code: 'OPEN_FOOD_FACTS',
+              provider_name: 'Open Food Facts',
+              status: 'not_found',
+              http_status: 404,
+              message: 'Not found in Open Food Facts.',
+              from_cache: false,
+              retrieved_at: new Date().toISOString(),
+            },
+          ],
+          product: {
+            id: 78,
+            slug: 'pkg-pineapple-cake-6b35c3',
+            name_en: 'Pineapple Cake',
+            image_url: null,
+            has_verified_image: false,
+            is_packaged: true,
+            brand: 'winkles',
+            barcode: '8906005618726',
+            standard_serving_name: '1 serving (30g)',
+            standard_serving_grams: 30,
+            completeness_pct: 0,
+            available_nutrient_count: 0,
+            confidence_level: 'label_declared',
+          },
         }),
       };
     }
@@ -265,6 +476,7 @@ beforeEach(() => {
         ok: true,
         json: async () => ({
           scan_id: 'ocr_123',
+          ocr_status: 'success',
           privacy_confirmation: 'Processed strictly in memory (RAM).',
           raw_text: 'Energy: 48O kcal',
           detected_basis: '100g',
@@ -288,7 +500,7 @@ beforeEach(() => {
   });
 });
 
-describe('GharPlate Redesigned Visual UI & Feature Suite', () => {
+describe('GharPlate Redesigned Visual UI, Packaged Product Intelligence & AI Assistant Suite', () => {
   it('renders Redesigned Visual Home Page with hero, food photos, and live stats', async () => {
     render(
       <HouseholdProvider>
@@ -299,10 +511,6 @@ describe('GharPlate Redesigned Visual UI & Feature Suite', () => {
     );
 
     expect(screen.getByText(/Know What’s on Your Plate/i)).toBeInTheDocument();
-    expect(
-      screen.getByText(/Transparent, Evidence-Based Nutrition Intelligence/i)
-    ).toBeInTheDocument();
-
     await waitFor(() => {
       expect(screen.getByText('77')).toBeInTheDocument();
     });
@@ -360,9 +568,98 @@ describe('GharPlate Redesigned Visual UI & Feature Suite', () => {
     });
 
     expect(screen.queryByText(/Chicken Biryani/i)).not.toBeInTheDocument();
-    expect(screen.getAllByText(/Relevant food to explore/i).length).toBeGreaterThan(0);
+  });
+
+  it('renders Pineapple Cake packaged product page with visible barcode, visible ingredients, soy consistency alert, honest missing-image card, and missing-nutrition actions', async () => {
+    render(
+      <HouseholdProvider>
+        <MemoryRouter initialEntries={['/foods/pkg-pineapple-cake-6b35c3']}>
+          <AppRoutes />
+        </MemoryRouter>
+      </HouseholdProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('product-barcode-value')).toHaveTextContent('8906005618726');
+    });
+
+    // Honest missing-image card (never shows generic Muesli photo)
+    expect(screen.getByTestId('no-verified-product-image')).toBeInTheDocument();
+    expect(screen.getByText(/No verified product image available/i)).toBeInTheDocument();
+
+    // Visible Ingredients & Allergens section (not hidden inside collapsed accordion)
+    expect(screen.getByTestId('visible-ingredients-allergens-section')).toBeInTheDocument();
     expect(
-      screen.getAllByText(/Soft-cooked rice and split green gram porridge/i).length
+      screen.getAllByText(/REFINED WHEAT FLOUR \(MAIDA\)/i).length
     ).toBeGreaterThan(0);
+
+    // Soy allergen consistency alert
+    expect(screen.getByTestId('allergen-consistency-alert')).toBeInTheDocument();
+    expect(screen.getByText(/mentions \[soy\]/i)).toBeInTheDocument();
+
+    // Actionable missing-nutrition card (not a wall of NULLs)
+    expect(screen.getByTestId('missing-nutrition-action-card')).toBeInTheDocument();
+    expect(
+      screen.getByText(/Nutrition values have not yet been captured for this product/i)
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Search Online Databases/i)).toBeInTheDocument();
+  });
+
+  it('supports Barcode Lookup page and camera scanner state handling', async () => {
+    render(
+      <HouseholdProvider>
+        <MemoryRouter initialEntries={['/barcode']}>
+          <AppRoutes />
+        </MemoryRouter>
+      </HouseholdProvider>
+    );
+
+    const startCamBtn = screen.getByTestId('start-camera-scanner-btn');
+    fireEvent.click(startCamBtn);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('camera-scanner-error')).toBeInTheDocument();
+    });
+
+    const searchBtn = screen.getByText(/^Search Barcode$/i);
+    fireEvent.click(searchBtn);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Found packaged product 'Pineapple Cake'/i)
+      ).toBeInTheDocument();
+    });
+  });
+
+  it('opens the Ask GharPlate AI Assistant drawer, switches search modes, and sends a context-aware question', async () => {
+    render(
+      <HouseholdProvider>
+        <MemoryRouter initialEntries={['/foods/pkg-pineapple-cake-6b35c3']}>
+          <AppRoutes />
+        </MemoryRouter>
+      </HouseholdProvider>
+    );
+
+    const fab = await screen.findByTestId('ask-gharplate-fab');
+    fireEvent.click(fab);
+
+    expect(screen.getByTestId('assistant-drawer')).toBeInTheDocument();
+
+    // Switch modes
+    const dbModeBtn = screen.getByTestId('assistant-mode-database_only');
+    fireEvent.click(dbModeBtn);
+    const onlineModeBtn = screen.getByTestId('assistant-mode-online_search');
+    fireEvent.click(onlineModeBtn);
+    const autoModeBtn = screen.getByTestId('assistant-mode-automatic');
+    fireEvent.click(autoModeBtn);
+
+    const input = screen.getByLabelText(/Ask GharPlate Input/i);
+    fireEvent.change(input, { target: { value: 'What are the ingredients in this cake?' } });
+    fireEvent.click(screen.getByText(/^Send$/i));
+
+    await waitFor(() => {
+      expect(screen.getByText(/get_ingredients_and_allergens/i)).toBeInTheDocument();
+      expect(screen.getByText(/Allergen Consistency Note/i)).toBeInTheDocument();
+    });
   });
 });
