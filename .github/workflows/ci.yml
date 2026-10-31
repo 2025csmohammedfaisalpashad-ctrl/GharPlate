@@ -33,7 +33,7 @@ jobs:
       - name: Run Python syntax and lint check
         run: |
           python -m compileall app tests
-          ruff check app tests
+          ruff check app tests --select E4,E7,E9,F
 
       - name: Run reproducible data ingestion script
         working-directory: .
