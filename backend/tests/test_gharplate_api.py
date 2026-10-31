@@ -1,6 +1,4 @@
 import io
-import os
-from pathlib import Path
 from PIL import Image
 import pytest
 from fastapi.testclient import TestClient
