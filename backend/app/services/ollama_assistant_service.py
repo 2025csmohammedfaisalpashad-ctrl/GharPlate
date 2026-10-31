@@ -14,7 +14,6 @@ import httpx
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
-from app.integrations.normalizer import check_allergen_consistency
 from app.integrations.provider_registry import (
     evaluate_local_product_completeness,
     search_multi_source_external_products,
@@ -23,7 +22,6 @@ from app.integrations.web_search import search_external_web
 from app.models.entities import (
     FoodItem,
     FoodNutrientValue,
-    HealthCondition,
     Household,
     HouseholdMember,
 )
