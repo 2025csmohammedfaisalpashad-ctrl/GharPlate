@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Optional
 from sqlalchemy import (
     Boolean,
     DateTime,
@@ -48,7 +48,7 @@ class FoodCategory(Base):
     image_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     display_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
-    foods: Mapped[List["FoodItem"]] = relationship("FoodItem", back_populates="category")
+    foods: Mapped[list["FoodItem"]] = relationship("FoodItem", back_populates="category")
 
 
 class FoodTag(Base):
@@ -115,9 +115,9 @@ class FoodItem(Base):
 
     is_vegetarian: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_vegan: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    allergen_tags: Mapped[List[str]] = mapped_column(JSON, default=list, nullable=False)
-    intolerance_tags: Mapped[List[str]] = mapped_column(JSON, default=list, nullable=False)
-    dietary_tags: Mapped[List[str]] = mapped_column(JSON, default=list, nullable=False)
+    allergen_tags: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    intolerance_tags: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    dietary_tags: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     ingredients_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     cleaned_ingredients_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     allergen_statement: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -137,25 +137,25 @@ class FoodItem(Base):
 
     category: Mapped["FoodCategory"] = relationship("FoodCategory", back_populates="foods")
     source: Mapped["DataSource"] = relationship("DataSource")
-    aliases: Mapped[List["FoodAlias"]] = relationship(
+    aliases: Mapped[list["FoodAlias"]] = relationship(
         "FoodAlias", back_populates="food", cascade="all, delete-orphan"
     )
-    nutrient_values: Mapped[List["FoodNutrientValue"]] = relationship(
+    nutrient_values: Mapped[list["FoodNutrientValue"]] = relationship(
         "FoodNutrientValue", back_populates="food", cascade="all, delete-orphan"
     )
-    servings: Mapped[List["ServingConversion"]] = relationship(
+    servings: Mapped[list["ServingConversion"]] = relationship(
         "ServingConversion", back_populates="food", cascade="all, delete-orphan"
     )
-    structured_tags: Mapped[List["FoodItemTag"]] = relationship(
+    structured_tags: Mapped[list["FoodItemTag"]] = relationship(
         "FoodItemTag", back_populates="food", cascade="all, delete-orphan"
     )
-    condition_mappings: Mapped[List["ConditionFoodMapping"]] = relationship(
+    condition_mappings: Mapped[list["ConditionFoodMapping"]] = relationship(
         "ConditionFoodMapping", back_populates="food", cascade="all, delete-orphan"
     )
-    field_provenance: Mapped[List["ProductFieldProvenance"]] = relationship(
+    field_provenance: Mapped[list["ProductFieldProvenance"]] = relationship(
         "ProductFieldProvenance", back_populates="food", cascade="all, delete-orphan"
     )
-    data_conflicts: Mapped[List["ProductDataConflict"]] = relationship(
+    data_conflicts: Mapped[list["ProductDataConflict"]] = relationship(
         "ProductDataConflict", back_populates="food", cascade="all, delete-orphan"
     )
 
@@ -338,11 +338,11 @@ class HealthCondition(Base):
     condition_group_name: Mapped[str] = mapped_column(String(150), nullable=False)
     is_short_term_illness: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_special_life_stage: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    applicable_age_groups: Mapped[List[str]] = mapped_column(JSON, default=list, nullable=False)
+    applicable_age_groups: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
 
     nutritional_meaning: Mapped[str] = mapped_column(Text, nullable=False)
-    relevant_nutrients: Mapped[List[str]] = mapped_column(JSON, default=list, nullable=False)
-    relevant_food_groups: Mapped[List[str]] = mapped_column(JSON, default=list, nullable=False)
+    relevant_nutrients: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    relevant_food_groups: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     evidence_dietary_patterns: Mapped[str] = mapped_column(Text, nullable=False)
     portion_considerations: Mapped[str] = mapped_column(Text, nullable=False)
     individual_differences: Mapped[str] = mapped_column(Text, nullable=False)
@@ -357,10 +357,10 @@ class HealthCondition(Base):
     review_status: Mapped[str] = mapped_column(String(50), default="clinically_reviewed_educational", nullable=False)
 
     source: Mapped["DataSource"] = relationship("DataSource")
-    rules: Mapped[List["NutritionRule"]] = relationship(
+    rules: Mapped[list["NutritionRule"]] = relationship(
         "NutritionRule", back_populates="condition", cascade="all, delete-orphan"
     )
-    food_mappings: Mapped[List["ConditionFoodMapping"]] = relationship(
+    food_mappings: Mapped[list["ConditionFoodMapping"]] = relationship(
         "ConditionFoodMapping", back_populates="condition", cascade="all, delete-orphan"
     )
 
@@ -392,7 +392,7 @@ class ConditionFoodMapping(Base):
     )
     explanation: Mapped[str] = mapped_column(Text, nullable=False)
     relevant_nutrient_or_characteristic: Mapped[str] = mapped_column(String(255), nullable=False)
-    relevant_tags: Mapped[List[str]] = mapped_column(JSON, default=list, nullable=False)
+    relevant_tags: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
 
     source_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("data_sources.id", ondelete="RESTRICT"), nullable=False
@@ -479,10 +479,10 @@ class Household(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
 
-    members: Mapped[List["HouseholdMember"]] = relationship(
+    members: Mapped[list["HouseholdMember"]] = relationship(
         "HouseholdMember", back_populates="household", cascade="all, delete-orphan"
     )
-    recipes: Mapped[List["Recipe"]] = relationship(
+    recipes: Mapped[list["Recipe"]] = relationship(
         "Recipe", back_populates="household", cascade="all, delete-orphan"
     )
 
@@ -501,11 +501,11 @@ class HouseholdMember(Base):
     dietary_preference: Mapped[str] = mapped_column(
         String(50), default="vegetarian", nullable=False
     )  # vegetarian, eggetarian, non_vegetarian, vegan, jain
-    selected_conditions: Mapped[List[str]] = mapped_column(JSON, default=list, nullable=False)
-    allergies: Mapped[List[str]] = mapped_column(JSON, default=list, nullable=False)
-    intolerances: Mapped[List[str]] = mapped_column(JSON, default=list, nullable=False)
-    dietary_restrictions: Mapped[List[str]] = mapped_column(JSON, default=list, nullable=False)
-    food_preferences: Mapped[List[str]] = mapped_column(JSON, default=list, nullable=False)
+    selected_conditions: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    allergies: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    intolerances: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    dietary_restrictions: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    food_preferences: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
 
     household: Mapped["Household"] = relationship("Household", back_populates="members")
@@ -531,7 +531,7 @@ class Recipe(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
 
     household: Mapped[Optional["Household"]] = relationship("Household", back_populates="recipes")
-    ingredients: Mapped[List["RecipeIngredient"]] = relationship(
+    ingredients: Mapped[list["RecipeIngredient"]] = relationship(
         "RecipeIngredient", back_populates="recipe", cascade="all, delete-orphan"
     )
 

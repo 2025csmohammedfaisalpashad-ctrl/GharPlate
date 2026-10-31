@@ -4,7 +4,7 @@ Separates clinical rules from business logic, evaluates single and multiple cond
 identifies competing nutritional considerations, and never labels foods as Safe/Unsafe/Allowed/Forbidden.
 """
 
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.entities import (
@@ -38,7 +38,7 @@ MEDICAL_DISCLAIMER_TEXT = (
 )
 
 
-def resolve_serving_grams(food: FoodItem, serving_unit: str, quantity: float) -> Tuple[str, float]:
+def resolve_serving_grams(food: FoodItem, serving_unit: str, quantity: float) -> tuple[str, float]:
     for srv in food.servings:
         if srv.unit_name.lower() == serving_unit.lower():
             grams = round(srv.grams_equivalent * quantity, 2)
@@ -72,15 +72,15 @@ def evaluate_food_guidance(
     )
     serving_factor = total_grams / 100.0
 
-    nut_defs: Dict[str, NutrientDefinition] = {
+    nut_defs: dict[str, NutrientDefinition] = {
         nd.code: nd for nd in db.query(NutrientDefinition).all()
     }
-    nv_per_100: Dict[str, Optional[float]] = {
+    nv_per_100: dict[str, Optional[float]] = {
         nv.nutrient_code: nv.value for nv in food.nutrient_values
     }
 
     # 1. Allergies & Intolerances (kept strictly distinct!)
-    allergen_alerts: List[str] = []
+    allergen_alerts: list[str] = []
     food_allergens = {a.lower() for a in (food.allergen_tags or [])}
     for user_allergy in req.allergies:
         ua_norm = user_allergy.strip().lower()
@@ -99,7 +99,7 @@ def evaluate_food_guidance(
                 "GharPlate cannot establish whether this product contains the allergen."
             )
 
-    intolerance_alerts: List[str] = []
+    intolerance_alerts: list[str] = []
     food_intolerances = {i.lower() for i in (food.intolerance_tags or [])}
     for user_intol in req.intolerances:
         ui_norm = user_intol.strip().lower()
@@ -111,7 +111,7 @@ def evaluate_food_guidance(
                 "that may be portion-sensitive for digestive comfort (distinct from an immune allergy)."
             )
 
-    dietary_pref_alerts: List[str] = []
+    dietary_pref_alerts: list[str] = []
     if req.dietary_preference:
         dp = req.dietary_preference.lower()
         if dp in ("vegetarian", "jain", "vegan") and not food.is_vegetarian:
@@ -138,7 +138,7 @@ def evaluate_food_guidance(
     cond_by_code = {c.code: c for c in conditions}
 
     # 3. Check Multi-Condition Conflicts
-    conflicts_out: List[ConditionConflictOut] = []
+    conflicts_out: list[ConditionConflictOut] = []
     if len(cond_by_code) >= 2:
         selected_set = set(cond_by_code.keys())
         all_conflict_rules = (
@@ -163,7 +163,7 @@ def evaluate_food_guidance(
                 )
 
     # 4. Evaluate Deterministic Rules per Condition
-    observations: List[GuidanceObservation] = []
+    observations: list[GuidanceObservation] = []
     missing_relevant_nutrients_set = set()
     requires_prof_guidance = bool(conflicts_out) or bool(allergen_alerts)
 

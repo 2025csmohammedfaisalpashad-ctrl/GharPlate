@@ -2,7 +2,7 @@
 Packaged Product Comparison (Module 9) and Personalised Indian Meal Suggestions (Module 10).
 """
 
-from typing import Dict, List, Optional
+from typing import Optional
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.seed_images import resolve_food_image_url
@@ -45,8 +45,8 @@ def compare_packaged_products(
     if len(req.product_slugs) < 2 or len(req.product_slugs) > 4:
         raise ValueError("Please select between 2 and 4 products to compare.")
 
-    items_out: List[ProductComparisonItem] = []
-    conflicts_out: List[ConditionConflictOut] = []
+    items_out: list[ProductComparisonItem] = []
+    conflicts_out: list[ConditionConflictOut] = []
 
     for idx, slug in enumerate(req.product_slugs):
         food = (
@@ -63,14 +63,14 @@ def compare_packaged_products(
         if not food:
             raise ValueError(f"Product '{slug}' not found")
 
-        nv_map: Dict[str, Optional[float]] = {
+        nv_map: dict[str, Optional[float]] = {
             nv.nutrient_code: nv.value for nv in food.nutrient_values
         }
         serving_factor = food.standard_serving_grams / 100.0
 
-        nut_100: Dict[str, Optional[float]] = {}
-        nut_serv: Dict[str, Optional[float]] = {}
-        unavailable: List[str] = []
+        nut_100: dict[str, Optional[float]] = {}
+        nut_serv: dict[str, Optional[float]] = {}
+        unavailable: list[str] = []
 
         for code in TRACKED_COMPARISON_NUTRIENTS:
             val = nv_map.get(code, None)
@@ -233,7 +233,7 @@ MEAL_TEMPLATES = [
 def generate_meal_suggestions(
     db: Session, req: MealSuggestionRequest
 ) -> MealSuggestionResponse:
-    conflicts_out: List[ConditionConflictOut] = []
+    conflicts_out: list[ConditionConflictOut] = []
     if len(req.condition_codes) >= 2:
         selected_set = set(req.condition_codes)
         all_conflicts = (
@@ -257,7 +257,7 @@ def generate_meal_suggestions(
                     )
                 )
 
-    foods_by_slug: Dict[str, FoodItem] = {
+    foods_by_slug: dict[str, FoodItem] = {
         f.slug: f
         for f in db.query(FoodItem)
         .options(
@@ -268,7 +268,7 @@ def generate_meal_suggestions(
         .all()
     }
 
-    cards: List[MealSuggestionCard] = []
+    cards: list[MealSuggestionCard] = []
     user_allergies = {a.strip().lower() for a in req.allergies if a.strip()}
     user_intols = {i.strip().lower() for i in req.intolerances if i.strip()}
     avail_kw = {k.strip().lower() for k in req.available_ingredient_keywords if k.strip()}
@@ -298,7 +298,7 @@ def generate_meal_suggestions(
             continue
 
         summary_keys = ["energy_kcal", "protein_g", "carbs_g", "fibre_g", "fat_total_g", "sodium_mg", "calcium_mg", "iron_mg"]
-        agg_nut: Dict[str, Optional[float]] = {k: 0.0 for k in summary_keys}
+        agg_nut: dict[str, Optional[float]] = {k: 0.0 for k in summary_keys}
         missing_set = set()
         sources_set = set()
 
@@ -313,8 +313,8 @@ def generate_meal_suggestions(
                 else:
                     missing_set.add(k)
 
-        relevance_notes: List[str] = []
-        caution_notes: List[str] = []
+        relevance_notes: list[str] = []
+        caution_notes: list[str] = []
 
         if avail_kw:
             matched_kw = [k for k in avail_kw if any(k in tk for tk in tpl["keywords"])]

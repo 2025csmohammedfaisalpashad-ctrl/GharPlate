@@ -1,0 +1,54 @@
+services:
+  backend:
+    image: ${DOCKERHUB_USERNAME:-mrfaisu0243}/gharplate-backend:${IMAGE_TAG:-latest}
+    container_name: gharplate-release-backend
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-sqlite:////app/data/db/gharplate.db}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173,http://localhost:8080,http://127.0.0.1:5173,http://127.0.0.1:8080}
+      - ENABLE_OCR=${ENABLE_OCR:-true}
+      - ENABLE_EXPERIMENTAL_DISH_RECOGNITION=${ENABLE_EXPERIMENTAL_DISH_RECOGNITION:-true}
+      - ENABLE_EXTERNAL_BARCODE_LOOKUP=${ENABLE_EXTERNAL_BARCODE_LOOKUP:-true}
+      - ENABLE_USDA_FDC_LOOKUP=${ENABLE_USDA_FDC_LOOKUP:-true}
+      - USDA_FDC_API_KEY=${USDA_FDC_API_KEY:-}
+      - ENABLE_EXTERNAL_WEB_SEARCH=${ENABLE_EXTERNAL_WEB_SEARCH:-false}
+      - WEB_SEARCH_PROVIDER=${WEB_SEARCH_PROVIDER:-none}
+      - WEB_SEARCH_API_KEY=${WEB_SEARCH_API_KEY:-}
+      - ENABLE_LOCAL_AI_ASSISTANT=${ENABLE_LOCAL_AI_ASSISTANT:-true}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
+      - OLLAMA_TIMEOUT_SECONDS=${OLLAMA_TIMEOUT_SECONDS:-25.0}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - gharplate_release_data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/v1/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  frontend:
+    image: ${DOCKERHUB_USERNAME:-mrfaisu0243}/gharplate-frontend:${IMAGE_TAG:-latest}
+    container_name: gharplate-release-frontend
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  gharplate_release_data:

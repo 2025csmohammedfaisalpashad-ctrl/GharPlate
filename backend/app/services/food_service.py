@@ -1,6 +1,6 @@
 import difflib
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.seed_images import (
@@ -37,7 +37,7 @@ def normalize_query(q: str) -> str:
     return re.sub(r"[^a-z0-9\u0900-\u097f\u0c80-\u0cff]+", " ", q.lower()).strip()
 
 
-def _resolve_display_image(food: FoodItem) -> Tuple[Optional[str], bool]:
+def _resolve_display_image(food: FoodItem) -> tuple[Optional[str], bool]:
     """
     CRITICAL HONESTY RULE:
     For packaged products (`food.is_packaged == True`), NEVER substitute a generic category
@@ -75,14 +75,14 @@ def serialize_food_summary(food: FoodItem, total_nutrient_defs: int = 20) -> Foo
         "calcium_mg",
         "iron_mg",
     ]
-    val_map: Dict[str, Optional[float]] = {nv.nutrient_code: nv.value for nv in food.nutrient_values}
+    val_map: dict[str, Optional[float]] = {nv.nutrient_code: nv.value for nv in food.nutrient_values}
     key_nutrients = {code: val_map.get(code, None) for code in key_codes}
     unavailable = [nv.nutrient_code for nv in food.nutrient_values if nv.value is None]
     available_count = sum(1 for nv in food.nutrient_values if nv.value is not None)
     completeness = round((available_count / max(total_nutrient_defs, 1)) * 100.0, 1)
 
     seen = set()
-    aliases_out: List[FoodAliasOut] = []
+    aliases_out: list[FoodAliasOut] = []
     for al in food.aliases:
         k = (al.language, al.alias_text.lower())
         if k not in seen and al.alias_text.lower() != food.name_en.lower():
@@ -131,13 +131,13 @@ def serialize_food_detail(db: Session, food: FoodItem) -> FoodDetailOut:
     nutrient_defs = (
         db.query(NutrientDefinition).order_by(NutrientDefinition.display_order.asc()).all()
     )
-    nv_by_code: Dict[str, FoodNutrientValue] = {
+    nv_by_code: dict[str, FoodNutrientValue] = {
         nv.nutrient_code: nv for nv in food.nutrient_values
     }
     serving_factor = food.standard_serving_grams / 100.0
 
-    nutrients_out: List[NutrientValueOut] = []
-    missing_codes: List[str] = []
+    nutrients_out: list[NutrientValueOut] = []
+    missing_codes: list[str] = []
     available_count = 0
 
     for nd in nutrient_defs:
@@ -172,7 +172,7 @@ def serialize_food_detail(db: Session, food: FoodItem) -> FoodDetailOut:
     completeness = round((available_count / max(len(nutrient_defs), 1)) * 100.0, 1)
 
     seen = set()
-    aliases_out: List[FoodAliasOut] = []
+    aliases_out: list[FoodAliasOut] = []
     for al in food.aliases:
         k = (al.language, al.alias_text.lower())
         if k not in seen:
@@ -315,11 +315,11 @@ def search_foods(
     if vegetarian_only:
         query = query.filter(FoodItem.is_vegetarian.is_(True))
 
-    all_candidates: List[FoodItem] = query.all()
+    all_candidates: list[FoodItem] = query.all()
     total_defs = db.query(NutrientDefinition).count() or 20
 
     if nutrient_filter:
-        filtered: List[FoodItem] = []
+        filtered: list[FoodItem] = []
         for f in all_candidates:
             nv_map = {nv.nutrient_code: nv.value for nv in f.nutrient_values}
             if nutrient_filter == "high_protein" and (nv_map.get("protein_g") or 0) >= 10.0:
@@ -338,14 +338,14 @@ def search_foods(
                 filtered.append(f)
         all_candidates = filtered
 
-    scored_items: List[Tuple[float, FoodItem]] = []
-    suggestions: List[str] = []
+    scored_items: list[tuple[float, FoodItem]] = []
+    suggestions: list[str] = []
 
     if q and q.strip():
         norm_q = normalize_query(q)
         tokens = [t for t in norm_q.split() if t]
 
-        all_vocab: Dict[str, str] = {}
+        all_vocab: dict[str, str] = {}
         for item in all_candidates:
             best_score = 0.0
             name_norm = normalize_query(item.name_en)

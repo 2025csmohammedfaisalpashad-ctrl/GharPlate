@@ -4,9 +4,9 @@ household serving conversions, and traceable nutrient profiles.
 Note: Unmeasured nutrients are explicitly set to None (NULL), never 0.
 """
 
-from typing import Any, Dict, List
+from typing import Any
 
-FOOD_ITEMS_SEED: List[Dict[str, Any]] = [
+FOOD_ITEMS_SEED: list[dict[str, Any]] = [
     # ==========================================
     # 1. CEREALS AND MILLETS (ICMR-NIN IFCT 2017)
     # ==========================================

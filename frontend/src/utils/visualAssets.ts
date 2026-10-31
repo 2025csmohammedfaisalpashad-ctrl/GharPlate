@@ -21,7 +21,7 @@ export interface CategoryVisualMeta {
 export const CATEGORY_VISUALS: Record<string, CategoryVisualMeta> = {
   'cereals-millets': {
     slug: 'cereals-millets',
-    shortTitle: 'Grains & Millets',
+    shortTitle: 'Cereals & Millets',
     tagline: 'Ragi, Jowar, Bajra, Rice & Whole Wheat',
     accentBg: 'bg-amber-50',
     accentText: 'text-amber-900',

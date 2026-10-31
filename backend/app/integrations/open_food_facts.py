@@ -9,7 +9,7 @@ Official documentation:
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 import httpx
 from sqlalchemy.orm import Session
 
@@ -63,7 +63,7 @@ def _parse_serving_grams(serving_size_str: Optional[str], serving_qty: Any) -> O
 
 
 def parse_off_product_dict(
-    prod: Dict[str, Any], fallback_barcode: Optional[str] = None, api_version: str = "v3"
+    prod: dict[str, Any], fallback_barcode: Optional[str] = None, api_version: str = "v3"
 ) -> NormalizedExternalProduct:
     """
     Normalizes an Open Food Facts API v3 (or v2 search) product payload into NormalizedExternalProduct.
@@ -146,7 +146,7 @@ def parse_off_product_dict(
         if kj is not None:
             energy_kcal = round(kj / 4.184, 1)
 
-    nutrients_per_100: Dict[str, Optional[float]] = {
+    nutrients_per_100: dict[str, Optional[float]] = {
         "energy_kcal": energy_kcal,
         "protein_g": _safe_float(nutr.get("proteins_100g")),
         "carbs_g": _safe_float(nutr.get("carbohydrates_100g")),
@@ -177,8 +177,8 @@ def parse_off_product_dict(
         ),
     }
 
-    available_fields: List[str] = []
-    missing_fields: List[str] = []
+    available_fields: list[str] = []
+    missing_fields: list[str] = []
     for key, val in [
         ("product_name", name),
         ("brand", brand),
@@ -403,7 +403,7 @@ def fetch_open_food_facts_by_barcode(
 
 def search_open_food_facts_products(
     db: Session, query: str, brand: Optional[str] = None, page_size: int = 5
-) -> Tuple[List[NormalizedExternalProduct], ProviderLookupAttempt]:
+) -> tuple[list[NormalizedExternalProduct], ProviderLookupAttempt]:
     """
     Searches Open Food Facts by product name and optional brand.
     Uses persistent caching and polite rate limiting (never triggered on every keystroke).

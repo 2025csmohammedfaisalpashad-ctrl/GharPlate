@@ -6,9 +6,9 @@ All rules strictly use educational categories ("Nutritionally relevant", "Portio
 labels ("Safe", "Unsafe", "Cures", "Allowed", "Forbidden", "Disease-reversing").
 """
 
-from typing import Any, Dict, List
+from typing import Any
 
-HEALTH_CONDITIONS_SEED: List[Dict[str, Any]] = [
+HEALTH_CONDITIONS_SEED: list[dict[str, Any]] = [
     # ==========================================
     # GROUP A: BLOOD GLUCOSE & METABOLIC HEALTH
     # ==========================================

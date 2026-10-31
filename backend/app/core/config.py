@@ -1,6 +1,5 @@
 import os
 from pathlib import Path
-from typing import List
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
@@ -63,11 +62,11 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @property
-    def cors_origins_list(self) -> List[str]:
+    def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
 
     @property
-    def allowed_image_mimes_list(self) -> List[str]:
+    def allowed_image_mimes_list(self) -> list[str]:
         return [mime.strip() for mime in self.ALLOWED_IMAGE_MIMES.split(",") if mime.strip()]
 
 

@@ -4,7 +4,7 @@ and Provenance Recorder for GharPlate Packaged Products.
 """
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -45,7 +45,7 @@ KEY_PACKAGED_NUTRIENT_CODES = [
 ]
 
 
-def evaluate_local_product_completeness(food: FoodItem) -> Dict[str, Any]:
+def evaluate_local_product_completeness(food: FoodItem) -> dict[str, Any]:
     """
     Evaluates whether a local packaged food record is complete or missing critical fields
     (verified product image, ingredients text, or key nutrients).
@@ -76,7 +76,7 @@ def evaluate_local_product_completeness(food: FoodItem) -> Dict[str, Any]:
         if now - ext_ts < timedelta(hours=settings.PRODUCT_CACHE_HOURS):
             is_stale = False
 
-    missing_summary: List[str] = []
+    missing_summary: list[str] = []
     if not has_image:
         missing_summary.append("image_url")
     if not has_ingredients:
@@ -295,7 +295,7 @@ def merge_external_product_into_local(
     db: Session,
     local_food: FoodItem,
     ext: NormalizedExternalProduct,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Merges compatible, verified missing fields from `ext` into `local_food` according to GharPlate's strict merge policy:
     1. Verify product identity first (`verify_product_identity_match`). If the external record has a conflicting
@@ -314,8 +314,8 @@ def merge_external_product_into_local(
         ext=ext,
     )
 
-    merged_fields: List[str] = []
-    conflicts_recorded: List[str] = []
+    merged_fields: list[str] = []
+    conflicts_recorded: list[str] = []
 
     if not is_same_product:
         record_data_conflict(
@@ -438,7 +438,7 @@ def merge_external_product_into_local(
                 conflicts_recorded.append("ingredients_text")
 
     # 4. Nutrient enrichment: fill ONLY NULL nutrient values; record conflict if external differs from non-NULL local value
-    nv_by_code: Dict[str, FoodNutrientValue] = {
+    nv_by_code: dict[str, FoodNutrientValue] = {
         nv.nutrient_code: nv for nv in (local_food.nutrient_values or [])
     }
     all_defs = {nd.code: nd for nd in db.query(NutrientDefinition).all()}
@@ -532,14 +532,14 @@ def merge_external_product_into_local(
 
 def query_external_providers_for_barcode(
     db: Session, barcode: str, force_refresh: bool = False
-) -> Tuple[Optional[NormalizedExternalProduct], List[ProviderLookupAttempt]]:
+) -> tuple[Optional[NormalizedExternalProduct], list[ProviderLookupAttempt]]:
     """
     Queries configured external barcode providers in priority order:
     1. Open Food Facts (API v3)
     2. USDA FoodData Central Branded Foods (exact GTIN match)
     Returns (best_matched_external_product, list_of_provider_attempts).
     """
-    attempts: List[ProviderLookupAttempt] = []
+    attempts: list[ProviderLookupAttempt] = []
 
     off_attempt = fetch_open_food_facts_by_barcode(
         db, barcode, force_refresh=force_refresh
@@ -564,13 +564,13 @@ def query_external_providers_for_barcode(
 
 def search_multi_source_external_products(
     db: Session, query: str, brand: Optional[str] = None, page_size: int = 5
-) -> Tuple[List[NormalizedExternalProduct], List[ProviderLookupAttempt]]:
+) -> tuple[list[NormalizedExternalProduct], list[ProviderLookupAttempt]]:
     """
     Searches Open Food Facts and USDA FoodData Central for candidate products matching `query` / `brand`.
     Candidates are returned for user selection and are never automatically merged without exact barcode verification.
     """
-    candidates: List[NormalizedExternalProduct] = []
-    attempts: List[ProviderLookupAttempt] = []
+    candidates: list[NormalizedExternalProduct] = []
+    attempts: list[ProviderLookupAttempt] = []
 
     off_items, off_attempt = search_open_food_facts_products(
         db, query=query, brand=brand, page_size=page_size

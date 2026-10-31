@@ -103,20 +103,34 @@ ollama pull qwen2.5:7b
 ```
 *(If Ollama is not running, the assistant drawer automatically falls back to deterministic GharPlate database tools and displays clear setup instructions.)*
 
-### 3. Run All 43 Backend & E2E Tests
+### 3. Run All 44 Backend & E2E Tests + Ruff Lint
 ```bash
-PYTHONPATH=backend python3 -m pytest -v backend/tests/
+cd backend
+ruff --version
+ruff check app tests
+PYTHONPATH=. python3 -m pytest -v tests/
 ```
 
-### 4. Run Frontend Vitest Suite & Start Dev Server (`http://localhost:5173`)
+### 4. Run Frontend TypeScript Lint, 9 Vitest Tests & Production Build (`http://localhost:5173`)
 ```bash
 cd frontend
+npm ci
+npm run lint
 npm test
+npm run build
 npm run dev
 ```
 
-### 5. Run with Docker Compose (`http://localhost:8080`)
+### 5. Run with Docker Compose from Source (`http://localhost:8080`)
 ```bash
 cp .env.example .env
-docker compose up --build
+docker compose up --build -d
 ```
+
+### 6. Run Pre-Built Docker Hub Images (`docker-compose.release.yml`)
+```bash
+docker pull mrfaisu0243/gharplate-backend:latest
+docker pull mrfaisu0243/gharplate-frontend:latest
+docker compose -f docker-compose.release.yml up -d
+```
+See [`docs/CI_CD_RUNBOOK.md`](docs/CI_CD_RUNBOOK.md) and [`docs/DOCKER_GUIDE.md`](docs/DOCKER_GUIDE.md) for the complete 5-stage GitHub Actions CI/CD and Docker Hub publishing runbook.

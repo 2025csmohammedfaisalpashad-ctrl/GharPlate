@@ -4,9 +4,9 @@ Every rule references an authoritative DataSource, specifies exact evaluation lo
 and uses strictly educational categories.
 """
 
-from typing import Any, Dict, List
+from typing import Any
 
-NUTRITION_RULES_SEED: List[Dict[str, Any]] = [
+NUTRITION_RULES_SEED: list[dict[str, Any]] = [
     # --- Type 2 Diabetes & Prediabetes ---
     {
         "rule_code": "T2DM_ADDED_SUGAR_MONITOR",
@@ -660,7 +660,7 @@ NUTRITION_RULES_SEED: List[Dict[str, Any]] = [
     },
 ]
 
-CONDITION_CONFLICT_RULES_SEED: List[Dict[str, Any]] = [
+CONDITION_CONFLICT_RULES_SEED: list[dict[str, Any]] = [
     {
         "conflict_code": "CONFLICT_DIABETES_CKD",
         "condition_a_code": "type_2_diabetes",

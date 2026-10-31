@@ -6,13 +6,13 @@ Prevents repeated API calls for the same barcode or search query and enforces po
 import json
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Optional
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.entities import ExternalLookupCache
 
-_LAST_PROVIDER_CALL_TS: Dict[str, float] = {}
+_LAST_PROVIDER_CALL_TS: dict[str, float] = {}
 
 
 def enforce_provider_rate_limit(provider_name: str, min_interval_sec: Optional[float] = None) -> None:
@@ -38,7 +38,7 @@ def get_cached_lookup(
     provider_name: str,
     lookup_type: str,
     query_value: str,
-) -> Optional[Tuple[ExternalLookupCache, Optional[Dict[str, Any]]]]:
+) -> Optional[tuple[ExternalLookupCache, Optional[dict[str, Any]]]]:
     """
     Returns (cache_row, parsed_payload) if a non-expired cache entry exists for the given key.
     """
@@ -62,7 +62,7 @@ def get_cached_lookup(
     if now > expires:
         return None
 
-    payload: Optional[Dict[str, Any]] = None
+    payload: Optional[dict[str, Any]] = None
     if row.payload_json:
         try:
             payload = json.loads(row.payload_json)
@@ -78,7 +78,7 @@ def set_cached_lookup(
     query_value: str,
     http_status: int,
     response_status: str,
-    payload: Optional[Dict[str, Any]],
+    payload: Optional[dict[str, Any]],
     ttl_hours: Optional[int] = None,
 ) -> ExternalLookupCache:
     """

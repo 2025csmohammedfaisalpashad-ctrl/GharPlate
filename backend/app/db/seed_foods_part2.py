@@ -2,9 +2,9 @@
 Food items Part 2: Fruits, Dairy, Protein Sources, Nuts & Seeds, Indian Dishes, and Packaged Foods.
 """
 
-from typing import Any, Dict, List
+from typing import Any
 
-FOOD_ITEMS_SEED_PART2: List[Dict[str, Any]] = [
+FOOD_ITEMS_SEED_PART2: list[dict[str, Any]] = [
     # ==========================================
     # 4. FRUITS (ICMR-NIN IFCT 2017)
     # ==========================================

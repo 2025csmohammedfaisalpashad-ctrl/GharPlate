@@ -7,32 +7,32 @@ import difflib
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Optional
 
 
 @dataclass
 class ParsedIngredientAnalysis:
     raw_text: Optional[str] = None
     cleaned_ingredients: Optional[str] = None
-    ingredient_items: List[str] = field(default_factory=list)
-    ingredient_percentages: List[str] = field(default_factory=list)
-    additives: List[str] = field(default_factory=list)
+    ingredient_items: list[str] = field(default_factory=list)
+    ingredient_percentages: list[str] = field(default_factory=list)
+    additives: list[str] = field(default_factory=list)
     allergen_declaration: Optional[str] = None
-    label_warnings: List[str] = field(default_factory=list)
+    label_warnings: list[str] = field(default_factory=list)
     net_weight: Optional[str] = None
     manufacturer_info: Optional[str] = None
     lot_and_date_info: Optional[str] = None
-    ocr_uncertainty_notes: List[str] = field(default_factory=list)
+    ocr_uncertainty_notes: list[str] = field(default_factory=list)
 
 
 @dataclass
 class AllergenConsistencyReport:
-    stored_allergen_tags: List[str] = field(default_factory=list)
-    declared_allergens: List[str] = field(default_factory=list)
-    ingredient_inferred_allergens: List[str] = field(default_factory=list)
-    missing_from_stored_tags: List[str] = field(default_factory=list)
+    stored_allergen_tags: list[str] = field(default_factory=list)
+    declared_allergens: list[str] = field(default_factory=list)
+    ingredient_inferred_allergens: list[str] = field(default_factory=list)
+    missing_from_stored_tags: list[str] = field(default_factory=list)
     consistency_status: str = "consistent"  # consistent, inconsistent_missing_tags, incomplete_declaration
-    consistency_warnings: List[str] = field(default_factory=list)
+    consistency_warnings: list[str] = field(default_factory=list)
     requires_manual_review: bool = False
 
 
@@ -53,11 +53,11 @@ class NormalizedExternalProduct:
     nutrition_image_url: Optional[str] = None
     ingredients_image_url: Optional[str] = None
     ingredients_text: Optional[str] = None
-    allergen_tags: List[str] = field(default_factory=list)
-    categories: List[str] = field(default_factory=list)
-    nutrients_per_100: Dict[str, Optional[float]] = field(default_factory=dict)
-    available_fields: List[str] = field(default_factory=list)
-    missing_fields: List[str] = field(default_factory=list)
+    allergen_tags: list[str] = field(default_factory=list)
+    categories: list[str] = field(default_factory=list)
+    nutrients_per_100: dict[str, Optional[float]] = field(default_factory=dict)
+    available_fields: list[str] = field(default_factory=list)
+    missing_fields: list[str] = field(default_factory=list)
     is_branded_packaged: bool = True
     data_version: str = "v3"
     retrieved_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
@@ -76,7 +76,7 @@ def compute_gs1_check_digit(digits_without_check: str) -> int:
 
 def validate_and_normalize_barcode(
     raw_barcode: str,
-) -> Tuple[str, bool, str, Optional[str]]:
+) -> tuple[str, bool, str, Optional[str]]:
     """
     Validates and normalizes EAN-8 (8), UPC-A (12), EAN-13 (13), and GTIN-14 (14) barcodes.
     Returns: (cleaned_barcode, is_valid, barcode_format, validation_message)
@@ -251,9 +251,9 @@ def parse_and_clean_package_ingredients(raw_text: Optional[str]) -> ParsedIngred
 
     if cleaned:
         # Split top-level commas (outside parentheses/brackets) for scannable pills
-        top_items: List[str] = []
+        top_items: list[str] = []
         depth = 0
-        current: List[str] = []
+        current: list[str] = []
         for ch in cleaned.rstrip("."):
             if ch in "([":
                 depth += 1
@@ -276,7 +276,7 @@ def parse_and_clean_package_ingredients(raw_text: Optional[str]) -> ParsedIngred
     return analysis
 
 
-CANONICAL_ALLERGEN_SYNONYMS: Dict[str, List[str]] = {
+CANONICAL_ALLERGEN_SYNONYMS: dict[str, list[str]] = {
     "gluten": ["wheat", "maida", "atta", "sooji", "rava", "semolina", "barley", "rye", "oats", "gluten"],
     "milk": ["milk", "dairy", "whey", "casein", "lactose", "butter", "ghee", "cheese", "paneer", "curd"],
     "egg": ["egg", "eggs", "albumin", "egg white", "egg yolk"],
@@ -310,7 +310,7 @@ def normalize_allergen_tag_name(raw_tag: str) -> str:
 
 def check_allergen_consistency(
     ingredients_text: Optional[str],
-    stored_allergen_tags: Optional[List[str]],
+    stored_allergen_tags: Optional[list[str]],
     allergen_declaration_complete: bool = True,
 ) -> AllergenConsistencyReport:
     """
@@ -342,7 +342,7 @@ def check_allergen_consistency(
     all_detected = sorted(list(declared_set | inferred_set))
     missing_from_stored = [a for a in all_detected if a not in normalized_stored]
 
-    warnings: List[str] = []
+    warnings: list[str] = []
     status = "consistent"
     requires_review = False
 
@@ -379,7 +379,7 @@ def verify_product_identity_match(
     local_name: str,
     local_brand: Optional[str],
     ext: NormalizedExternalProduct,
-) -> Tuple[bool, str, float]:
+) -> tuple[bool, str, float]:
     """
     Verifies whether an external product record matches a local packaged product record.
     Priority:

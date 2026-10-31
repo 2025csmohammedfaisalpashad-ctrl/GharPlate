@@ -4,7 +4,7 @@ Calculates total and per-serving nutrition across ingredients, converts househol
 and NEVER replaces missing (NULL) ingredient nutrients with zero.
 """
 
-from typing import Dict, List, Optional
+from typing import Optional
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.seed_images import resolve_food_image_url
@@ -22,7 +22,7 @@ from app.schemas.api_schemas import (
     RecipeNutrientBreakdown,
 )
 
-DEFAULT_UNIT_GRAMS: Dict[str, float] = {
+DEFAULT_UNIT_GRAMS: dict[str, float] = {
     "100g": 100.0,
     "100ml": 100.0,
     "g": 1.0,
@@ -56,7 +56,7 @@ def serialize_recipe_detail(db: Session, recipe: Recipe) -> RecipeDetailOut:
     total_weight = sum(ing.grams_equivalent for ing in recipe.ingredients)
     serving_weight = round(total_weight / servings_count, 2)
 
-    contributions: List[RecipeIngredientContributionOut] = []
+    contributions: list[RecipeIngredientContributionOut] = []
     primary_img_url: Optional[str] = None
 
     for ing in recipe.ingredients:
@@ -66,7 +66,7 @@ def serialize_recipe_detail(db: Session, recipe: Recipe) -> RecipeDetailOut:
             primary_img_url = img
 
         factor = ing.grams_equivalent / 100.0
-        nv_map: Dict[str, Optional[float]] = {
+        nv_map: dict[str, Optional[float]] = {
             nv.nutrient_code: nv.value for nv in food.nutrient_values
         }
         missing_codes = [
@@ -104,14 +104,14 @@ def serialize_recipe_detail(db: Session, recipe: Recipe) -> RecipeDetailOut:
             )
         )
 
-    nutrient_breakdowns: List[RecipeNutrientBreakdown] = []
+    nutrient_breakdowns: list[RecipeNutrientBreakdown] = []
     complete_nutrients_count = 0
 
     for nd in nutrient_defs:
         known_sum = 0.0
         with_data = 0
         missing_data = 0
-        missing_names: List[str] = []
+        missing_names: list[str] = []
 
         for ing in recipe.ingredients:
             food = ing.food

@@ -6,9 +6,9 @@ Full creator and license attribution is documented in `docs/IMAGE_ATTRIBUTION.md
 `frontend/public/images/foods/attribution.json`.
 """
 
-from typing import Dict, Optional
+from typing import Optional
 
-CATEGORY_IMAGE_URLS: Dict[str, str] = {
+CATEGORY_IMAGE_URLS: dict[str, str] = {
     "cereals-millets": "/images/categories/cereals-millets.webp",
     "pulses-legumes": "/images/categories/pulses-legumes.webp",
     "vegetables": "/images/categories/vegetables.webp",
@@ -20,7 +20,7 @@ CATEGORY_IMAGE_URLS: Dict[str, str] = {
     "packaged-foods": "/images/categories/packaged-foods.webp",
 }
 
-FOOD_IMAGE_URLS: Dict[str, str] = {
+FOOD_IMAGE_URLS: dict[str, str] = {
     # 1. Cereals & Millets
     "rice-raw-milled": "/images/foods/cereals-millets/rice-raw-milled.webp",
     "brown-rice": "/images/foods/cereals-millets/brown-rice.webp",

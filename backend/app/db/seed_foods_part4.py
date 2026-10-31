@@ -4,9 +4,9 @@ Indian dishes are calculated from ICMR-NIN DGI 2024 standardized cooked recipes 
 Packaged foods reflect FSSAI back-of-pack label declarations; undeclared micronutrients remain None (NULL).
 """
 
-from typing import Any, Dict, List
+from typing import Any
 
-FOOD_ITEMS_SEED_PART4: List[Dict[str, Any]] = [
+FOOD_ITEMS_SEED_PART4: list[dict[str, Any]] = [
     # ==========================================
     # 8. INDIAN DISHES (ICMR-NIN DGI 2024 Recipes)
     # ==========================================

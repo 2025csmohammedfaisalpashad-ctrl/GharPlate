@@ -1,8 +1,10 @@
+from typing import Annotated, Optional
 import uuid
-from typing import List, Optional
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session, joinedload
 
+from app.core.config import settings
 from app.db.session import get_db
 from app.integrations.normalizer import check_allergen_consistency
 from app.integrations.provider_registry import (
@@ -87,6 +89,8 @@ from app.services.recipe_service import create_or_update_recipe, serialize_recip
 
 api_router = APIRouter()
 
+DbSession = Annotated[Session, Depends(get_db)]
+
 PRIVACY_NOTICE_TEXT = (
     "Convenience Browser Identifier Only: Your household token is a randomly generated UUID stored locally in your browser. "
     "It is NOT strong authentication or identity verification. Uploaded food or label images are processed strictly in memory and never stored without explicit consent."
@@ -97,7 +101,7 @@ PRIVACY_NOTICE_TEXT = (
 # 1. HEALTH & SYSTEM STATS
 # ==========================================
 @api_router.get("/health", tags=["System"])
-def health_check(db: Session = Depends(get_db)):
+def health_check(db: DbSession):
     food_count = db.query(FoodItem).count()
     condition_count = db.query(HealthCondition).count()
     source_count = db.query(DataSource).count()
@@ -115,8 +119,8 @@ def health_check(db: Session = Depends(get_db)):
     }
 
 
-@api_router.get("/sources", response_model=List[DataSourceOut], tags=["Sources"])
-def list_data_sources(db: Session = Depends(get_db)):
+@api_router.get("/sources", response_model=list[DataSourceOut], tags=["Sources"])
+def list_data_sources(db: DbSession):
     sources = db.query(DataSource).order_by(DataSource.publication_year.desc(), DataSource.id.asc()).all()
     return [DataSourceOut.model_validate(s) for s in sources]
 
@@ -124,29 +128,29 @@ def list_data_sources(db: Session = Depends(get_db)):
 # ==========================================
 # 2. FOOD INTELLIGENCE & ADVANCED SEARCH
 # ==========================================
-@api_router.get("/foods/categories", response_model=List[FoodCategoryOut], tags=["Foods"])
-def list_food_categories(db: Session = Depends(get_db)):
+@api_router.get("/foods/categories", response_model=list[FoodCategoryOut], tags=["Foods"])
+def list_food_categories(db: DbSession):
     cats = db.query(FoodCategory).order_by(FoodCategory.display_order.asc()).all()
     return [FoodCategoryOut.model_validate(c) for c in cats]
 
 
 @api_router.get("/foods", response_model=FoodSearchResponse, tags=["Foods"])
 def search_food_items(
-    q: Optional[str] = Query(default=None, description="Search by English, Hindi, or Kannada name/alias"),
-    category: Optional[str] = Query(default=None, description="Filter by category slug"),
-    is_packaged: Optional[bool] = Query(default=None, description="Filter packaged vs whole/cooked foods"),
-    vegetarian_only: bool = Query(default=False, description="Filter vegetarian foods only"),
-    nutrient_filter: Optional[str] = Query(
-        default=None,
-        description="Optional filter: high_protein, high_fibre, high_calcium, high_iron, low_sodium",
-    ),
-    sort_by: str = Query(
-        default="relevance",
-        description="Sort order: relevance, name_asc, protein_desc, fibre_desc, energy_asc",
-    ),
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, ge=1, le=100),
-    db: Session = Depends(get_db),
+    db: DbSession,
+    q: Annotated[Optional[str], Query(description="Search by English, Hindi, or Kannada name/alias")] = None,
+    category: Annotated[Optional[str], Query(description="Filter by category slug")] = None,
+    is_packaged: Annotated[Optional[bool], Query(description="Filter packaged vs whole/cooked foods")] = None,
+    vegetarian_only: Annotated[bool, Query(description="Filter vegetarian foods only")] = False,
+    nutrient_filter: Annotated[
+        Optional[str],
+        Query(description="Optional filter: high_protein, high_fibre, high_calcium, high_iron, low_sodium"),
+    ] = None,
+    sort_by: Annotated[
+        str,
+        Query(description="Sort order: relevance, name_asc, protein_desc, fibre_desc, energy_asc"),
+    ] = "relevance",
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ):
     return search_foods(
         db=db,
@@ -162,7 +166,7 @@ def search_food_items(
 
 
 @api_router.get("/foods/{slug}", response_model=FoodDetailOut, tags=["Foods"])
-def get_food_detail(slug: str, db: Session = Depends(get_db)):
+def get_food_detail(slug: str, db: DbSession):
     food = (
         db.query(FoodItem)
         .options(
@@ -187,8 +191,8 @@ def get_food_detail(slug: str, db: Session = Depends(get_db)):
 # ==========================================
 # 3. CONDITIONS & DETERMINISTIC GUIDANCE
 # ==========================================
-@api_router.get("/conditions", response_model=List[HealthConditionSummaryOut], tags=["Conditions & Guidance"])
-def list_health_conditions(db: Session = Depends(get_db)):
+@api_router.get("/conditions", response_model=list[HealthConditionSummaryOut], tags=["Conditions & Guidance"])
+def list_health_conditions(db: DbSession):
     conds = (
         db.query(HealthCondition)
         .options(joinedload(HealthCondition.source))
@@ -215,8 +219,8 @@ def list_health_conditions(db: Session = Depends(get_db)):
     ]
 
 
-@api_router.get("/conditions/conflicts", response_model=List[ConditionConflictOut], tags=["Conditions & Guidance"])
-def list_condition_conflicts(db: Session = Depends(get_db)):
+@api_router.get("/conditions/conflicts", response_model=list[ConditionConflictOut], tags=["Conditions & Guidance"])
+def list_condition_conflicts(db: DbSession):
     conflicts = (
         db.query(ConditionConflictRule)
         .options(joinedload(ConditionConflictRule.source))
@@ -239,7 +243,7 @@ def list_condition_conflicts(db: Session = Depends(get_db)):
 
 
 @api_router.get("/conditions/{code}", response_model=HealthConditionDetailOut, tags=["Conditions & Guidance"])
-def get_health_condition_detail(code: str, db: Session = Depends(get_db)):
+def get_health_condition_detail(code: str, db: DbSession):
     cond = (
         db.query(HealthCondition)
         .options(
@@ -309,19 +313,19 @@ def get_health_condition_detail(code: str, db: Session = Depends(get_db)):
 )
 def explore_foods_by_condition(
     code: str,
-    household_token: Optional[str] = Query(
-        default=None,
-        description="Optional household convenience token for member context resolution",
-    ),
-    member_id: Optional[int] = Query(
-        default=None,
-        description="Optional household member ID to filter by dietary preference and flag allergens",
-    ),
-    dietary_preference: Optional[str] = Query(
-        default=None,
-        description="Optional explicit dietary preference override (vegetarian, vegan, eggetarian, non_vegetarian, jain)",
-    ),
-    db: Session = Depends(get_db),
+    db: DbSession,
+    household_token: Annotated[
+        Optional[str],
+        Query(description="Optional household convenience token for member context resolution"),
+    ] = None,
+    member_id: Annotated[
+        Optional[int],
+        Query(description="Optional household member ID to filter by dietary preference and flag allergens"),
+    ] = None,
+    dietary_preference: Annotated[
+        Optional[str],
+        Query(description="Optional explicit dietary preference override (vegetarian, vegan, eggetarian, non_vegetarian, jain)"),
+    ] = None,
 ):
     try:
         return get_condition_food_recommendations(
@@ -339,7 +343,7 @@ def explore_foods_by_condition(
 
 @api_router.post("/guidance/evaluate", response_model=GuidanceEvaluationResponse, tags=["Conditions & Guidance"])
 def evaluate_guidance_endpoint(
-    req: GuidanceEvaluationRequest, db: Session = Depends(get_db)
+    req: GuidanceEvaluationRequest, db: DbSession
 ):
     try:
         return evaluate_food_guidance(db, req)
@@ -352,7 +356,7 @@ def evaluate_guidance_endpoint(
 # ==========================================
 @api_router.post("/households", response_model=HouseholdOut, tags=["Households"])
 def create_or_get_household(
-    req: HouseholdCreateRequest, db: Session = Depends(get_db)
+    req: HouseholdCreateRequest, db: DbSession
 ):
     token = req.household_token or f"hh_{uuid.uuid4().hex}"
     hh = (
@@ -378,7 +382,7 @@ def create_or_get_household(
 
 
 @api_router.get("/households/{token}", response_model=HouseholdOut, tags=["Households"])
-def get_household(token: str, db: Session = Depends(get_db)):
+def get_household(token: str, db: DbSession):
     hh = (
         db.query(Household)
         .options(joinedload(Household.members))
@@ -399,7 +403,7 @@ def get_household(token: str, db: Session = Depends(get_db)):
 
 
 @api_router.delete("/households/{token}", tags=["Households"])
-def delete_household(token: str, db: Session = Depends(get_db)):
+def delete_household(token: str, db: DbSession):
     hh = db.query(Household).filter(Household.household_token == token).first()
     if hh:
         db.delete(hh)
@@ -417,7 +421,7 @@ def delete_household(token: str, db: Session = Depends(get_db)):
     tags=["Households"],
 )
 def add_household_member(
-    token: str, req: HouseholdMemberCreate, db: Session = Depends(get_db)
+    token: str, req: HouseholdMemberCreate, db: DbSession
 ):
     hh = db.query(Household).filter(Household.household_token == token).first()
     if not hh:
@@ -454,7 +458,7 @@ def update_household_member(
     token: str,
     member_id: int,
     req: HouseholdMemberCreate,
-    db: Session = Depends(get_db),
+    db: DbSession,
 ):
     hh = db.query(Household).filter(Household.household_token == token).first()
     if not hh:
@@ -485,7 +489,7 @@ def update_household_member(
 
 @api_router.post("/households/{token}/default-member/{member_id}", response_model=HouseholdOut, tags=["Households"])
 def set_default_household_member(
-    token: str, member_id: int, db: Session = Depends(get_db)
+    token: str, member_id: int, db: DbSession
 ):
     hh = (
         db.query(Household)
@@ -512,7 +516,7 @@ def set_default_household_member(
 
 
 @api_router.delete("/households/{token}/members/{member_id}", tags=["Households"])
-def delete_household_member(token: str, member_id: int, db: Session = Depends(get_db)):
+def delete_household_member(token: str, member_id: int, db: DbSession):
     hh = db.query(Household).filter(Household.household_token == token).first()
     if not hh:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Household not found")
@@ -535,7 +539,7 @@ def delete_household_member(token: str, member_id: int, db: Session = Depends(ge
 # ==========================================
 @api_router.post("/recipes/calculate", response_model=RecipeDetailOut, tags=["Recipes"])
 def create_and_calculate_recipe(
-    req: RecipeCreateRequest, db: Session = Depends(get_db)
+    req: RecipeCreateRequest, db: DbSession
 ):
     try:
         return create_or_update_recipe(db, req)
@@ -545,7 +549,7 @@ def create_and_calculate_recipe(
 
 @api_router.put("/recipes/{recipe_id}", response_model=RecipeDetailOut, tags=["Recipes"])
 def update_existing_recipe(
-    recipe_id: int, req: RecipeCreateRequest, db: Session = Depends(get_db)
+    recipe_id: int, req: RecipeCreateRequest, db: DbSession
 ):
     try:
         return create_or_update_recipe(db, req, recipe_id=recipe_id)
@@ -553,10 +557,10 @@ def update_existing_recipe(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
-@api_router.get("/recipes", response_model=List[RecipeDetailOut], tags=["Recipes"])
+@api_router.get("/recipes", response_model=list[RecipeDetailOut], tags=["Recipes"])
 def list_recipes(
-    household_token: Optional[str] = Query(default=None),
-    db: Session = Depends(get_db),
+    db: DbSession,
+    household_token: Annotated[Optional[str], Query()] = None,
 ):
     query = db.query(Recipe).options(joinedload(Recipe.ingredients))
     if household_token:
@@ -570,7 +574,7 @@ def list_recipes(
 
 
 @api_router.get("/recipes/{recipe_id}", response_model=RecipeDetailOut, tags=["Recipes"])
-def get_recipe_by_id(recipe_id: int, db: Session = Depends(get_db)):
+def get_recipe_by_id(recipe_id: int, db: DbSession):
     recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
     if not recipe:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recipe not found")
@@ -578,7 +582,7 @@ def get_recipe_by_id(recipe_id: int, db: Session = Depends(get_db)):
 
 
 @api_router.delete("/recipes/{recipe_id}", tags=["Recipes"])
-def delete_recipe(recipe_id: int, db: Session = Depends(get_db)):
+def delete_recipe(recipe_id: int, db: DbSession):
     recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
     if not recipe:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recipe not found")
@@ -598,9 +602,9 @@ def parse_ocr_label_text_endpoint(req: OCRTextParseRequest):
 @api_router.post("/scan/ocr", response_model=OCRScanResponse, tags=["Scanner & OCR"])
 @api_router.post("/scan/ocr-image", response_model=OCRScanResponse, tags=["Scanner & OCR"])
 async def scan_nutrition_label_image(
-    file: UploadFile = File(...),
-    ingredients_file: Optional[UploadFile] = File(default=None),
-    hint_text: Optional[str] = Form(default=None),
+    file: Annotated[UploadFile, File(...)],
+    ingredients_file: Annotated[Optional[UploadFile], File()] = None,
+    hint_text: Annotated[Optional[str], Form()] = None,
 ):
     raw_bytes = await file.read()
     ing_bytes = await ingredients_file.read() if ingredients_file is not None else None
@@ -622,7 +626,7 @@ async def scan_nutrition_label_image(
 
 @api_router.post("/scan/confirm-product", response_model=FoodDetailOut, tags=["Scanner & OCR"])
 def confirm_and_save_product(
-    req: ManualProductCreateRequest, db: Session = Depends(get_db)
+    req: ManualProductCreateRequest, db: DbSession
 ):
     try:
         return create_user_confirmed_product(db, req)
@@ -633,22 +637,22 @@ def confirm_and_save_product(
 @api_router.get("/scan/barcode/{barcode}", response_model=BarcodeLookupResponse, tags=["Barcode Lookup"])
 def get_product_by_barcode(
     barcode: str,
-    force_refresh: bool = Query(default=False, description="Force fresh external provider lookup"),
-    db: Session = Depends(get_db),
+    db: DbSession,
+    force_refresh: Annotated[bool, Query(description="Force fresh external provider lookup")] = False,
 ):
     return lookup_barcode(db, barcode, force_refresh=force_refresh)
 
 
 @api_router.get("/products/search", response_model=ExternalProductSearchResponse, tags=["Product Intelligence"])
 def search_products_multi_source(
-    q: str = Query(..., min_length=1, description="Product name or barcode query"),
-    brand: Optional[str] = Query(default=None, description="Optional brand filter"),
-    include_external: bool = Query(default=True, description="Query Open Food Facts & USDA FDC"),
-    db: Session = Depends(get_db),
+    q: Annotated[str, Query(min_length=1, description="Product name or barcode query")],
+    db: DbSession,
+    brand: Annotated[Optional[str], Query(description="Optional brand filter")] = None,
+    include_external: Annotated[bool, Query(description="Query Open Food Facts & USDA FDC")] = True,
 ):
     local_res = search_foods(db=db, q=q, page_size=8)
-    cands_out: List[ExternalProductCandidateOut] = []
-    attempts_out: List[ProviderAttemptOut] = []
+    cands_out: list[ExternalProductCandidateOut] = []
+    attempts_out: list[ProviderAttemptOut] = []
 
     if include_external:
         ext_cands, ext_attempts = search_multi_source_external_products(
@@ -701,7 +705,7 @@ def search_products_multi_source(
 
 @api_router.post("/products/enrich", response_model=BarcodeLookupResponse, tags=["Product Intelligence"])
 def enrich_product_endpoint(
-    req: ProductEnrichRequest, db: Session = Depends(get_db)
+    req: ProductEnrichRequest, db: DbSession
 ):
     target_barcode = req.barcode
     if not target_barcode and req.food_slug:
@@ -730,7 +734,7 @@ def enrich_product_endpoint(
     response_model=ProductProvenanceResponse,
     tags=["Product Intelligence"],
 )
-def get_product_provenance_endpoint(slug: str, db: Session = Depends(get_db)):
+def get_product_provenance_endpoint(slug: str, db: DbSession):
     food = (
         db.query(FoodItem)
         .options(
@@ -780,9 +784,9 @@ def get_product_provenance_endpoint(slug: str, db: Session = Depends(get_db)):
 
 @api_router.post("/scan/recognize-dish", response_model=DishRecognitionResponse, tags=["Dish Recognition"])
 async def recognize_dish_endpoint(
-    file: UploadFile = File(...),
-    user_hint: Optional[str] = Form(default=None),
-    db: Session = Depends(get_db),
+    file: Annotated[UploadFile, File(...)],
+    db: DbSession,
+    user_hint: Annotated[Optional[str], Form()] = None,
 ):
     raw_bytes = await file.read()
     try:
@@ -804,7 +808,7 @@ async def recognize_dish_endpoint(
 # ==========================================
 @api_router.post("/products/compare", response_model=ProductComparisonResponse, tags=["Product Comparison"])
 def compare_products_endpoint(
-    req: ProductComparisonRequest, db: Session = Depends(get_db)
+    req: ProductComparisonRequest, db: DbSession
 ):
     try:
         return compare_packaged_products(db, req)
@@ -814,7 +818,7 @@ def compare_products_endpoint(
 
 @api_router.post("/meals/suggestions", response_model=MealSuggestionResponse, tags=["Meal Suggestions"])
 def suggest_meals_endpoint(
-    req: MealSuggestionRequest, db: Session = Depends(get_db)
+    req: MealSuggestionRequest, db: DbSession
 ):
     return generate_meal_suggestions(db, req)
 
@@ -823,7 +827,9 @@ def suggest_meals_endpoint(
 # 8. LOCAL OLLAMA-POWERED GHARPLATE AI ASSISTANT
 # ==========================================
 @api_router.get("/assistant/status", response_model=AssistantStatusResponse, tags=["AI Assistant"])
-def assistant_status_endpoint(model: Optional[str] = Query(default=None)):
+def assistant_status_endpoint(
+    model: Annotated[Optional[str], Query()] = None,
+):
     return get_ollama_assistant_status(requested_model=model)
 
 
@@ -841,6 +847,6 @@ def assistant_models_endpoint():
 
 @api_router.post("/assistant/chat", response_model=AssistantChatResponse, tags=["AI Assistant"])
 def assistant_chat_endpoint(
-    req: AssistantChatRequest, db: Session = Depends(get_db)
+    req: AssistantChatRequest, db: DbSession
 ):
     return chat_with_gharplate_assistant(db, req)

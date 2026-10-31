@@ -850,4 +850,39 @@ describe('GharPlate Targeted Food Images, Barcode Camera Scanner & Resizable AI 
     const unsafeSpan = screen.getByText('Unsafe JS').closest('a');
     expect(unsafeSpan).toBeNull();
   });
+
+  it('renders all 9 Home page Explore Food Categories cards as compact, text-only clickable cards without image preview areas', async () => {
+    render(
+      <HouseholdProvider>
+        <MemoryRouter initialEntries={['/']}>
+          <AppRoutes />
+        </MemoryRouter>
+      </HouseholdProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('77')).toBeInTheDocument();
+    });
+
+    const expectedCategories = [
+      { slug: 'cereals-millets', title: 'Cereals & Millets' },
+      { slug: 'pulses-legumes', title: 'Pulses & Dals' },
+      { slug: 'vegetables', title: 'Vegetables & Greens' },
+      { slug: 'fruits', title: 'Fresh Fruits' },
+      { slug: 'dairy', title: 'Dairy & Fermented' },
+      { slug: 'protein-sources', title: 'Protein Sources' },
+      { slug: 'nuts-seeds', title: 'Nuts & Seeds' },
+      { slug: 'indian-dishes', title: 'Indian Dishes' },
+      { slug: 'packaged-foods', title: 'Packaged Foods' },
+    ];
+
+    for (const cat of expectedCategories) {
+      const card = screen.getByTestId(`home-category-card-${cat.slug}`);
+      expect(card).toBeInTheDocument();
+      expect(card).toHaveTextContent(cat.title);
+      expect(card.getAttribute('href')).toBe(`/foods?category=${cat.slug}`);
+      // Verify category card is strictly text-only (no <img> or blank image container)
+      expect(card.querySelector('img')).toBeNull();
+    }
+  });
 });

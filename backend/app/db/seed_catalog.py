@@ -5,9 +5,9 @@ and ICMR-NIN Dietary Guidelines for Indians (DGI 2024) standard household measur
 Missing or unmeasured nutrients are explicitly represented as None (NULL), never 0.
 """
 
-from typing import Any, Dict, List
+from typing import Any
 
-DATA_SOURCES_SEED: List[Dict[str, Any]] = [
+DATA_SOURCES_SEED: list[dict[str, Any]] = [
     {
         "code": "ICMR_NIN_IFCT_2017",
         "name": "ICMR-NIN Indian Food Composition Tables 2017",
@@ -109,7 +109,7 @@ DATA_SOURCES_SEED: List[Dict[str, Any]] = [
     },
 ]
 
-NUTRIENT_DEFINITIONS_SEED: List[Dict[str, Any]] = [
+NUTRIENT_DEFINITIONS_SEED: list[dict[str, Any]] = [
     {"code": "energy_kcal", "name": "Energy", "unit": "kcal", "category": "macronutrient", "display_order": 1},
     {"code": "protein_g", "name": "Protein", "unit": "g", "category": "macronutrient", "display_order": 2},
     {"code": "carbs_g", "name": "Total Carbohydrates", "unit": "g", "category": "macronutrient", "display_order": 3},
@@ -132,7 +132,7 @@ NUTRIENT_DEFINITIONS_SEED: List[Dict[str, Any]] = [
     {"code": "folate_mcg", "name": "Dietary Folate", "unit": "mcg", "category": "vitamin", "display_order": 20},
 ]
 
-FOOD_CATEGORIES_SEED: List[Dict[str, Any]] = [
+FOOD_CATEGORIES_SEED: list[dict[str, Any]] = [
     {
         "slug": "cereals-millets",
         "name": "Cereals & Millets",

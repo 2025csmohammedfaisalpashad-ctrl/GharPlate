@@ -14,7 +14,7 @@ import io
 import re
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 from PIL import Image, ImageFilter, ImageOps, ImageStat
 from sqlalchemy.orm import Session, joinedload
 
@@ -58,7 +58,7 @@ from app.services.food_service import normalize_query, serialize_food_detail
 
 def validate_and_inspect_image_in_memory(
     file_bytes: bytes, content_type: Optional[str]
-) -> Tuple[int, int, Tuple[float, float, float]]:
+) -> tuple[int, int, tuple[float, float, float]]:
     if not file_bytes:
         raise ValueError("Uploaded image file is empty.")
     if len(file_bytes) > settings.MAX_UPLOAD_SIZE_BYTES:
@@ -101,7 +101,7 @@ def preprocess_label_image_for_ocr(img: Image.Image) -> Image.Image:
 
 def extract_text_from_image_bytes_in_memory(
     file_bytes: bytes,
-) -> Tuple[str, str, Optional[str]]:
+) -> tuple[str, str, Optional[str]]:
     """
     Attempts OCR extraction across upright and rotated orientations using pytesseract if installed.
     Returns (extracted_text, engine_status, error_reason).
@@ -151,7 +151,7 @@ def extract_text_from_image_bytes_in_memory(
         buf.close()
 
 
-def clean_ocr_numeric_token(raw_token: str) -> Tuple[Optional[float], bool, Optional[float]]:
+def clean_ocr_numeric_token(raw_token: str) -> tuple[Optional[float], bool, Optional[float]]:
     """
     Detects OCR character errors such as 'O' for '0' or 'l'/'I' for '1'.
     Does NOT silently overwrite uncertain values — returns (parsed_val, had_ocr_typo, proposed_correction).
@@ -178,7 +178,7 @@ def clean_ocr_numeric_token(raw_token: str) -> Tuple[Optional[float], bool, Opti
         return None, True, None
 
 
-def _build_empty_failed_ocr_fields() -> Dict[str, OCRFieldPrediction]:
+def _build_empty_failed_ocr_fields() -> dict[str, OCRFieldPrediction]:
     """
     Builds an honest empty field map (with extracted_value=None for every nutrient)
     when OCR fails or detects no text. NEVER inserts synthetic nutrient numbers.
@@ -256,7 +256,7 @@ def parse_nutrition_label_text(
     has_per_serve = bool(re.search(r"per\s*serv(ing|e)", text_lower))
 
     detected_basis = "100g"
-    warnings: List[str] = []
+    warnings: list[str] = []
     if has_100ml:
         detected_basis = "100ml"
     elif has_per_serve and not (has_100g or has_100ml):
@@ -269,7 +269,7 @@ def parse_nutrition_label_text(
             "Multi-column label detected (both Per 100g and Per Serving present). Verify that extracted values correspond to the Per 100g/100ml column."
         )
 
-    fields: Dict[str, OCRFieldPrediction] = {}
+    fields: dict[str, OCRFieldPrediction] = {}
 
     # Extract Product Name, Brand, Serving Size, Net Quantity
     prod_match = re.search(r"product(?:\s*name)?\s*[:\-]\s*(.+)", raw_text, re.IGNORECASE)
@@ -321,7 +321,7 @@ def parse_nutrition_label_text(
         ("sodium_mg", "Sodium", r"sodium\s*[:\-]?\s*([0-9OolIS.,]+)\s*(mg|g)?", "mg", 50000.0),
     ]
 
-    extracted_nums: Dict[str, float] = {}
+    extracted_nums: dict[str, float] = {}
 
     for code, label, pattern, expected_unit, max_possible in nutrient_patterns:
         m = re.search(pattern, raw_text, re.IGNORECASE)
@@ -557,7 +557,7 @@ def process_uploaded_label_image(
     with NULL/None fields and requests a clearer photograph or manual entry.
     """
     validate_and_inspect_image_in_memory(file_bytes, content_type)
-    extracted_segments: List[str] = []
+    extracted_segments: list[str] = []
 
     nut_text, engine_status, err_reason = extract_text_from_image_bytes_in_memory(file_bytes)
     if nut_text.strip():
@@ -823,8 +823,8 @@ def lookup_barcode(
         .first()
     )
 
-    provider_attempts_out: List[ProviderAttemptOut] = []
-    merged_fields: List[str] = []
+    provider_attempts_out: list[ProviderAttemptOut] = []
+    merged_fields: list[str] = []
 
     if local_food:
         ensure_baseline_local_provenance(db, local_food)
@@ -854,7 +854,7 @@ def lookup_barcode(
                 completeness = evaluate_local_product_completeness(local_food)
 
         detail_out = serialize_food_detail(db, local_food)
-        fallback_actions: List[str] = []
+        fallback_actions: list[str] = []
         if not completeness["has_verified_image"]:
             fallback_actions.append(
                 "Upload a front-of-package photograph with consent to display the actual product image"
@@ -1244,7 +1244,7 @@ def recognize_indian_dish_from_image(
     )
 
     hint_blob = f"{filename or ''} {user_hint or ''}".lower()
-    candidates: List[DishCandidateOut] = []
+    candidates: list[DishCandidateOut] = []
 
     for dish in dishes:
         score = 0.28

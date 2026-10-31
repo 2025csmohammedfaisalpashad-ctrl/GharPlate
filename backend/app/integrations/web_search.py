@@ -7,7 +7,7 @@ Never sends household medical profiles or personal identifiers to external searc
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Tuple
+from typing import Any
 import httpx
 from sqlalchemy.orm import Session
 
@@ -30,7 +30,7 @@ class ExternalWebSearchResultItem:
 
 def search_external_web(
     db: Session, query: str, max_results: int = 5
-) -> Tuple[List[ExternalWebSearchResultItem], Dict[str, Any]]:
+) -> tuple[list[ExternalWebSearchResultItem], dict[str, Any]]:
     """
     Executes an external web search using the configured provider ('brave' or 'tavily').
     If disabled or API credentials are not configured, returns a transparent status dict
@@ -84,7 +84,7 @@ def search_external_web(
 
 def _execute_brave_search(
     db: Session, query: str, max_results: int
-) -> Tuple[List[ExternalWebSearchResultItem], Dict[str, Any]]:
+) -> tuple[list[ExternalWebSearchResultItem], dict[str, Any]]:
     cached = get_cached_lookup(db, "BRAVE_SEARCH", "web_search", query)
     if cached is not None:
         cache_row, payload = cached
@@ -173,7 +173,7 @@ def _execute_brave_search(
 
 def _execute_tavily_search(
     db: Session, query: str, max_results: int
-) -> Tuple[List[ExternalWebSearchResultItem], Dict[str, Any]]:
+) -> tuple[list[ExternalWebSearchResultItem], dict[str, Any]]:
     cached = get_cached_lookup(db, "TAVILY_SEARCH", "web_search", query)
     if cached is not None:
         cache_row, payload = cached

@@ -314,7 +314,7 @@ export const HomePage: React.FC = () => {
         </div>
       </section>
 
-      {/* B. EXPLORE FOOD CATEGORIES — 9 Image-Based Category Cards */}
+      {/* B. EXPLORE FOOD CATEGORIES — 9 Compact Text-Only Category Cards */}
       <section className="space-y-4">
         <div className="flex items-center justify-between">
           <div>
@@ -328,8 +328,8 @@ export const HomePage: React.FC = () => {
           </Link>
         </div>
 
-        <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
-          {(categories.length > 0
+        <div className="grid gap-3.5 grid-cols-1 sm:grid-cols-2 md:grid-cols-3">
+          {(categories.length >= 9
             ? categories
             : Object.values(CATEGORY_VISUALS).map((v, i) => ({
                 id: i,
@@ -344,27 +344,32 @@ export const HomePage: React.FC = () => {
             return (
               <Link
                 key={cat.slug}
+                data-testid={`home-category-card-${cat.slug}`}
                 to={`/foods?category=${encodeURIComponent(cat.slug)}`}
-                className="group relative overflow-hidden rounded-3xl border border-stone-200/80 bg-white shadow-sm transition hover:-translate-y-1 hover:border-emerald-600 hover:shadow-lg"
+                className="group flex items-start justify-between gap-3 rounded-2xl border border-stone-200/90 bg-white p-4 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-600 hover:bg-emerald-50/30 hover:shadow-md"
               >
-                <FoodImage
-                  src={cat.image_url || meta.photoUrl}
-                  foodName={cat.name}
-                  categorySlug={cat.slug}
-                  isCategoryCard={true}
-                  aspectClass="aspect-[4/3]"
-                />
-                <div className="p-3.5">
-                  <div className="flex items-center gap-1.5">
-                    <span>{meta.emojiIcon}</span>
+                <div className="flex items-start gap-3 min-w-0">
+                  <span
+                    aria-hidden="true"
+                    className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border text-lg ${meta.accentBg} ${meta.accentBorder}`}
+                  >
+                    {meta.emojiIcon}
+                  </span>
+                  <div className="min-w-0">
                     <h3 className="text-sm font-extrabold text-stone-900 group-hover:text-emerald-800 truncate">
                       {meta.shortTitle || cat.name}
                     </h3>
+                    <p className="mt-0.5 text-xs text-stone-500 line-clamp-2 leading-snug">
+                      {meta.tagline || cat.description}
+                    </p>
                   </div>
-                  <p className="mt-0.5 text-[11px] text-stone-500 line-clamp-1">
-                    {meta.tagline}
-                  </p>
                 </div>
+                <span
+                  aria-hidden="true"
+                  className="mt-1 shrink-0 text-xs font-extrabold text-stone-400 transition-transform group-hover:translate-x-0.5 group-hover:text-emerald-800"
+                >
+                  →
+                </span>
               </Link>
             );
           })}

@@ -9,7 +9,7 @@ Packaged products may only be enriched from exact GTIN/UPC barcode matches or us
 """
 
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 import httpx
 from sqlalchemy.orm import Session
 
@@ -27,7 +27,7 @@ FDC_LICENSE_ATTRIBUTION = (
 )
 
 # Map USDA FDC nutrient numbers / IDs to GharPlate's 20 nutrient codes
-FDC_NUTRIENT_NUMBER_MAP: Dict[str, str] = {
+FDC_NUTRIENT_NUMBER_MAP: dict[str, str] = {
     "208": "energy_kcal",
     "1008": "energy_kcal",
     "203": "protein_g",
@@ -73,7 +73,7 @@ FDC_NUTRIENT_NUMBER_MAP: Dict[str, str] = {
 }
 
 
-def parse_fdc_food_item(item: Dict[str, Any]) -> NormalizedExternalProduct:
+def parse_fdc_food_item(item: dict[str, Any]) -> NormalizedExternalProduct:
     fdc_id = str(item.get("fdcId") or "")
     desc = (item.get("description") or "").strip() or None
     brand = (item.get("brandOwner") or item.get("brandName") or "").strip() or None
@@ -86,7 +86,7 @@ def parse_fdc_food_item(item: Dict[str, Any]) -> NormalizedExternalProduct:
         f"{serving_size} {serving_unit}" if serving_size is not None else None
     )
 
-    nutrients_per_100: Dict[str, Optional[float]] = {}
+    nutrients_per_100: dict[str, Optional[float]] = {}
     for fn in item.get("foodNutrients") or []:
         n_num = str(
             fn.get("nutrientNumber")
@@ -278,7 +278,7 @@ def lookup_fdc_by_barcode(
 
 def search_fdc_foods(
     db: Session, query: str, page_size: int = 5
-) -> Tuple[List[NormalizedExternalProduct], ProviderLookupAttempt]:
+) -> tuple[list[NormalizedExternalProduct], ProviderLookupAttempt]:
     """
     Searches USDA FoodData Central for generic or branded foods.
     """

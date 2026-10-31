@@ -9,12 +9,11 @@ context-aware, grounded answers without ever fabricating nutrient values, ingred
 import json
 import re
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 import httpx
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
-from app.integrations.normalizer import check_allergen_consistency
 from app.integrations.provider_registry import (
     evaluate_local_product_completeness,
     search_multi_source_external_products,
@@ -23,7 +22,6 @@ from app.integrations.web_search import search_external_web
 from app.models.entities import (
     FoodItem,
     FoodNutrientValue,
-    HealthCondition,
     Household,
     HouseholdMember,
 )
@@ -83,7 +81,7 @@ ALLOWLISTED_TOOL_NAMES = [
     "search_external_web_sources",
 ]
 
-OLLAMA_TOOLS_SCHEMA: List[Dict[str, Any]] = [
+OLLAMA_TOOLS_SCHEMA: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
@@ -260,7 +258,7 @@ OLLAMA_TOOLS_SCHEMA: List[Dict[str, Any]] = [
 ]
 
 
-def discover_ollama_models() -> Tuple[bool, List[str], Optional[str]]:
+def discover_ollama_models() -> tuple[bool, list[str], Optional[str]]:
     """
     Queries the local Ollama instance (`GET /api/tags`) to check connectivity
     and list locally installed models without downloading anything automatically.
@@ -360,15 +358,15 @@ def get_ollama_assistant_status(requested_model: Optional[str] = None) -> Assist
 def execute_allowlisted_tool(
     db: Session,
     tool_name: str,
-    arguments: Dict[str, Any],
+    arguments: dict[str, Any],
     mode: str = "automatic",
-) -> Tuple[Dict[str, Any], AssistantToolExecutionTrace, List[AssistantSourceReference]]:
+) -> tuple[dict[str, Any], AssistantToolExecutionTrace, list[AssistantSourceReference]]:
     """
     Executes one of the 11 allowlisted backend tools with strict argument validation
     and mode enforcement (`database_only` blocks external network tools).
     """
     now_iso = datetime.now(timezone.utc).isoformat()
-    sources: List[AssistantSourceReference] = []
+    sources: list[AssistantSourceReference] = []
 
     if tool_name not in ALLOWLISTED_TOOL_NAMES:
         trace = AssistantToolExecutionTrace(
@@ -1016,7 +1014,7 @@ def _resolve_context_food_slug(
 
     # Check if any food item's name appears in the message
     all_foods = db.query(FoodItem.slug, FoodItem.name_en, FoodItem.brand).all()
-    for slug, name_en, brand in all_foods:
+    for slug, name_en, _brand in all_foods:
         base_name = re.sub(r"\s*\(.*?\)", "", name_en.lower()).strip()
         if len(base_name) >= 4 and base_name in msg_lower:
             return slug
@@ -1027,7 +1025,7 @@ def _resolve_context_food_slug(
 def _orchestrate_deterministic_tool_calls(
     db: Session,
     req: AssistantChatRequest,
-) -> Tuple[Dict[str, Any], List[AssistantToolExecutionTrace], List[AssistantSourceReference]]:
+) -> tuple[dict[str, Any], list[AssistantToolExecutionTrace], list[AssistantSourceReference]]:
     """
     Database-first deterministic tool planner that guarantees accurate backend tool execution
     for the current page context and user question, before passing grounded facts to Ollama
@@ -1038,11 +1036,11 @@ def _orchestrate_deterministic_tool_calls(
     mode = req.mode if req.mode in ("database_only", "automatic", "online_search") else "automatic"
     ctx = req.context
 
-    collected_data: Dict[str, Any] = {}
-    traces: List[AssistantToolExecutionTrace] = []
-    sources: List[AssistantSourceReference] = []
+    collected_data: dict[str, Any] = {}
+    traces: list[AssistantToolExecutionTrace] = []
+    sources: list[AssistantSourceReference] = []
 
-    def _run(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+    def _run(name: str, args: dict[str, Any]) -> dict[str, Any]:
         out, tr, srcs = execute_allowlisted_tool(db, name, args, mode=mode)
         traces.append(tr)
         sources.extend(srcs)
@@ -1202,7 +1200,7 @@ def _orchestrate_deterministic_tool_calls(
         )
 
     # Deduplicate sources by title + url
-    unique_sources: List[AssistantSourceReference] = []
+    unique_sources: list[AssistantSourceReference] = []
     seen_src = set()
     for s in sources:
         k = (s.title, s.url)
@@ -1215,14 +1213,14 @@ def _orchestrate_deterministic_tool_calls(
 
 def _synthesize_grounded_response(
     req: AssistantChatRequest,
-    collected_data: Dict[str, Any],
+    collected_data: dict[str, Any],
 ) -> str:
     """
     Synthesizes a concise, factual, grounded answer strictly from retrieved tool data.
     Never invents nutrient values, ingredients, clinical rules, or citations.
     """
     msg_l = req.message.lower()
-    lines: List[str] = []
+    lines: list[str] = []
 
     food_det = collected_data.get("food_details") or {}
     ing_data = collected_data.get("ingredients_and_allergens") or {}
@@ -1444,7 +1442,7 @@ def chat_with_gharplate_assistant(
         f"VERIFIED BACKEND TOOL DATA:\n{json.dumps(collected_data, indent=2, default=str)}"
     )
 
-    messages_payload: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}]
+    messages_payload: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
     for h in req.history[-6:]:
         if h.role in ("user", "assistant") and h.content.strip():
             messages_payload.append({"role": h.role, "content": h.content.strip()})

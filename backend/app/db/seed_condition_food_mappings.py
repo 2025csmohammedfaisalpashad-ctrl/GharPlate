@@ -16,9 +16,9 @@ Every mapping includes:
 - serving_consideration
 """
 
-from typing import Any, Dict, List
+from typing import Any
 
-STRUCTURED_FOOD_TAGS_SEED: List[Dict[str, str]] = [
+STRUCTURED_FOOD_TAGS_SEED: list[dict[str, str]] = [
     # 1. Dietary Classification
     {"code": "vegetarian", "label": "Vegetarian", "tag_domain": "dietary_classification", "description": "Suitable for lacto-vegetarian diets (no meat, poultry, fish, or egg)."},
     {"code": "non_vegetarian", "label": "Non-Vegetarian", "tag_domain": "dietary_classification", "description": "Contains poultry, fish, or meat."},
@@ -76,14 +76,14 @@ def _m(
     relevance_category: str,
     explanation: str,
     relevant_nutrient_or_characteristic: str,
-    relevant_tags: List[str],
+    relevant_tags: list[str],
     source_code: str,
     source_section: str,
     applicability_limitations: str,
     serving_consideration: str = "Evaluate per standard household serving.",
     review_status: str = "reviewed",
     is_active: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     label_map = {
         "relevant_to_explore": "Relevant food to explore",
         "portion_sensitive": "Portion-sensitive",
@@ -108,7 +108,7 @@ def _m(
     }
 
 
-CONDITION_FOOD_MAPPINGS_SEED: List[Dict[str, Any]] = [
+CONDITION_FOOD_MAPPINGS_SEED: list[dict[str, Any]] = [
     # =========================================================================
     # 1. FEVER, REDUCED APPETITE & SHORT-TERM ILLNESS RECOVERY (fever_acute_recovery)
     # Strictly maps ONLY documented supportive foods. Chicken Biryani is NOT mapped.

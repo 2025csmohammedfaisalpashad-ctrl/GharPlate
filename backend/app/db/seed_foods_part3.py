@@ -2,9 +2,9 @@
 Food items Part 3: Nuts & Seeds, Indian Dishes (all 18 required regional dishes), and Packaged Foods.
 """
 
-from typing import Any, Dict, List
+from typing import Any
 
-FOOD_ITEMS_SEED_PART3: List[Dict[str, Any]] = [
+FOOD_ITEMS_SEED_PART3: list[dict[str, Any]] = [
     # ==========================================
     # 7. NUTS AND SEEDS (ICMR-NIN IFCT 2017)
     # ==========================================

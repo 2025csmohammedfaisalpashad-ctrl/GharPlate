@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional
+from typing import Optional
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.entities import (
@@ -20,7 +20,7 @@ from app.schemas.api_schemas import (
 )
 from app.services.food_service import serialize_food_summary
 
-RELEVANCE_TYPE_NORMALIZATION: Dict[str, str] = {
+RELEVANCE_TYPE_NORMALIZATION: dict[str, str] = {
     "relevant_to_explore": "relevant_food_to_explore",
     "relevant_food_to_explore": "relevant_food_to_explore",
     "portion_sensitive": "portion_sensitive",
@@ -29,7 +29,7 @@ RELEVANCE_TYPE_NORMALIZATION: Dict[str, str] = {
     "insufficient_information": "insufficient_information",
 }
 
-RELEVANCE_LABELS: Dict[str, str] = {
+RELEVANCE_LABELS: dict[str, str] = {
     "relevant_food_to_explore": "Relevant food to explore",
     "portion_sensitive": "Portion-sensitive",
     "nutrient_to_monitor": "Nutrient to monitor",
@@ -37,7 +37,7 @@ RELEVANCE_LABELS: Dict[str, str] = {
     "insufficient_information": "Insufficient information",
 }
 
-RELEVANCE_PRIORITY_ORDER: Dict[str, int] = {
+RELEVANCE_PRIORITY_ORDER: dict[str, int] = {
     "relevant_food_to_explore": 1,
     "portion_sensitive": 2,
     "nutrient_to_monitor": 3,
@@ -65,7 +65,7 @@ def _normalize_dietary_preference(pref: Optional[str]) -> Optional[str]:
 
 
 def _is_food_compatible_with_preference(
-    food: FoodItem, tag_codes: List[str], dietary_preference: Optional[str]
+    food: FoodItem, tag_codes: list[str], dietary_preference: Optional[str]
 ) -> bool:
     """
     Evaluate whether a food item is compatible with the requested dietary preference.
@@ -247,7 +247,7 @@ def get_condition_food_recommendations(
         )
     )
 
-    items_out: List[ConditionFoodRecommendationItem] = []
+    items_out: list[ConditionFoodRecommendationItem] = []
 
     for idx, mapping in enumerate(mappings, start=1):
         food = mapping.food
@@ -267,10 +267,10 @@ def get_condition_food_recommendations(
             continue
 
         # Step 3: Verify nutritional information or mark missing relevant nutrients honestly (never replace NULL with 0)
-        nv_map: Dict[str, Optional[float]] = {
+        nv_map: dict[str, Optional[float]] = {
             nv.nutrient_code: nv.value for nv in (food.nutrient_values or [])
         }
-        nutrition_highlights: Dict[str, Optional[float]] = {
+        nutrition_highlights: dict[str, Optional[float]] = {
             code: nv_map.get(code, None) for code in highlight_codes
         }
         missing_relevant = [
@@ -296,7 +296,7 @@ def get_condition_food_recommendations(
         food_allergens = [a.lower() for a in (food.allergen_tags or [])]
         food_intolerances = [i.lower() for i in (food.intolerance_tags or [])]
 
-        allergen_warnings: List[str] = []
+        allergen_warnings: list[str] = []
         for ma in member_allergies:
             if ma in food_allergens or any(ma in fa or fa in ma for fa in food_allergens):
                 allergen_warnings.append(
@@ -304,7 +304,7 @@ def get_condition_food_recommendations(
                     f"contains declared or reference allergen '{ma}'."
                 )
 
-        intolerance_warnings: List[str] = []
+        intolerance_warnings: list[str] = []
         for mi in member_intolerances:
             if mi in food_intolerances or any(mi in fi or fi in mi for fi in food_intolerances):
                 intolerance_warnings.append(

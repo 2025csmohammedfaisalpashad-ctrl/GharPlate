@@ -2,7 +2,7 @@ import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -102,8 +102,8 @@ def ensure_image_and_intelligence_columns(db: Session) -> None:
 
 def ensure_pineapple_cake_regression_record(
     db: Session,
-    categories_by_slug: Dict[str, FoodCategory],
-    nutrients_by_code: Dict[str, NutrientDefinition],
+    categories_by_slug: dict[str, FoodCategory],
+    nutrients_by_code: dict[str, NutrientDefinition],
 ) -> FoodItem:
     """
     Ensures the user's Pineapple Cake record (barcode 8906005618726, slug pkg-pineapple-cake-6b35c3)
@@ -212,7 +212,7 @@ def ensure_pineapple_cake_regression_record(
     return cake
 
 
-def seed_database(db: Session, write_report: bool = True) -> Dict[str, Any]:
+def seed_database(db: Session, write_report: bool = True) -> dict[str, Any]:
     """
     Idempotent, reproducible data-ingestion pipeline.
     Validates records, populates database-driven image_url references, structured FoodTags,
@@ -220,7 +220,7 @@ def seed_database(db: Session, write_report: bool = True) -> Dict[str, Any]:
     """
     ensure_image_and_intelligence_columns(db)
 
-    sources_by_code: Dict[str, DataSource] = {}
+    sources_by_code: dict[str, DataSource] = {}
     for src_data in DATA_SOURCES_SEED:
         existing = db.query(DataSource).filter(DataSource.code == src_data["code"]).first()
         if not existing:
@@ -229,7 +229,7 @@ def seed_database(db: Session, write_report: bool = True) -> Dict[str, Any]:
             db.flush()
         sources_by_code[src_data["code"]] = existing
 
-    nutrients_by_code: Dict[str, NutrientDefinition] = {}
+    nutrients_by_code: dict[str, NutrientDefinition] = {}
     for nut_data in NUTRIENT_DEFINITIONS_SEED:
         existing = (
             db.query(NutrientDefinition)
@@ -242,7 +242,7 @@ def seed_database(db: Session, write_report: bool = True) -> Dict[str, Any]:
             db.flush()
         nutrients_by_code[nut_data["code"]] = existing
 
-    categories_by_slug: Dict[str, FoodCategory] = {}
+    categories_by_slug: dict[str, FoodCategory] = {}
     for cat_data in FOOD_CATEGORIES_SEED:
         existing = db.query(FoodCategory).filter(FoodCategory.slug == cat_data["slug"]).first()
         img_url = resolve_category_image_url(cat_data["slug"])
@@ -255,7 +255,7 @@ def seed_database(db: Session, write_report: bool = True) -> Dict[str, Any]:
         categories_by_slug[cat_data["slug"]] = existing
 
     # Seed Structured FoodTags
-    tags_by_code: Dict[str, FoodTag] = {}
+    tags_by_code: dict[str, FoodTag] = {}
     for tag_data in STRUCTURED_FOOD_TAGS_SEED:
         existing_tag = db.query(FoodTag).filter(FoodTag.code == tag_data["code"]).first()
         if not existing_tag:
@@ -272,11 +272,8 @@ def seed_database(db: Session, write_report: bool = True) -> Dict[str, Any]:
     )
 
     imported_foods_count = 0
-    null_nutrient_records_count = 0
-    known_nutrient_records_count = 0
-    alias_count = 0
 
-    foods_by_slug: Dict[str, FoodItem] = {}
+    foods_by_slug: dict[str, FoodItem] = {}
 
     for food_data in all_foods_seed:
         existing_food = db.query(FoodItem).filter(FoodItem.slug == food_data["slug"]).first()
@@ -345,7 +342,6 @@ def seed_database(db: Session, write_report: bool = True) -> Dict[str, Any]:
                             script_text=al.get("script_text"),
                         )
                     )
-                    alias_count += 1
                 script_val = al.get("script_text")
                 if script_val:
                     norm_script = normalize_alias(script_val)
@@ -361,7 +357,6 @@ def seed_database(db: Session, write_report: bool = True) -> Dict[str, Any]:
                                 script_text=script_val,
                             )
                         )
-                        alias_count += 1
 
             servings_list = food_data.get("servings", [])
             has_100 = any(s["unit_name"] in ("100g", "100ml") for s in servings_list)
@@ -429,10 +424,8 @@ def seed_database(db: Session, write_report: bool = True) -> Dict[str, Any]:
             for nut_code in nutrients_by_code:
                 val = nut_map.get(nut_code, None)
                 if val is None:
-                    null_nutrient_records_count += 1
                     conf_status = "not_measured"
                 else:
-                    known_nutrient_records_count += 1
                     conf_status = (
                         "label_declared" if food_item.is_packaged else "verified_ifct"
                     )
@@ -483,7 +476,7 @@ def seed_database(db: Session, write_report: bool = True) -> Dict[str, Any]:
     ensure_pineapple_cake_regression_record(db, categories_by_slug, nutrients_by_code)
 
     # Seed Health Conditions
-    conditions_by_code: Dict[str, HealthCondition] = {}
+    conditions_by_code: dict[str, HealthCondition] = {}
     for cond_data in HEALTH_CONDITIONS_SEED:
         existing_cond = (
             db.query(HealthCondition)
