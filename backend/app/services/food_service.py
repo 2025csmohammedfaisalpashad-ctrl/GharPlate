@@ -56,7 +56,8 @@ def _resolve_display_image(food: FoodItem) -> Tuple[Optional[str], bool]:
         return None, False
 
     cat_slug = food.category.slug if food.category else "indian-dishes"
-    return resolve_food_image_url(food.slug, cat_slug), True
+    resolved_img = resolve_food_image_url(food.slug, cat_slug)
+    return resolved_img, bool(resolved_img)
 
 
 def serialize_food_summary(food: FoodItem, total_nutrient_defs: int = 20) -> FoodSummaryOut:

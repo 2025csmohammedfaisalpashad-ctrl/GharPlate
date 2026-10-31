@@ -1,18 +1,21 @@
 """
 Automated Test Suite for Multi-Source Barcode Lookup, Pineapple Cake (8906005618726) Enrichment,
-Field-Level Provenance, Conflict Detection, Network Error Handling, and Duplicate Barcode Safety.
+Field-Level Provenance, Conflict Detection, Network Error Handling, Duplicate Barcode Safety,
+and Local Food Photography Catalogue Verification.
 """
 
-from datetime import datetime, timezone
+import json
+from pathlib import Path
 from unittest.mock import patch
-import httpx
+from PIL import Image
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.db.seed_images import CATEGORY_IMAGE_URLS, FOOD_IMAGE_URLS
 from app.db.session import SessionLocal
 from app.integrations.normalizer import NormalizedExternalProduct
 from app.integrations.open_food_facts import ProviderLookupAttempt
-from app.models.entities import FoodItem, FoodNutrientValue, ProductDataConflict
+from app.models.entities import FoodItem, ProductDataConflict
 
 client = TestClient(app)
 
@@ -301,3 +304,62 @@ def test_06_duplicate_barcode_updates_existing_product_safely():
     assert resp.status_code == 200
     assert resp.json()["slug"] == "pkg-pineapple-cake-6b35c3"
     assert resp.json()["barcode"] == "8906005618726"
+
+
+def test_07_local_food_photographs_and_attribution_manifest():
+    """
+    Verifies that all 75 food items in FOOD_IMAGE_URLS and all 9 categories in CATEGORY_IMAGE_URLS
+    point to valid, readable local .webp photographs under frontend/public/images/,
+    with zero duplicate paths and complete attribution documentation.
+    """
+    project_root = Path(__file__).resolve().parents[2]
+    public_dir = project_root / "frontend" / "public"
+
+    assert len(FOOD_IMAGE_URLS) == 75
+    assert len(set(FOOD_IMAGE_URLS.values())) == 75, "Each food must have its own unique local photograph"
+
+    representative_slugs = [
+        "idli-steamed-rice-lentil",
+        "dosa-plain",
+        "masala-dosa",
+        "ragi-mudde-finger-millet-ball",
+        "bisi-bele-bath",
+        "khichdi-moong-dal-rice",
+        "sambar-vegetable-lentil-stew",
+        "banana-ripe",
+        "apple-red",
+        "mango-ripe",
+        "almonds-badam",
+        "paneer-cottage-cheese",
+        "chicken-biryani",
+    ]
+    for rep_slug in representative_slugs:
+        assert rep_slug in FOOD_IMAGE_URLS
+        r = client.get(f"/api/v1/foods/{rep_slug}")
+        assert r.status_code == 200
+        food_json = r.json()
+        assert food_json["image_url"] == FOOD_IMAGE_URLS[rep_slug]
+        assert food_json["has_verified_image"] is True
+
+    for slug, web_path in FOOD_IMAGE_URLS.items():
+        assert web_path.startswith("/images/foods/") and web_path.endswith(".webp")
+        file_path = public_dir / web_path.lstrip("/")
+        assert file_path.exists(), f"Missing local image file for {slug}: {file_path}"
+        with Image.open(file_path) as img:
+            w, h = img.size
+            assert w >= 200 and h >= 200, f"Invalid dimensions for {slug}: {w}x{h}"
+
+    for cat_slug, web_path in CATEGORY_IMAGE_URLS.items():
+        assert web_path.startswith("/images/categories/") and web_path.endswith(".webp")
+        file_path = public_dir / web_path.lstrip("/")
+        assert file_path.exists(), f"Missing local category image file for {cat_slug}: {file_path}"
+        with Image.open(file_path) as img:
+            w, h = img.size
+            assert w >= 200 and h >= 200
+
+    attr_json = public_dir / "images" / "foods" / "attribution.json"
+    attr_md = project_root / "docs" / "IMAGE_ATTRIBUTION.md"
+    assert attr_json.exists()
+    assert attr_md.exists()
+    records = json.loads(attr_json.read_text(encoding="utf-8"))
+    assert len(records) == 84

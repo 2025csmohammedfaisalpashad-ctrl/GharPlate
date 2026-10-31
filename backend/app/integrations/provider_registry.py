@@ -349,7 +349,7 @@ def merge_external_product_into_local(
     # 1. Image enrichment: fill missing image_url if external record has a genuine product photo
     ext_img = ext.front_image_url or ext.image_url
     if ext_img:
-        if not local_food.image_url:
+        if not local_food.image_url or local_food.image_url.startswith("/images/foods/packaged-foods/"):
             local_food.image_url = ext_img
             merged_fields.append("image_url")
             record_field_provenance(

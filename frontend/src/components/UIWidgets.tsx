@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { FoodSummary, GuidanceObservation } from '../types/api';
 import {
   buildFoodIllustrationDataUri,
   CATEGORY_VISUALS,
+  resolveFoodSpecificPhotoUrl,
 } from '../utils/visualAssets';
 
 /**
@@ -12,11 +13,15 @@ import {
  * When `isPackaged === true` and `(!src || hasVerifiedImage === false)`,
  * renders an explicit "No verified product image available" state rather than
  * displaying a generic category illustration as if it were the actual product packaging.
+ * For non-packaged foods, resolves the exact food-specific local photograph first and
+ * never substitutes a generic category photograph for an individual food item.
  */
 export const FoodImage: React.FC<{
   src?: string | null;
   foodName: string;
+  foodSlug?: string;
   categorySlug?: string;
+  isCategoryCard?: boolean;
   isPackaged?: boolean;
   hasVerifiedImage?: boolean;
   className?: string;
@@ -25,7 +30,9 @@ export const FoodImage: React.FC<{
 }> = ({
   src,
   foodName,
+  foodSlug,
   categorySlug = 'indian-dishes',
+  isCategoryCard = false,
   isPackaged = false,
   hasVerifiedImage = true,
   className = '',
@@ -35,8 +42,21 @@ export const FoodImage: React.FC<{
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
 
+  const resolvedFoodSrc = isPackaged
+    ? src && src.trim()
+      ? src.trim()
+      : null
+    : isCategoryCard
+    ? src || CATEGORY_VISUALS[categorySlug]?.photoUrl || null
+    : resolveFoodSpecificPhotoUrl(src, foodName, foodSlug);
+
+  useEffect(() => {
+    setLoaded(false);
+    setFailed(false);
+  }, [resolvedFoodSrc, foodName]);
+
   const isUnverifiedPackagedImage =
-    isPackaged && (!src || !hasVerifiedImage || failed);
+    isPackaged && (!resolvedFoodSrc || !hasVerifiedImage || failed);
 
   if (isUnverifiedPackagedImage) {
     return (
@@ -57,16 +77,15 @@ export const FoodImage: React.FC<{
     );
   }
 
-  const catVisual = CATEGORY_VISUALS[categorySlug] || CATEGORY_VISUALS['indian-dishes'];
-  const primarySrc = src || catVisual.photoUrl;
   const fallbackIllustration = buildFoodIllustrationDataUri(foodName, categorySlug);
-  const effectiveSrc = failed || !primarySrc ? fallbackIllustration : primarySrc;
+  const usingIllustration = failed || !resolvedFoodSrc;
+  const effectiveSrc = usingIllustration ? fallbackIllustration : resolvedFoodSrc;
 
   return (
     <div
       className={`relative overflow-hidden bg-stone-100 ${aspectClass} ${className}`}
     >
-      {!loaded && !failed && (
+      {!loaded && !usingIllustration && (
         <div
           aria-hidden="true"
           className="absolute inset-0 animate-pulse bg-gradient-to-r from-stone-100 via-stone-200 to-stone-100"
@@ -78,16 +97,18 @@ export const FoodImage: React.FC<{
         loading="lazy"
         onLoad={() => setLoaded(true)}
         onError={() => {
-          setFailed(true);
-          setLoaded(true);
+          if (!failed) {
+            setFailed(true);
+            setLoaded(true);
+          }
         }}
         className={`h-full w-full object-cover transition-transform duration-500 group-hover:scale-105 ${
-          loaded ? 'opacity-100' : 'opacity-0'
+          loaded || usingIllustration ? 'opacity-100' : 'opacity-0'
         }`}
       />
       {showBadge && (
         <span className="absolute bottom-2.5 right-2.5 rounded-full bg-stone-900/75 px-2.5 py-0.5 text-[10px] font-semibold text-white backdrop-blur-sm">
-          {failed
+          {usingIllustration
             ? 'Illustrated Reference'
             : isPackaged
             ? 'Verified Package Photo'
@@ -259,6 +280,7 @@ export const FoodCard: React.FC<{
           <FoodImage
             src={food.image_url}
             foodName={food.name_en}
+            foodSlug={food.slug}
             categorySlug={food.category_slug}
             isPackaged={food.is_packaged}
             hasVerifiedImage={food.has_verified_image ?? Boolean(food.image_url)}
@@ -321,6 +343,7 @@ export const FoodCard: React.FC<{
         <FoodImage
           src={food.image_url}
           foodName={food.name_en}
+          foodSlug={food.slug}
           categorySlug={food.category_slug}
           isPackaged={food.is_packaged}
           hasVerifiedImage={food.has_verified_image ?? Boolean(food.image_url)}

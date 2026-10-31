@@ -154,28 +154,28 @@ export const HomePage: React.FC = () => {
                 sub: '146 kcal / 2 idlis',
                 slug: 'idli-steamed-rice-lentil',
                 cat: 'indian-dishes',
-                img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/1/11/Idli_Sambar.JPG/640px-Idli_Sambar.JPG',
+                img: '/images/foods/indian-dishes/idli-steamed-rice-lentil.webp',
               },
               {
                 title: 'Ragi (Finger Millet)',
                 sub: '364 mg Calcium / 100g',
                 slug: 'ragi-finger-millet',
                 cat: 'cereals-millets',
-                img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/b/b2/Eleusine_coracana_seeds.jpg/640px-Eleusine_coracana_seeds.jpg',
+                img: '/images/foods/cereals-millets/ragi-finger-millet.webp',
               },
               {
                 title: 'Palak Paneer',
                 sub: 'Rich in Folate & Calcium',
                 slug: 'palak-paneer-curry',
                 cat: 'indian-dishes',
-                img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/b/b7/Palak_paneer_in_India.jpg/640px-Palak_paneer_in_India.jpg',
+                img: '/images/foods/indian-dishes/palak-paneer-curry.webp',
               },
               {
                 title: 'Almonds (Badam)',
                 sub: '18.4g Protein / 100g',
                 slug: 'almonds-badam',
                 cat: 'nuts-seeds',
-                img: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/83/Almonds.png/640px-Almonds.png',
+                img: '/images/foods/nuts-seeds/almonds-badam.webp',
               },
             ].map((card) => (
               <Link
@@ -351,6 +351,7 @@ export const HomePage: React.FC = () => {
                   src={cat.image_url || meta.photoUrl}
                   foodName={cat.name}
                   categorySlug={cat.slug}
+                  isCategoryCard={true}
                   aspectClass="aspect-[4/3]"
                 />
                 <div className="p-3.5">

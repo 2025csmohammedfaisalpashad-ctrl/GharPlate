@@ -352,10 +352,10 @@ def test_15_visual_redesign_database_image_references():
     """Verifies that database-driven image_url references are populated across foods, categories, comparisons, and meals."""
     foods = client.get("/api/v1/foods", params={"page_size": 15}).json()["items"]
     assert len(foods) >= 10
-    assert all(f.get("image_url") and f["image_url"].startswith("https://") for f in foods)
+    assert all(f.get("image_url") and (f["image_url"].startswith("/images/foods/") or f["image_url"].startswith("https://")) for f in foods)
     # Confirm distinct food images rather than one generic image
     distinct_imgs = {f["image_url"] for f in foods}
     assert len(distinct_imgs) >= 10
 
     almonds = client.get("/api/v1/foods/almonds-badam").json()
-    assert almonds["image_url"] and "Almonds" in almonds["image_url"]
+    assert almonds["image_url"] and "almonds-badam.webp" in almonds["image_url"]

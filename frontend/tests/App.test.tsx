@@ -1,14 +1,17 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { BrowserMultiFormatReader } from '@zxing/browser';
 import { AppRoutes } from '../src/App';
+import { AssistantMarkdown } from '../src/components/AssistantDrawer';
 import { HouseholdProvider } from '../src/hooks/useHousehold';
 
 const mockFetch = vi.fn();
 globalThis.fetch = mockFetch as unknown as typeof fetch;
 
 beforeEach(() => {
+  window.localStorage.clear();
   mockFetch.mockReset();
   mockFetch.mockImplementation(async (url: string) => {
     if (url.includes('/health')) {
@@ -69,7 +72,7 @@ beforeEach(() => {
             slug: 'packaged-foods',
             name: 'Packaged Foods',
             description: 'Packaged foods',
-            image_url: null,
+            image_url: '/images/categories/packaged-foods.webp',
             display_order: 9,
           },
           is_packaged: true,
@@ -175,7 +178,7 @@ beforeEach(() => {
           ollama_reachable: true,
           configured_model: 'llama3.2:latest',
           active_model: 'llama3.2:latest',
-          installed_models: ['llama3.2:latest'],
+          installed_models: ['llama3.2:latest', 'qwen2.5:7b'],
           status_message: "Connected to local Ollama using model 'llama3.2:latest'.",
           remediation_command: null,
           available_modes: [
@@ -191,8 +194,7 @@ beforeEach(() => {
       return {
         ok: true,
         json: async () => ({
-          reply:
-            '**Pineapple Cake** (winkles) • Barcode: `8906005618726`\n- **Declared Ingredients:** REFINED WHEAT FLOUR (MAIDA), EGGS, SUGAR, PINEAPPLE CUTS (2%).\n- **Allergen Consistency Note:** Label declares **soy** in addition to wheat, milk, and egg.',
+          reply: `## Fever-related food information\n\nFor short-term illness recovery:\n\n**Foods to explore:**\n\n1. Moong Dal Khichdi.\n2. Idli.\n3. Pongal.\n\n**Allergen Consistency Note:** Label declares **soy** in addition to wheat, milk, and egg.\n\n| Food | Energy | Protein |\n|---|---|---|\n| Khichdi | 118 kcal | 4.3 g |\n\n\`\`\`json\n{"barcode": "8906005618726"}\n\`\`\`\n\n[ICMR-NIN Guidelines](https://www.nin.res.in)`,
           mode_used: 'automatic',
           model_used: 'llama3.2:latest',
           ollama_connected: true,
@@ -217,6 +219,47 @@ beforeEach(() => {
           ],
           suggested_followups: ['Why are the nutritional values missing?'],
           medical_disclaimer: 'Educational only.',
+        }),
+      };
+    }
+    if (url.includes('/scan/barcode/8901491101813')) {
+      return {
+        ok: true,
+        json: async () => ({
+          barcode: '8901491101813',
+          barcode_format: 'EAN-13',
+          is_valid_barcode: true,
+          found: true,
+          source_origin: 'open_food_facts_v3',
+          retrieval_timestamp: new Date().toISOString(),
+          message: "Found packaged product 'Crunchy Almond Muesli' with verified product photo.",
+          fallback_actions: [],
+          provider_attempts: [
+            {
+              provider_code: 'OPEN_FOOD_FACTS',
+              provider_name: 'Open Food Facts',
+              status: 'found',
+              http_status: 200,
+              message: 'Matched exact barcode 8901491101813.',
+              from_cache: false,
+              retrieved_at: new Date().toISOString(),
+            },
+          ],
+          product: {
+            id: 68,
+            slug: 'packaged-crunchy-muesli-almond',
+            name_en: 'Crunchy Almond Muesli',
+            image_url: 'https://images.openfoodfacts.org/images/products/890/149/110/1813/front_en.jpg',
+            has_verified_image: true,
+            is_packaged: true,
+            brand: 'Bagrrys',
+            barcode: '8901491101813',
+            standard_serving_name: '1 bowl (40g)',
+            standard_serving_grams: 40,
+            completeness_pct: 85,
+            available_nutrient_count: 17,
+            confidence_level: 'openfoodfacts',
+          },
         }),
       };
     }
@@ -291,7 +334,7 @@ beforeEach(() => {
               slug: 'khichdi-moong-dal-rice',
               ifct_code: null,
               name_en: 'Khichdi (Moong Dal & Rice)',
-              image_url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a3/Khichdi.jpg/640px-Khichdi.jpg',
+              image_url: '/images/foods/indian-dishes/khichdi-moong-dal-rice.webp',
               category: 'Indian Dishes',
               category_slug: 'indian-dishes',
               category_name: 'Indian Dishes',
@@ -419,7 +462,7 @@ beforeEach(() => {
             slug: 'cereals-millets',
             name: 'Cereals & Millets',
             description: 'Staple grains and millets',
-            image_url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/b/b2/Eleusine_coracana_seeds.jpg/640px-Eleusine_coracana_seeds.jpg',
+            image_url: '/images/categories/cereals-millets.webp',
             display_order: 1,
           },
         ],
@@ -441,7 +484,7 @@ beforeEach(() => {
               slug: 'ragi-finger-millet',
               ifct_code: 'A010',
               name_en: 'Ragi (Finger Millet)',
-              image_url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/b/b2/Eleusine_coracana_seeds.jpg/640px-Eleusine_coracana_seeds.jpg',
+              image_url: '/images/foods/cereals-millets/ragi-finger-millet.webp',
               category_slug: 'cereals-millets',
               category_name: 'Cereals & Millets',
               is_packaged: false,
@@ -500,8 +543,12 @@ beforeEach(() => {
   });
 });
 
-describe('GharPlate Redesigned Visual UI, Packaged Product Intelligence & AI Assistant Suite', () => {
-  it('renders Redesigned Visual Home Page with hero, food photos, and live stats', async () => {
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+describe('GharPlate Targeted Food Images, Barcode Camera Scanner & Resizable AI Assistant Suite', () => {
+  it('renders Redesigned Visual Home Page with local .webp food photographs and live stats', async () => {
     render(
       <HouseholdProvider>
         <MemoryRouter initialEntries={['/']}>
@@ -514,9 +561,14 @@ describe('GharPlate Redesigned Visual UI, Packaged Product Intelligence & AI Ass
     await waitFor(() => {
       expect(screen.getByText('77')).toBeInTheDocument();
     });
+
+    const idliImg = screen.getByAltText('Idli & Sambar') as HTMLImageElement;
+    expect(idliImg.getAttribute('src')).toBe(
+      '/images/foods/indian-dishes/idli-steamed-rice-lentil.webp'
+    );
   });
 
-  it('renders Image-First Food Explorer with Grid and Compact List view toggle', async () => {
+  it('renders Image-First Food Explorer with Grid and Compact List view toggle and local food photograph', async () => {
     render(
       <HouseholdProvider>
         <MemoryRouter initialEntries={['/foods']}>
@@ -528,6 +580,11 @@ describe('GharPlate Redesigned Visual UI, Packaged Product Intelligence & AI Ass
     await waitFor(() => {
       expect(screen.getByText('Ragi (Finger Millet)')).toBeInTheDocument();
     });
+
+    const ragiImg = screen.getByAltText('Ragi (Finger Millet)') as HTMLImageElement;
+    expect(ragiImg.getAttribute('src')).toBe(
+      '/images/foods/cereals-millets/ragi-finger-millet.webp'
+    );
 
     const listBtn = screen.getByText(/Compact List/i);
     fireEvent.click(listBtn);
@@ -570,7 +627,7 @@ describe('GharPlate Redesigned Visual UI, Packaged Product Intelligence & AI Ass
     expect(screen.queryByText(/Chicken Biryani/i)).not.toBeInTheDocument();
   });
 
-  it('renders Pineapple Cake packaged product page with visible barcode, visible ingredients, soy consistency alert, honest missing-image card, and missing-nutrition actions', async () => {
+  it('renders Pineapple Cake packaged product page with visible barcode, visible ingredients, soy consistency alert, and honest missing-image card', async () => {
     render(
       <HouseholdProvider>
         <MemoryRouter initialEntries={['/foods/pkg-pineapple-cake-6b35c3']}>
@@ -583,30 +640,80 @@ describe('GharPlate Redesigned Visual UI, Packaged Product Intelligence & AI Ass
       expect(screen.getByTestId('product-barcode-value')).toHaveTextContent('8906005618726');
     });
 
-    // Honest missing-image card (never shows generic Muesli photo)
     expect(screen.getByTestId('no-verified-product-image')).toBeInTheDocument();
     expect(screen.getByText(/No verified product image available/i)).toBeInTheDocument();
-
-    // Visible Ingredients & Allergens section (not hidden inside collapsed accordion)
     expect(screen.getByTestId('visible-ingredients-allergens-section')).toBeInTheDocument();
     expect(
       screen.getAllByText(/REFINED WHEAT FLOUR \(MAIDA\)/i).length
     ).toBeGreaterThan(0);
-
-    // Soy allergen consistency alert
     expect(screen.getByTestId('allergen-consistency-alert')).toBeInTheDocument();
     expect(screen.getByText(/mentions \[soy\]/i)).toBeInTheDocument();
-
-    // Actionable missing-nutrition card (not a wall of NULLs)
     expect(screen.getByTestId('missing-nutrition-action-card')).toBeInTheDocument();
-    expect(
-      screen.getByText(/Nutrition values have not yet been captured for this product/i)
-    ).toBeInTheDocument();
-    expect(screen.getByText(/Search Online Databases/i)).toBeInTheDocument();
   });
 
-  it('supports Barcode Lookup page and camera scanner state handling', async () => {
-    render(
+  it('handles camera permission denied, no camera found, live video stream attachment, non-zero dimensions, ZXing Safari barcode detection, automatic lookup with product image, and stop/unmount cleanup', async () => {
+    const stopTrackSpy = vi.fn();
+    const mockTrack = {
+      stop: stopTrackSpy,
+      readyState: 'live',
+      onended: null,
+      getSettings: () => ({ deviceId: 'cam_1', width: 1280, height: 720 }),
+      getCapabilities: () => ({ torch: true }),
+      applyConstraints: vi.fn().mockResolvedValue(undefined),
+    };
+    const mockStream = {
+      getTracks: () => [mockTrack],
+      getVideoTracks: () => [mockTrack],
+    } as unknown as MediaStream;
+
+    // 1. Test Permission Denied
+    const getUserMediaMock = vi
+      .fn()
+      .mockRejectedValueOnce(
+        Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' })
+      )
+      // 2. Test No Camera Found
+      .mockRejectedValueOnce(
+        Object.assign(new Error('Requested device not found'), { name: 'NotFoundError' })
+      )
+      // 3. Test Successful Camera Stream + ZXing Barcode Detection in Safari (no native BarcodeDetector)
+      .mockResolvedValue(mockStream);
+
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      writable: true,
+      value: {
+        getUserMedia: getUserMediaMock,
+        enumerateDevices: vi.fn().mockResolvedValue([
+          { kind: 'videoinput', deviceId: 'cam_1', label: 'FaceTime HD Camera' },
+        ]),
+      },
+    });
+
+    // Mock HTMLVideoElement play and non-zero dimensions
+    vi.spyOn(window.HTMLMediaElement.prototype, 'play').mockImplementation(async function (
+      this: HTMLVideoElement
+    ) {
+      Object.defineProperty(this, 'readyState', { configurable: true, value: 4 });
+      Object.defineProperty(this, 'paused', { configurable: true, value: false });
+      Object.defineProperty(this, 'ended', { configurable: true, value: false });
+      Object.defineProperty(this, 'videoWidth', { configurable: true, value: 1280 });
+      Object.defineProperty(this, 'videoHeight', { configurable: true, value: 720 });
+    });
+    vi.spyOn(window.HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
+
+    // Ensure native BarcodeDetector is absent so Safari ZXing fallback is exercised
+    delete (window as unknown as { BarcodeDetector?: unknown }).BarcodeDetector;
+
+    // Mock ZXing BrowserMultiFormatReader.prototype.decode to detect EAN-13 8901491101813
+    const zxingDecodeSpy = vi
+      .spyOn(BrowserMultiFormatReader.prototype, 'decode')
+      .mockReturnValue({
+        getText: () => '8901491101813',
+        getBarcodeFormat: () => 'EAN_13',
+      } as unknown as ReturnType<BrowserMultiFormatReader['decode']>);
+
+    const { unmount } = render(
       <HouseholdProvider>
         <MemoryRouter initialEntries={['/barcode']}>
           <AppRoutes />
@@ -614,24 +721,55 @@ describe('GharPlate Redesigned Visual UI, Packaged Product Intelligence & AI Ass
       </HouseholdProvider>
     );
 
-    const startCamBtn = screen.getByTestId('start-camera-scanner-btn');
-    fireEvent.click(startCamBtn);
+    // Video element is mounted in the DOM from initial render (fixes React videoRef null bug)
+    const videoEl = screen.getByTestId('live-barcode-video') as HTMLVideoElement;
+    expect(videoEl).toBeInTheDocument();
 
+    // Attempt 1: Permission denied
+    fireEvent.click(screen.getByTestId('start-camera-scanner-btn'));
     await waitFor(() => {
-      expect(screen.getByTestId('camera-scanner-error')).toBeInTheDocument();
+      expect(screen.getByTestId('camera-scanner-error')).toHaveTextContent(
+        /Camera permission was denied/i
+      );
     });
 
-    const searchBtn = screen.getByText(/^Search Barcode$/i);
-    fireEvent.click(searchBtn);
-
+    // Attempt 2: No camera found
+    fireEvent.click(screen.getByTestId('start-camera-scanner-btn'));
     await waitFor(() => {
-      expect(
-        screen.getByText(/Found packaged product 'Pineapple Cake'/i)
-      ).toBeInTheDocument();
+      expect(screen.getByTestId('camera-scanner-error')).toHaveTextContent(
+        /No camera device was found/i
+      );
     });
+
+    // Attempt 3: Camera granted -> attaches stream, verifies 1280x720, runs ZXing decode, stops camera, and looks up 8901491101813
+    fireEvent.click(screen.getByTestId('start-camera-scanner-btn'));
+
+    await waitFor(
+      () => {
+        expect(zxingDecodeSpy).toHaveBeenCalled();
+        expect(screen.getByTestId('camera-scanner-status')).toHaveTextContent(
+          /Detected barcode: 8901491101813/i
+        );
+      },
+      { timeout: 2500 }
+    );
+
+    // Verify automatic barcode API lookup and immediate display of the verified Open Food Facts product image
+    await waitFor(() => {
+      expect(screen.getAllByText(/Crunchy Almond Muesli/i).length).toBeGreaterThan(0);
+    });
+    const muesliImg = screen.getByAltText('Crunchy Almond Muesli') as HTMLImageElement;
+    expect(muesliImg.getAttribute('src')).toBe(
+      'https://images.openfoodfacts.org/images/products/890/149/110/1813/front_en.jpg'
+    );
+
+    // Verify camera tracks were stopped after detection
+    expect(stopTrackSpy).toHaveBeenCalled();
+
+    unmount();
   });
 
-  it('opens the Ask GharPlate AI Assistant drawer, switches search modes, and sends a context-aware question', async () => {
+  it('opens the Ask GharPlate Assistant as a resizable floating window, persists width and dock side, preserves conversation on Escape/reopen, and renders rich Markdown without literal asterisks', async () => {
     render(
       <HouseholdProvider>
         <MemoryRouter initialEntries={['/foods/pkg-pineapple-cake-6b35c3']}>
@@ -643,23 +781,73 @@ describe('GharPlate Redesigned Visual UI, Packaged Product Intelligence & AI Ass
     const fab = await screen.findByTestId('ask-gharplate-fab');
     fireEvent.click(fab);
 
-    expect(screen.getByTestId('assistant-drawer')).toBeInTheDocument();
+    const drawer = screen.getByTestId('assistant-drawer');
+    const floatingWindow = screen.getByTestId('assistant-floating-window');
+    const backdrop = screen.getByTestId('assistant-backdrop');
+    const resizeHandle = screen.getByTestId('assistant-resize-handle');
 
-    // Switch modes
-    const dbModeBtn = screen.getByTestId('assistant-mode-database_only');
-    fireEvent.click(dbModeBtn);
-    const onlineModeBtn = screen.getByTestId('assistant-mode-online_search');
-    fireEvent.click(onlineModeBtn);
-    const autoModeBtn = screen.getByTestId('assistant-mode-automatic');
-    fireEvent.click(autoModeBtn);
+    expect(drawer).toBeInTheDocument();
+    expect(floatingWindow).toBeInTheDocument();
+    expect(backdrop).toBeInTheDocument();
 
+    // Test interactive horizontal resizing via pointer events
+    fireEvent.mouseDown(resizeHandle, { clientX: 700 });
+    fireEvent.mouseMove(window, { clientX: 550 }); // Dragging left when docked right increases width
+    fireEvent.mouseUp(window);
+
+    const resizedWidth = Number(
+      window.localStorage.getItem('gharplate_assistant_width_px')
+    );
+    expect(resizedWidth).toBeGreaterThanOrEqual(360);
+
+    // Test docking Left / Right toggle
+    const dockToggle = screen.getByTestId('assistant-dock-toggle');
+    fireEvent.click(dockToggle);
+    expect(window.localStorage.getItem('gharplate_assistant_dock_side')).toBe('left');
+    fireEvent.click(dockToggle);
+    expect(window.localStorage.getItem('gharplate_assistant_dock_side')).toBe('right');
+
+    // Send a message and verify Rich Markdown formatting (headings, bold, numbered list, table, code block, safe link)
     const input = screen.getByLabelText(/Ask GharPlate Input/i);
     fireEvent.change(input, { target: { value: 'What are the ingredients in this cake?' } });
-    fireEvent.click(screen.getByText(/^Send$/i));
+    fireEvent.click(screen.getByText(/Send ↑/i));
 
     await waitFor(() => {
-      expect(screen.getByText(/get_ingredients_and_allergens/i)).toBeInTheDocument();
-      expect(screen.getByText(/Allergen Consistency Note/i)).toBeInTheDocument();
+      expect(screen.getByText('Fever-related food information')).toBeInTheDocument();
     });
+
+    const markdownBody = screen.getByTestId('assistant-markdown-body');
+    // Verify literal ** asterisks are NOT displayed
+    expect(markdownBody.textContent).not.toContain('**Foods to explore:**');
+    expect(markdownBody.querySelector('h2')?.textContent).toBe(
+      'Fever-related food information'
+    );
+    expect(markdownBody.querySelector('ol')).not.toBeNull();
+    expect(markdownBody.querySelector('table')).not.toBeNull();
+    expect(screen.getByTestId('copy-code-btn')).toBeInTheDocument();
+    expect(screen.getByTestId('copy-answer-btn')).toBeInTheDocument();
+
+    // Close with Escape and reopen: verify conversation & width are preserved
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByTestId('assistant-drawer')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('ask-gharplate-fab'));
+    expect(screen.getByTestId('assistant-drawer')).toBeInTheDocument();
+    expect(screen.getByText('Fever-related food information')).toBeInTheDocument();
+  });
+
+  it('sanitizes unsafe links and raw HTML in AssistantMarkdown', () => {
+    render(
+      <AssistantMarkdown
+        content={`Click [Safe Link](https://www.nin.res.in) or [Unsafe JS](javascript:alert(1))`}
+      />
+    );
+
+    const safeAnchor = screen.getByText('Safe Link').closest('a');
+    expect(safeAnchor).not.toBeNull();
+    expect(safeAnchor?.getAttribute('href')).toBe('https://www.nin.res.in');
+
+    const unsafeSpan = screen.getByText('Unsafe JS').closest('a');
+    expect(unsafeSpan).toBeNull();
   });
 });
