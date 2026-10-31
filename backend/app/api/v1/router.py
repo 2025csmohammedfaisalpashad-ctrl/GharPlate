@@ -3,6 +3,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session, joinedload
 
+from app.core.config import settings
 from app.db.session import get_db
 from app.integrations.normalizer import check_allergen_consistency
 from app.integrations.provider_registry import (
