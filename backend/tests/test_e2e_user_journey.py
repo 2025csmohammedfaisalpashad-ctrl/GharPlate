@@ -15,21 +15,22 @@ Executes the full 12-step household journey against the real database and API co
 12. Review, correct, and confirm OCR results into a saved product record
 """
 
-from fastapi.testclient import TestClient
 from app.main import app
+from tests.conftest import AuthenticatedTestClient
 
-client = TestClient(app)
+client = AuthenticatedTestClient(app)
 
 
 def test_complete_12_step_gharplate_user_journey():
+    client.ensure_authenticated()
     # Step 1: Open GharPlate & verify health + data sources
     health = client.get("/api/v1/health").json()
     assert health["status"] == "healthy"
     sources = client.get("/api/v1/sources").json()
     assert len(sources) >= 8
 
-    # Step 2: Create a household with browser convenience token
-    token = "hh_e2e_mysuru_family_2026"
+    # Step 2: Update authenticated user's household
+    token = client.household_token
     hh = client.post(
         "/api/v1/households",
         json={"household_token": token, "name": "Mysuru Rao Household"},

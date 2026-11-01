@@ -3,17 +3,112 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { BrowserMultiFormatReader } from '@zxing/browser';
-import { AppRoutes } from '../src/App';
+import { App, AppRoutes } from '../src/App';
 import { AssistantMarkdown } from '../src/components/AssistantDrawer';
 import { HouseholdProvider } from '../src/hooks/useHousehold';
 
 const mockFetch = vi.fn();
 globalThis.fetch = mockFetch as unknown as typeof fetch;
+let mockAuthenticated = true;
+
+const MOCK_HOUSEHOLD = {
+  id: 1,
+  household_token: 'hh_mock_token_123',
+  name: 'Test Household',
+  default_member_id: 1,
+  privacy_notice: 'Private account household',
+  created_at: new Date().toISOString(),
+  members: [
+    {
+      id: 1,
+      household_id: 1,
+      display_name: 'Ajji',
+      age_group: 'older_adult',
+      dietary_preference: 'vegetarian',
+      selected_conditions: ['type_2_diabetes'],
+      allergies: ['peanut'],
+      intolerances: ['lactose'],
+      dietary_restrictions: [],
+      food_preferences: [],
+      created_at: new Date().toISOString(),
+    },
+  ],
+};
+
+const MOCK_AUTH_SESSION = {
+  authenticated: true,
+  user: {
+    id: 1,
+    email: 'priya.rao@gharplate.in',
+    full_name: 'Priya Rao',
+    is_active: true,
+    created_at: new Date().toISOString(),
+  },
+  household: MOCK_HOUSEHOLD,
+  csrf_token: 'csrf_test_token_123',
+};
 
 beforeEach(() => {
   window.localStorage.clear();
+  window.sessionStorage.clear();
+  mockAuthenticated = true;
   mockFetch.mockReset();
-  mockFetch.mockImplementation(async (url: string) => {
+  mockFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+    if (url.includes('/auth/me')) {
+      if (!mockAuthenticated) {
+        return {
+          ok: false,
+          status: 401,
+          json: async () => ({ detail: 'Authentication required.' }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => MOCK_AUTH_SESSION,
+      };
+    }
+    if (url.includes('/auth/login')) {
+      const body = init?.body ? JSON.parse(String(init.body)) : {};
+      if (body.email === 'unknown@gharplate.in' || body.password === 'WrongPass123!') {
+        return {
+          ok: false,
+          status: 401,
+          json: async () => ({
+            detail: 'Invalid email address or password. Please verify your credentials or create an account.',
+          }),
+        };
+      }
+      mockAuthenticated = true;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => MOCK_AUTH_SESSION,
+      };
+    }
+    if (url.includes('/auth/register')) {
+      mockAuthenticated = true;
+      return {
+        ok: true,
+        status: 201,
+        json: async () => MOCK_AUTH_SESSION,
+      };
+    }
+    if (url.includes('/auth/logout')) {
+      mockAuthenticated = false;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ logged_out: true }),
+      };
+    }
+    if (url.includes('/assistant/conversations')) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => [],
+      };
+    }
     if (url.includes('/health')) {
       return {
         ok: true,
@@ -29,29 +124,7 @@ beforeEach(() => {
     if (url.includes('/households')) {
       return {
         ok: true,
-        json: async () => ({
-          id: 1,
-          household_token: 'hh_mock_token_123',
-          name: 'Test Household',
-          default_member_id: 1,
-          privacy_notice: 'Convenience token only',
-          created_at: new Date().toISOString(),
-          members: [
-            {
-              id: 1,
-              household_id: 1,
-              display_name: 'Ajji',
-              age_group: 'older_adult',
-              dietary_preference: 'vegetarian',
-              selected_conditions: ['type_2_diabetes'],
-              allergies: ['peanut'],
-              intolerances: ['lactose'],
-              dietary_restrictions: [],
-              food_preferences: [],
-              created_at: new Date().toISOString(),
-            },
-          ],
-        }),
+        json: async () => MOCK_HOUSEHOLD,
       };
     }
     if (url.includes('/foods/pkg-pineapple-cake-6b35c3')) {
@@ -884,5 +957,465 @@ describe('GharPlate Targeted Food Images, Barcode Camera Scanner & Resizable AI 
       // Verify category card is strictly text-only (no <img> or blank image container)
       expect(card.querySelector('img')).toBeNull();
     }
+  });
+
+  it('displays the Login / Sign-up landing page when unauthenticated, rejects unregistered credentials via backend API, authenticates registered accounts, and logs out cleanly', async () => {
+    mockAuthenticated = false;
+    render(<App />);
+
+    // 1. Verify Login / Sign-up landing page is shown after backend /auth/me returns 401
+    await waitFor(() => {
+      expect(screen.getByTestId('auth-landing-page')).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Every Indian Kitchen Deserves/i)).toBeInTheDocument();
+
+    // Verify demo login button is NOT present
+    expect(screen.queryByTestId('demo-login-btn')).not.toBeInTheDocument();
+
+    // 2. Verify interactive animated food plate and Assemble Nourishing Plate CTA
+    const plate = screen.getByTestId('interactive-food-plate');
+    expect(plate.getAttribute('data-plate-state')).toBe('orbiting');
+    expect(screen.getByTestId('plate-calorie-readout')).toHaveTextContent('477 kcal');
+
+    fireEvent.click(screen.getByTestId('animate-plate-btn'));
+    expect(plate.getAttribute('data-plate-state')).toBe('assembled');
+    expect(screen.getByTestId('plate-calorie-readout')).toHaveTextContent('643 kcal');
+
+    // 3. Verify live food discovery search on landing page
+    const discoveryInput = screen.getByTestId('landing-food-search-input');
+    fireEvent.change(discoveryInput, { target: { value: 'Avalakki' } });
+    expect(
+      screen.getByTestId('discovery-food-card-poha-avalakki-cooked')
+    ).toBeInTheDocument();
+    fireEvent.change(discoveryInput, { target: { value: '' } });
+
+    // 4. Test Sign-up mode switch, validation error, and password show/hide toggle
+    fireEvent.click(screen.getByTestId('tab-signup'));
+    expect(screen.getByTestId('signup-name-input')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('auth-submit-btn'));
+    expect(screen.getByTestId('auth-error-banner')).toHaveTextContent(
+      /Please enter your name/i
+    );
+
+    // Switch back to Login, test rejected unregistered email, then sign in with valid credentials
+    fireEvent.click(screen.getByTestId('tab-login'));
+    const emailInput = screen.getByTestId('auth-email-input') as HTMLInputElement;
+    const passwordInput = screen.getByTestId('auth-password-input') as HTMLInputElement;
+
+    expect(passwordInput.type).toBe('password');
+    fireEvent.click(screen.getByTestId('toggle-password-visibility'));
+    expect(passwordInput.type).toBe('text');
+
+    fireEvent.change(emailInput, { target: { value: 'unknown@gharplate.in' } });
+    fireEvent.change(passwordInput, { target: { value: 'WrongPass123!' } });
+    fireEvent.click(screen.getByTestId('auth-submit-btn'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('auth-error-banner')).toHaveTextContent(
+        /Invalid email address or password/i
+      );
+    });
+    expect(screen.getByTestId('auth-landing-page')).toBeInTheDocument();
+
+    fireEvent.change(emailInput, { target: { value: 'priya.rao@gharplate.in' } });
+    fireEvent.change(passwordInput, { target: { value: 'NourishIndia2026!' } });
+    fireEvent.click(screen.getByTestId('auth-submit-btn'));
+
+    // 5. Verify navigation to the existing GharPlate HomePage after backend authentication
+    await waitFor(() => {
+      expect(screen.getByText(/Know What’s on Your Plate/i)).toBeInTheDocument();
+    });
+
+    // 6. Verify Sign Out calls backend /auth/logout and returns to the Login / Sign-up landing page
+    fireEvent.click(screen.getByTestId('header-signout-btn'));
+    await waitFor(() => {
+      expect(screen.getByTestId('auth-landing-page')).toBeInTheDocument();
+    });
+  });
+
+  it('verifies all 8 New Chat & Saved Chats conversation-management scenarios: 5-message chat -> + New Chat blank welcome state -> isolated new message -> switch back to 5-message chat -> switch to new chat -> search, rename, and delete with confirmation', async () => {
+    const nowIso = new Date().toISOString();
+    const yesterdayIso = new Date(Date.now() - 86400000).toISOString();
+
+    interface MockConvStore {
+      id: number;
+      title: string;
+      created_at: string;
+      updated_at: string;
+      messages: {
+        id: number;
+        conversation_id: number;
+        role: 'user' | 'assistant';
+        content: string;
+        mode_used: string;
+        model_used: string;
+        ollama_connected: boolean;
+        tool_traces: [];
+        sources: [];
+        created_at: string;
+      }[];
+    }
+
+    let nextConvId = 200;
+    let nextMsgId = 500;
+    const convStore: MockConvStore[] = [
+      {
+        id: 101,
+        title: 'Ragi Calcium & Sambar Guide',
+        created_at: yesterdayIso,
+        updated_at: yesterdayIso,
+        messages: [
+          {
+            id: 1,
+            conversation_id: 101,
+            role: 'user',
+            content: 'Message 1: What is the calcium content in Ragi?',
+            mode_used: 'automatic',
+            model_used: 'llama3.2:latest',
+            ollama_connected: true,
+            tool_traces: [],
+            sources: [],
+            created_at: yesterdayIso,
+          },
+          {
+            id: 2,
+            conversation_id: 101,
+            role: 'assistant',
+            content: 'Message 2: Ragi contains 364 mg of calcium per 100g according to IFCT 2017.',
+            mode_used: 'automatic',
+            model_used: 'llama3.2:latest',
+            ollama_connected: true,
+            tool_traces: [],
+            sources: [],
+            created_at: yesterdayIso,
+          },
+          {
+            id: 3,
+            conversation_id: 101,
+            role: 'user',
+            content: 'Message 3: Is Ragi Mudde suitable for vegetarians?',
+            mode_used: 'automatic',
+            model_used: 'llama3.2:latest',
+            ollama_connected: true,
+            tool_traces: [],
+            sources: [],
+            created_at: yesterdayIso,
+          },
+          {
+            id: 4,
+            conversation_id: 101,
+            role: 'assistant',
+            content: 'Message 4: Yes, Ragi Mudde is 100% plant-based and vegetarian.',
+            mode_used: 'automatic',
+            model_used: 'llama3.2:latest',
+            ollama_connected: true,
+            tool_traces: [],
+            sources: [],
+            created_at: yesterdayIso,
+          },
+          {
+            id: 5,
+            conversation_id: 101,
+            role: 'user',
+            content: 'Message 5: How much protein does Sambar add?',
+            mode_used: 'automatic',
+            model_used: 'llama3.2:latest',
+            ollama_connected: true,
+            tool_traces: [],
+            sources: [],
+            created_at: yesterdayIso,
+          },
+        ],
+      },
+    ];
+
+    const prevImpl = mockFetch.getMockImplementation();
+    mockFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      const method = (init?.method || 'GET').toUpperCase();
+
+      if (url.includes('/assistant/conversations/')) {
+        const idStr = url.split('/assistant/conversations/')[1]?.split('?')[0];
+        const targetId = Number(idStr);
+        const found = convStore.find((c) => c.id === targetId);
+        if (!found) {
+          return { ok: false, status: 404, json: async () => ({ detail: 'Not found' }) };
+        }
+        if (method === 'GET') {
+          return { ok: true, status: 200, json: async () => found };
+        }
+        if (method === 'PATCH' || method === 'PUT') {
+          const body = init?.body ? JSON.parse(String(init.body)) : {};
+          found.title = body.title || found.title;
+          found.updated_at = new Date().toISOString();
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              id: found.id,
+              title: found.title,
+              created_at: found.created_at,
+              updated_at: found.updated_at,
+              message_count: found.messages.length,
+              last_message_preview:
+                found.messages[found.messages.length - 1]?.content || null,
+            }),
+          };
+        }
+        if (method === 'DELETE') {
+          const idx = convStore.findIndex((c) => c.id === targetId);
+          if (idx >= 0) convStore.splice(idx, 1);
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ deleted: true, conversation_id: targetId }),
+          };
+        }
+      }
+
+      if (url.includes('/assistant/conversations')) {
+        if (method === 'POST') {
+          const body = init?.body ? JSON.parse(String(init.body)) : {};
+          const created: MockConvStore = {
+            id: ++nextConvId,
+            title: body.title || 'New Chat',
+            created_at: nowIso,
+            updated_at: nowIso,
+            messages: [],
+          };
+          convStore.unshift(created);
+          return { ok: true, status: 201, json: async () => created };
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () =>
+            convStore.map((c) => ({
+              id: c.id,
+              title: c.title,
+              created_at: c.created_at,
+              updated_at: c.updated_at,
+              message_count: c.messages.length,
+              last_message_preview:
+                c.messages[c.messages.length - 1]?.content || null,
+            })),
+        };
+      }
+
+      if (url.includes('/assistant/chat') && method === 'POST') {
+        const body = init?.body ? JSON.parse(String(init.body)) : {};
+        let targetConv = convStore.find((c) => c.id === body.conversation_id);
+        if (!targetConv) {
+          targetConv = {
+            id: ++nextConvId,
+            title: String(body.message || 'New Chat').slice(0, 60),
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            messages: [],
+          };
+          convStore.unshift(targetConv);
+        } else if (targetConv.messages.length === 0 && targetConv.title === 'New Chat') {
+          targetConv.title = String(body.message).slice(0, 60);
+        }
+        const replyText = `Verified Reply for Conv ${targetConv.id}: Khichdi and Idli are reviewed for Fever recovery.`;
+        targetConv.messages.push(
+          {
+            id: ++nextMsgId,
+            conversation_id: targetConv.id,
+            role: 'user',
+            content: body.message,
+            mode_used: 'automatic',
+            model_used: 'llama3.2:latest',
+            ollama_connected: true,
+            tool_traces: [],
+            sources: [],
+            created_at: new Date().toISOString(),
+          },
+          {
+            id: ++nextMsgId,
+            conversation_id: targetConv.id,
+            role: 'assistant',
+            content: replyText,
+            mode_used: 'automatic',
+            model_used: 'llama3.2:latest',
+            ollama_connected: true,
+            tool_traces: [],
+            sources: [],
+            created_at: new Date().toISOString(),
+          }
+        );
+        targetConv.updated_at = new Date().toISOString();
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            conversation_id: targetConv.id,
+            conversation_title: targetConv.title,
+            reply: replyText,
+            mode_used: 'automatic',
+            model_used: 'llama3.2:latest',
+            ollama_connected: true,
+            used_fallback_synthesis: false,
+            tool_traces: [],
+            sources: [],
+            suggested_followups: [],
+            medical_disclaimer: 'Educational only.',
+          }),
+        };
+      }
+
+      return prevImpl ? prevImpl(url, init) : { ok: true, json: async () => [] };
+    });
+
+    const { unmount } = render(
+      <HouseholdProvider>
+        <MemoryRouter initialEntries={['/']}>
+          <AppRoutes />
+        </MemoryRouter>
+      </HouseholdProvider>
+    );
+
+    // Step 1: Open Assistant -> existing conversation with 5 messages loads
+    const fab = await screen.findByTestId('ask-gharplate-fab');
+    fireEvent.click(fab);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('Message 1: What is the calcium content in Ragi?')
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText('Message 5: How much protein does Sambar add?')
+      ).toBeInTheDocument();
+    });
+    expect(screen.getAllByTestId('assistant-user-message').length).toBe(3);
+    expect(screen.getAllByTestId('assistant-ai-message').length).toBe(2);
+
+    // Type something in input box to verify + New Chat clears it too
+    const input = screen.getByLabelText(/Ask GharPlate Input/i) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: 'Unsent draft text' } });
+    expect(input.value).toBe('Unsent draft text');
+
+    // Step 2 & 3: Click + New Chat -> screen immediately clears all 5 messages, clears input, and shows welcome state
+    fireEvent.click(screen.getByTestId('assistant-new-conversation-btn'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('assistant-empty-welcome')).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText(/What would you like to explore today\?/i)
+    ).toBeInTheDocument();
+    expect(screen.getByTestId('assistant-suggested-questions')).toBeInTheDocument();
+    expect(input.value).toBe('');
+    expect(
+      screen.queryByText('Message 1: What is the calcium content in Ragi?')
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Message 5: How much protein does Sambar add?')
+    ).not.toBeInTheDocument();
+    expect(screen.queryAllByTestId('assistant-user-message').length).toBe(0);
+    expect(screen.queryAllByTestId('assistant-ai-message').length).toBe(0);
+
+    // Step 4: Send a new message in the new conversation -> appears ONLY in the new conversation
+    fireEvent.change(input, {
+      target: { value: 'New Chat Question: Fever recovery foods?' },
+    });
+    fireEvent.click(screen.getByText(/Send ↑/i));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('New Chat Question: Fever recovery foods?')
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(/Verified Reply for Conv 201/i)
+      ).toBeInTheDocument();
+    });
+    // Ensure old conversation messages are NOT present above or below
+    expect(
+      screen.queryByText('Message 1: What is the calcium content in Ragi?')
+    ).not.toBeInTheDocument();
+    expect(screen.getAllByTestId('assistant-user-message').length).toBe(1);
+    expect(screen.getAllByTestId('assistant-ai-message').length).toBe(1);
+
+    // Step 5: Open Saved Chats panel, verify date sections (Today & Yesterday), and reopen Conversation 101
+    fireEvent.click(screen.getByTestId('assistant-saved-chats-toggle'));
+    expect(screen.getByTestId('assistant-saved-chats-panel')).toBeInTheDocument();
+    expect(screen.getByTestId('saved-chats-group-today')).toBeInTheDocument();
+    expect(screen.getByTestId('saved-chats-group-yesterday')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('saved-chat-open-101'));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('Message 1: What is the calcium content in Ragi?')
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText('Message 5: How much protein does Sambar add?')
+      ).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByText('New Chat Question: Fever recovery foods?')
+    ).not.toBeInTheDocument();
+    expect(screen.getAllByTestId('assistant-user-message').length).toBe(3);
+    expect(screen.getAllByTestId('assistant-ai-message').length).toBe(2);
+
+    // Step 6: Switch back to the new conversation (201) and confirm its messages are separate
+    fireEvent.click(screen.getByTestId('assistant-saved-chats-toggle'));
+    fireEvent.click(screen.getByTestId('saved-chat-open-201'));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('New Chat Question: Fever recovery foods?')
+      ).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByText('Message 1: What is the calcium content in Ragi?')
+    ).not.toBeInTheDocument();
+
+    // Test Search, Rename, and Delete with confirmation in Saved Chats
+    fireEvent.click(screen.getByTestId('assistant-saved-chats-toggle'));
+    const searchBox = screen.getByTestId('saved-chats-search-input');
+    fireEvent.change(searchBox, { target: { value: 'Ragi Calcium' } });
+    expect(screen.getByTestId('saved-chat-item-101')).toBeInTheDocument();
+    expect(screen.queryByTestId('saved-chat-item-201')).not.toBeInTheDocument();
+    fireEvent.change(searchBox, { target: { value: '' } });
+
+    // Rename conversation 101
+    fireEvent.click(screen.getByTestId('rename-chat-btn-101'));
+    const renameInput = screen.getByTestId('rename-chat-input-101');
+    fireEvent.change(renameInput, { target: { value: 'Renamed Ragi Guide' } });
+    fireEvent.click(screen.getByTestId('save-rename-chat-btn-101'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('saved-chat-title-101')).toHaveTextContent(
+        'Renamed Ragi Guide'
+      );
+    });
+
+    // Step 7: Unmount and remount (simulate browser refresh) and confirm both conversations remain available
+    unmount();
+
+    render(
+      <HouseholdProvider>
+        <MemoryRouter initialEntries={['/']}>
+          <AppRoutes />
+        </MemoryRouter>
+      </HouseholdProvider>
+    );
+    fireEvent.click(await screen.findByTestId('ask-gharplate-fab'));
+    await waitFor(() => {
+      expect(screen.getByTestId('assistant-saved-chats-toggle')).toHaveTextContent(
+        'Saved Chats (2)'
+      );
+    });
+
+    // Delete conversation 201 with confirmation
+    fireEvent.click(screen.getByTestId('assistant-saved-chats-toggle'));
+    fireEvent.click(screen.getByTestId('delete-chat-btn-201'));
+    expect(screen.getByTestId('delete-confirm-box-201')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('confirm-delete-chat-btn-201'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('saved-chat-item-201')).not.toBeInTheDocument();
+    });
   });
 });

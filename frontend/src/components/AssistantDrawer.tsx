@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useLocation } from 'react-router-dom';
@@ -6,6 +6,8 @@ import { useHousehold } from '../hooks/useHousehold';
 import { api } from '../services/api';
 import type {
   AssistantChatMessage,
+  AssistantConversationSummary,
+  AssistantMessageRecord,
   AssistantSourceReference,
   AssistantStatusResponse,
   AssistantToolExecutionTrace,
@@ -16,12 +18,25 @@ interface ChatTurn {
   role: 'user' | 'assistant';
   content: string;
   timestamp: string;
-  modeUsed?: string;
-  modelUsed?: string;
+  modeUsed?: string | null;
+  modelUsed?: string | null;
   ollamaConnected?: boolean;
   toolTraces?: AssistantToolExecutionTrace[];
   sources?: AssistantSourceReference[];
 }
+
+type DateGroupLabel =
+  | 'Today'
+  | 'Yesterday'
+  | 'Previous 7 Days'
+  | 'Older Conversations';
+
+const DATE_GROUP_ORDER: DateGroupLabel[] = [
+  'Today',
+  'Yesterday',
+  'Previous 7 Days',
+  'Older Conversations',
+];
 
 const STORAGE_WIDTH_KEY = 'gharplate_assistant_width_px';
 const STORAGE_DOCK_KEY = 'gharplate_assistant_dock_side';
@@ -52,6 +67,70 @@ function isSafeHref(href?: string): boolean {
     trimmed.startsWith('/') ||
     trimmed.startsWith('#')
   );
+}
+
+function formatMessageTimestamp(isoOrTime: string): string {
+  try {
+    const d = new Date(isoOrTime);
+    if (!Number.isNaN(d.getTime())) {
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+  } catch {
+    // fallback to raw string
+  }
+  return isoOrTime;
+}
+
+function formatConversationUpdatedTime(iso: string): string {
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfYesterday = new Date(startOfToday.getTime() - 86400000);
+    const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    if (d >= startOfToday) {
+      return `Today · ${timeStr}`;
+    }
+    if (d >= startOfYesterday) {
+      return `Yesterday · ${timeStr}`;
+    }
+    return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} · ${timeStr}`;
+  } catch {
+    return iso;
+  }
+}
+
+function getConversationDateGroup(iso: string): DateGroupLabel {
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return 'Older Conversations';
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfYesterday = new Date(startOfToday.getTime() - 86400000);
+    const startOfSevenDaysAgo = new Date(startOfToday.getTime() - 7 * 86400000);
+
+    if (d >= startOfToday) return 'Today';
+    if (d >= startOfYesterday) return 'Yesterday';
+    if (d >= startOfSevenDaysAgo) return 'Previous 7 Days';
+    return 'Older Conversations';
+  } catch {
+    return 'Older Conversations';
+  }
+}
+
+function mapRecordToTurn(m: AssistantMessageRecord): ChatTurn {
+  return {
+    id: `db_${m.id}`,
+    role: m.role,
+    content: m.content,
+    timestamp: formatMessageTimestamp(m.created_at),
+    modeUsed: m.mode_used,
+    modelUsed: m.model_used,
+    ollamaConnected: m.ollama_connected,
+    toolTraces: m.tool_traces || [],
+    sources: m.sources || [],
+  };
 }
 
 /**
@@ -205,7 +284,7 @@ export const AssistantMarkdown: React.FC<{ content: string }> = ({ content }) =>
 
 export const AssistantDrawer: React.FC = () => {
   const location = useLocation();
-  const { household, activeMember } = useHousehold();
+  const { user, household, activeMember } = useHousehold();
 
   const [isOpen, setIsOpen] = useState(false);
   const [status, setStatus] = useState<AssistantStatusResponse | null>(null);
@@ -216,10 +295,37 @@ export const AssistantDrawer: React.FC = () => {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Isolated Per-Conversation State
+  const [conversations, setConversations] = useState<AssistantConversationSummary[]>([]);
+  const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
+  const [activeConversationTitle, setActiveConversationTitle] =
+    useState<string>('New Chat');
   const [turns, setTurns] = useState<ChatTurn[]>([]);
+  const [turnsByConversationId, setTurnsByConversationId] = useState<
+    Record<number, ChatTurn[]>
+  >({});
+  const [chatViewNonce, setChatViewNonce] = useState<number>(1);
   const [copiedTurnId, setCopiedTurnId] = useState<string | null>(null);
 
-  // Interactive Resizing & Docking State (persisted in localStorage)
+  // Saved Chats Organizer Panel State (Search, Rename, Delete Confirmation)
+  const [showSavedChatsPanel, setShowSavedChatsPanel] = useState(false);
+  const [savedChatsSearch, setSavedChatsSearch] = useState('');
+  const [renamingConvId, setRenamingConvId] = useState<number | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
+  const [confirmDeleteConvId, setConfirmDeleteConvId] = useState<number | null>(null);
+
+  // Lifecycle & Concurrency Guards (prevents stale async responses from mutating a newly opened/blank chat)
+  const loadedUserIdRef = useRef<number | null>(null);
+  const initialAutoLoadDoneRef = useRef<boolean>(false);
+  const viewEpochRef = useRef<number>(1);
+  const activeConversationIdRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    activeConversationIdRef.current = activeConversationId;
+  }, [activeConversationId]);
+
+  // Interactive Resizing & Docking State
   const [panelWidth, setPanelWidth] = useState<number>(() => {
     try {
       const saved = window.localStorage.getItem(STORAGE_WIDTH_KEY);
@@ -277,17 +383,123 @@ export const AssistantDrawer: React.FC = () => {
   const activeConditionCode =
     condMatch && condMatch[1] !== 'conflicts' ? decodeURIComponent(condMatch[1]) : null;
 
+  // Clear all in-memory conversation state whenever the authenticated user changes or logs out
   useEffect(() => {
-    if (isOpen && !status) {
-      void api
-        .getAssistantStatus()
-        .then((res) => {
-          setStatus(res);
-          if (res.active_model) setSelectedModel(res.active_model);
-        })
-        .catch(() => null);
+    const currentUserId = user?.id ?? null;
+    if (loadedUserIdRef.current !== currentUserId) {
+      loadedUserIdRef.current = currentUserId;
+      initialAutoLoadDoneRef.current = false;
+      viewEpochRef.current += 1;
+      activeConversationIdRef.current = null;
+      setConversations([]);
+      setActiveConversationId(null);
+      setActiveConversationTitle('New Chat');
+      setTurns([]);
+      setTurnsByConversationId({});
+      setInput('');
+      setLoading(false);
+      setError(null);
+      setShowSavedChatsPanel(false);
+      setSavedChatsSearch('');
+      setRenamingConvId(null);
+      setConfirmDeleteConvId(null);
+      setChatViewNonce((n) => n + 1);
     }
-  }, [isOpen, status]);
+  }, [user?.id]);
+
+  /**
+   * Loads a single saved conversation by ID, replacing (never appending) the active message list
+   * in strict chronological order.
+   */
+  const loadConversationMessages = useCallback(async (conversationId: number) => {
+    const requestEpoch = ++viewEpochRef.current;
+    activeConversationIdRef.current = conversationId;
+    setActiveConversationId(conversationId);
+    setLoading(false);
+    setError(null);
+    setConfirmDeleteConvId(null);
+    setRenamingConvId(null);
+    setShowSavedChatsPanel(false);
+    setChatViewNonce((n) => n + 1);
+
+    try {
+      const detail = await api.getAssistantConversation(conversationId);
+      const mappedTurns = (detail.messages || []).map(mapRecordToTurn);
+      setTurnsByConversationId((prev) => ({
+        ...prev,
+        [detail.id]: mappedTurns,
+      }));
+      // Only update the visible screen if the user has not switched or clicked + New Chat since requesting
+      if (
+        viewEpochRef.current === requestEpoch &&
+        activeConversationIdRef.current === conversationId
+      ) {
+        setActiveConversationId(detail.id);
+        setActiveConversationTitle(detail.title || 'Saved Conversation');
+        setTurns(mappedTurns);
+      }
+    } catch {
+      // If backend fetch fails, fall back to cached turns for this conversation if present
+      if (
+        viewEpochRef.current === requestEpoch &&
+        activeConversationIdRef.current === conversationId
+      ) {
+        setTurns((prev) => prev);
+      }
+    }
+  }, []);
+
+  /**
+   * Fetches the user's saved conversations list from the backend.
+   * Auto-loads the latest conversation ONLY once on initial drawer open for the logged-in user,
+   * and NEVER overwrites an explicit + New Chat blank session.
+   */
+  const refreshConversations = useCallback(
+    async (allowInitialAutoLoad = false) => {
+      try {
+        const list = await api.listAssistantConversations();
+        if (Array.isArray(list)) {
+          setConversations(list);
+          if (
+            allowInitialAutoLoad &&
+            !initialAutoLoadDoneRef.current &&
+            list.length > 0 &&
+            activeConversationIdRef.current === null
+          ) {
+            initialAutoLoadDoneRef.current = true;
+            // Open the most recent conversation with messages on initial drawer open
+            const latestWithMessages =
+              list.find((c) => (c.message_count ?? 0) > 0) || list[0];
+            if (latestWithMessages) {
+              await loadConversationMessages(latestWithMessages.id);
+            }
+          } else if (allowInitialAutoLoad) {
+            initialAutoLoadDoneRef.current = true;
+          }
+        }
+      } catch {
+        // ignore if offline or unauthenticated
+      }
+    },
+    [loadConversationMessages]
+  );
+
+  // Trigger initial load when drawer opens — does NOT depend on turns.length or activeConversationId
+  // so clicking + New Chat never triggers an auto-reload of the previous conversation.
+  useEffect(() => {
+    if (isOpen) {
+      if (!status) {
+        void api
+          .getAssistantStatus()
+          .then((res) => {
+            setStatus(res);
+            if (res.active_model) setSelectedModel(res.active_model);
+          })
+          .catch(() => null);
+      }
+      void refreshConversations(!initialAutoLoadDoneRef.current);
+    }
+  }, [isOpen, status, refreshConversations]);
 
   useEffect(() => {
     if (activeFoodSlug) {
@@ -303,12 +515,20 @@ export const AssistantDrawer: React.FC = () => {
         'How does dietary preference affect these recommendations?',
         'What nutrients should be monitored?',
       ]);
+    } else {
+      setSuggestedFollowups([
+        'Which foods are reviewed for Fever recovery?',
+        'Compare Ragi Mudde and Plain Rice for Type 2 Diabetes',
+        'What are iron-rich vegetarian foods in IFCT 2017?',
+        'How does GharPlate check packaged food allergens?',
+      ]);
     }
   }, [activeFoodSlug, activeConditionCode]);
 
   useEffect(() => {
     if (
       isOpen &&
+      turns.length > 0 &&
       messagesEndRef.current &&
       typeof messagesEndRef.current.scrollIntoView === 'function'
     ) {
@@ -359,8 +579,6 @@ export const AssistantDrawer: React.FC = () => {
     if (!dragStateRef.current.active) return;
     const { startX, startWidth, dock } = dragStateRef.current;
     const deltaX = clientX - startX;
-    // When docked right, dragging left (negative deltaX) increases width
-    // When docked left, dragging right (positive deltaX) increases width
     const rawNextWidth = dock === 'right' ? startWidth - deltaX : startWidth + deltaX;
     const clamped = clampAssistantWidth(rawNextWidth);
     setPanelWidth(clamped);
@@ -415,9 +633,140 @@ export const AssistantDrawer: React.FC = () => {
     }, 1800);
   };
 
+  /**
+   * Starts a completely blank new conversation:
+   * - Preserves the previous conversation in `conversations` & `turnsByConversationId`
+   * - Immediately clears active screen messages (`turns = []`), input box, errors, and loading indicators
+   * - Increments `viewEpochRef` so any in-flight response from the previous conversation is isolated
+   * - Creates a new conversation record with a unique ID on the backend and makes it active
+   */
+  const handleStartNewConversation = async () => {
+    initialAutoLoadDoneRef.current = true;
+    const newEpoch = ++viewEpochRef.current;
+
+    // Preserve current turns in the per-conversation cache before clearing the active screen
+    if (activeConversationIdRef.current !== null && turns.length > 0) {
+      const prevId = activeConversationIdRef.current;
+      setTurnsByConversationId((prev) => ({
+        ...prev,
+        [prevId]: turns,
+      }));
+    }
+
+    // Immediately clear visible conversation state
+    activeConversationIdRef.current = null;
+    setActiveConversationId(null);
+    setActiveConversationTitle('New Chat');
+    setTurns([]);
+    setInput('');
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+    }
+    setLoading(false);
+    setError(null);
+    setCopiedTurnId(null);
+    setConfirmDeleteConvId(null);
+    setRenamingConvId(null);
+    setShowSavedChatsPanel(false);
+    setChatViewNonce((n) => n + 1);
+
+    try {
+      const created = await api.createAssistantConversation('New Chat');
+      if (
+        created &&
+        typeof created.id === 'number' &&
+        viewEpochRef.current === newEpoch
+      ) {
+        activeConversationIdRef.current = created.id;
+        setActiveConversationId(created.id);
+        setActiveConversationTitle(created.title || 'New Chat');
+        setTurnsByConversationId((prev) => ({
+          ...prev,
+          [created.id]: [],
+        }));
+        setConversations((prev) => {
+          const filtered = prev.filter((c) => c.id !== created.id);
+          return [
+            {
+              id: created.id,
+              title: created.title || 'New Chat',
+              created_at: created.created_at || new Date().toISOString(),
+              updated_at: created.updated_at || new Date().toISOString(),
+              message_count: 0,
+              last_message_preview: null,
+            },
+            ...filtered,
+          ];
+        });
+      }
+    } catch {
+      // If backend create call is unavailable in a minimal mock, keep blank state and create on first message
+    }
+  };
+
+  const handleRenameConversation = async (conversationId: number) => {
+    const trimmed = renameDraft.trim();
+    if (!trimmed) {
+      setRenamingConvId(null);
+      return;
+    }
+    try {
+      const updated = await api.renameAssistantConversation(conversationId, trimmed);
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === conversationId
+            ? {
+                ...c,
+                title: updated?.title || trimmed,
+                updated_at: updated?.updated_at || new Date().toISOString(),
+              }
+            : c
+        )
+      );
+      if (activeConversationIdRef.current === conversationId) {
+        setActiveConversationTitle(updated?.title || trimmed);
+      }
+      setRenamingConvId(null);
+      setRenameDraft('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to rename conversation.');
+    }
+  };
+
+  const handleDeleteConversationById = async (conversationId: number) => {
+    try {
+      await api.deleteAssistantConversation(conversationId);
+      setConversations((prev) => prev.filter((c) => c.id !== conversationId));
+      setTurnsByConversationId((prev) => {
+        const next = { ...prev };
+        delete next[conversationId];
+        return next;
+      });
+      setConfirmDeleteConvId(null);
+
+      if (activeConversationIdRef.current === conversationId) {
+        viewEpochRef.current += 1;
+        activeConversationIdRef.current = null;
+        setActiveConversationId(null);
+        setActiveConversationTitle('New Chat');
+        setTurns([]);
+        setInput('');
+        setLoading(false);
+        setError(null);
+        setChatViewNonce((n) => n + 1);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete conversation.');
+    }
+  };
+
   const handleSendMessage = async (textToSend?: string) => {
     const query = (textToSend ?? input).trim();
     if (!query || loading) return;
+
+    initialAutoLoadDoneRef.current = true;
+    const requestEpoch = viewEpochRef.current;
+    const targetConversationId = activeConversationIdRef.current;
 
     const nowTime = new Date().toLocaleTimeString([], {
       hour: '2-digit',
@@ -425,18 +774,28 @@ export const AssistantDrawer: React.FC = () => {
     });
 
     const userTurn: ChatTurn = {
-      id: `u_${Date.now()}`,
+      id: `u_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       role: 'user',
       content: query,
       timestamp: nowTime,
     };
 
-    const historyPayload: AssistantChatMessage[] = turns.map((t) => ({
+    // Build history strictly from the active conversation's current turns (never another conversation)
+    const currentConvTurns = turns;
+    const historyPayload: AssistantChatMessage[] = currentConvTurns.map((t) => ({
       role: t.role,
       content: t.content,
     }));
 
-    setTurns((prev) => [...prev, userTurn]);
+    const optimisticTurns = [...currentConvTurns, userTurn];
+    setTurns(optimisticTurns);
+    if (targetConversationId !== null) {
+      setTurnsByConversationId((prev) => ({
+        ...prev,
+        [targetConversationId]: optimisticTurns,
+      }));
+    }
+
     if (!textToSend) {
       setInput('');
       if (textareaRef.current) {
@@ -449,6 +808,7 @@ export const AssistantDrawer: React.FC = () => {
     try {
       const resp = await api.chatWithAssistant({
         message: query,
+        conversation_id: targetConversationId,
         mode: selectedMode,
         model: selectedModel || undefined,
         history: historyPayload,
@@ -461,8 +821,13 @@ export const AssistantDrawer: React.FC = () => {
         },
       });
 
+      const resolvedConvId = resp.conversation_id ?? targetConversationId;
+      const resolvedTitle =
+        resp.conversation_title ||
+        (currentConvTurns.length === 0 ? query.slice(0, 80) : activeConversationTitle);
+
       const assistantTurn: ChatTurn = {
-        id: `a_${Date.now()}`,
+        id: `a_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
         role: 'assistant',
         content: resp.reply,
         timestamp: new Date().toLocaleTimeString([], {
@@ -476,14 +841,36 @@ export const AssistantDrawer: React.FC = () => {
         sources: resp.sources,
       };
 
-      setTurns((prev) => [...prev, assistantTurn]);
-      if (resp.suggested_followups && resp.suggested_followups.length > 0) {
-        setSuggestedFollowups(resp.suggested_followups);
+      const completedTurns = [...optimisticTurns, assistantTurn];
+      if (resolvedConvId !== null && resolvedConvId !== undefined) {
+        setTurnsByConversationId((prev) => ({
+          ...prev,
+          [resolvedConvId]: completedTurns,
+        }));
       }
+
+      // Only update the visible chat screen if the user is STILL in this conversation epoch
+      if (viewEpochRef.current === requestEpoch) {
+        if (resolvedConvId !== null && resolvedConvId !== undefined) {
+          activeConversationIdRef.current = resolvedConvId;
+          setActiveConversationId(resolvedConvId);
+        }
+        setActiveConversationTitle(resolvedTitle);
+        setTurns(completedTurns);
+        if (resp.suggested_followups && resp.suggested_followups.length > 0) {
+          setSuggestedFollowups(resp.suggested_followups);
+        }
+      }
+
+      void refreshConversations(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Assistant request failed.');
+      if (viewEpochRef.current === requestEpoch) {
+        setError(err instanceof Error ? err.message : 'Assistant request failed.');
+      }
     } finally {
-      setLoading(false);
+      if (viewEpochRef.current === requestEpoch) {
+        setLoading(false);
+      }
     }
   };
 
@@ -500,6 +887,31 @@ export const AssistantDrawer: React.FC = () => {
     el.style.height = 'auto';
     el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
   };
+
+  // Filter and group saved conversations into Today, Yesterday, Previous 7 Days, Older Conversations
+  const filteredConversations = useMemo(() => {
+    const q = savedChatsSearch.trim().toLowerCase();
+    if (!q) return conversations;
+    return conversations.filter(
+      (c) =>
+        (c.title || '').toLowerCase().includes(q) ||
+        (c.last_message_preview || '').toLowerCase().includes(q)
+    );
+  }, [conversations, savedChatsSearch]);
+
+  const groupedConversations = useMemo(() => {
+    const groups: Record<DateGroupLabel, AssistantConversationSummary[]> = {
+      Today: [],
+      Yesterday: [],
+      'Previous 7 Days': [],
+      'Older Conversations': [],
+    };
+    for (const conv of filteredConversations) {
+      const bucket = getConversationDateGroup(conv.updated_at);
+      groups[bucket].push(conv);
+    }
+    return groups;
+  }, [filteredConversations]);
 
   return (
     <>
@@ -546,7 +958,7 @@ export const AssistantDrawer: React.FC = () => {
               width: `${panelWidth}px`,
               maxWidth: '100vw',
             }}
-            className={`relative z-10 flex h-full w-full sm:my-3 sm:mx-3 sm:h-[calc(100vh-1.5rem)] flex-col overflow-hidden bg-[#FAF8F5] sm:rounded-3xl shadow-[0_24px_64px_-12px_rgba(6,78,59,0.35)] border border-stone-200/90 ring-1 ring-emerald-950/10 transition-transform duration-200 motion-reduce:transition-none`}
+            className="relative z-10 flex h-full w-full sm:my-3 sm:mx-3 sm:h-[calc(100vh-1.5rem)] flex-col overflow-hidden bg-[#FAF8F5] sm:rounded-3xl shadow-[0_24px_64px_-12px_rgba(6,78,59,0.35)] border border-stone-200/90 ring-1 ring-emerald-950/10 transition-transform duration-200 motion-reduce:transition-none"
           >
             {/* Interactive Resize Handle Along Inner Edge (Desktop / Tablet) */}
             <div
@@ -602,11 +1014,13 @@ export const AssistantDrawer: React.FC = () => {
                     </span>
                   </div>
                   <p className="mt-1 text-[11px] text-emerald-200/90 truncate">
-                    Database-first Indian food, barcode, ingredient & condition intelligence
+                    {turns.length > 0
+                      ? `Active Chat: ${activeConversationTitle}`
+                      : 'Database-first Indian food, barcode, ingredient & condition intelligence'}
                   </p>
                 </div>
 
-                {/* Window Action Controls (Dock Side, Clear Chat, Close) */}
+                {/* Window Action Controls (Dock Side, Saved Chats, New Chat, Close) */}
                 <div className="flex items-center gap-1.5 shrink-0">
                   <button
                     type="button"
@@ -624,16 +1038,39 @@ export const AssistantDrawer: React.FC = () => {
                     {dockSide === 'right' ? '⇤ Left' : 'Right ⇥'}
                   </button>
 
-                  {turns.length > 0 && (
+                  <button
+                    type="button"
+                    data-testid="assistant-saved-chats-toggle"
+                    onClick={() => setShowSavedChatsPanel((prev) => !prev)}
+                    className={`rounded-xl border px-2.5 py-1.5 text-[11px] font-bold transition ${
+                      showSavedChatsPanel
+                        ? 'bg-amber-300 text-stone-950 border-amber-300 font-extrabold'
+                        : 'bg-emerald-900/90 border-emerald-700/60 text-emerald-100 hover:bg-emerald-800'
+                    }`}
+                  >
+                    💬 Saved Chats ({conversations.length})
+                  </button>
+
+                  <button
+                    type="button"
+                    data-testid="assistant-new-conversation-btn"
+                    onClick={() => void handleStartNewConversation()}
+                    className="rounded-xl bg-emerald-400 px-2.5 py-1.5 text-[11px] font-extrabold text-stone-950 hover:bg-emerald-300 transition shadow-xs"
+                  >
+                    + New Chat
+                  </button>
+
+                  {activeConversationId !== null && turns.length > 0 && (
                     <button
                       type="button"
+                      data-testid="assistant-delete-conversation-btn"
                       onClick={() => {
-                        setTurns([]);
-                        setError(null);
+                        setShowSavedChatsPanel(true);
+                        setConfirmDeleteConvId(activeConversationId);
                       }}
-                      className="rounded-xl bg-emerald-900/90 border border-emerald-700/60 px-2.5 py-1.5 text-[11px] font-bold text-emerald-100 hover:bg-emerald-800 transition"
+                      className="rounded-xl bg-emerald-900/90 border border-emerald-700/60 px-2.5 py-1.5 text-[11px] font-bold text-rose-200 hover:bg-rose-900/60 transition"
                     >
-                      Clear Chat
+                      Delete
                     </button>
                   )}
 
@@ -647,6 +1084,34 @@ export const AssistantDrawer: React.FC = () => {
                   </button>
                 </div>
               </div>
+
+              {/* Quick Conversation Bar + Organizer Trigger */}
+              {conversations.length > 0 && (
+                <div className="flex items-center gap-2 text-[11px]">
+                  <span className="font-bold text-emerald-200 shrink-0">Active Thread:</span>
+                  <select
+                    aria-label="Select Saved Conversation"
+                    data-testid="assistant-conversation-select"
+                    value={activeConversationId ?? ''}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (!val) {
+                        void handleStartNewConversation();
+                      } else {
+                        void loadConversationMessages(Number(val));
+                      }
+                    }}
+                    className="flex-1 truncate rounded-xl bg-emerald-900/90 border border-emerald-700/60 px-2.5 py-1 text-[11px] font-bold text-white"
+                  >
+                    <option value="">+ New Blank Conversation</option>
+                    {conversations.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.title} ({c.message_count} msgs)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               {/* 3 Search Mode Selector Pills */}
               <div className="grid grid-cols-3 gap-1.5 rounded-2xl bg-emerald-900/80 p-1 text-[11px] font-bold">
@@ -721,29 +1186,273 @@ export const AssistantDrawer: React.FC = () => {
               )}
             </div>
 
-            {/* Distinct Scrollable Chat Conversation Area */}
-            <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
+            {/* Organized Saved Chats History Panel (ChatGPT-Style Grouped History) */}
+            {showSavedChatsPanel && (
+              <div
+                data-testid="assistant-saved-chats-panel"
+                className="border-b border-stone-200 bg-stone-100/95 p-4 space-y-3 max-h-[58vh] overflow-y-auto shrink-0"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="text-xs font-extrabold text-emerald-950">
+                      Saved Conversations
+                    </div>
+                    <div className="text-[11px] text-stone-500">
+                      Private to {user?.full_name || 'your account'} · Click any chat to resume
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      data-testid="saved-chats-new-btn"
+                      onClick={() => void handleStartNewConversation()}
+                      className="rounded-xl bg-emerald-900 px-3 py-1.5 text-[11px] font-extrabold text-white hover:bg-emerald-800 transition"
+                    >
+                      + Start New Chat
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowSavedChatsPanel(false)}
+                      className="rounded-xl border border-stone-300 bg-white px-2.5 py-1.5 text-[11px] font-bold text-stone-700 hover:bg-stone-50"
+                    >
+                      Done
+                    </button>
+                  </div>
+                </div>
+
+                {/* Search Saved Conversations */}
+                <div className="relative">
+                  <input
+                    type="search"
+                    data-testid="saved-chats-search-input"
+                    value={savedChatsSearch}
+                    onChange={(e) => setSavedChatsSearch(e.target.value)}
+                    placeholder="Search conversations by title or message..."
+                    className="w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-xs text-stone-800 placeholder:text-stone-400 focus:border-emerald-700 focus:outline-none"
+                  />
+                </div>
+
+                {filteredConversations.length === 0 ? (
+                  <div className="rounded-2xl border border-stone-200 bg-white p-4 text-center text-xs text-stone-500">
+                    {conversations.length === 0
+                      ? 'No saved conversations yet. Ask a question below to start your first conversation.'
+                      : 'No conversations match your search.'}
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {DATE_GROUP_ORDER.map((groupLabel) => {
+                      const items = groupedConversations[groupLabel];
+                      if (!items || items.length === 0) return null;
+                      return (
+                        <div
+                          key={groupLabel}
+                          data-testid={`saved-chats-group-${groupLabel
+                            .toLowerCase()
+                            .replace(/\s+/g, '-')}`}
+                          className="space-y-1.5"
+                        >
+                          <div className="px-1 text-[10px] font-extrabold uppercase tracking-wider text-stone-500">
+                            {groupLabel}
+                          </div>
+                          <div className="space-y-1.5">
+                            {items.map((c) => {
+                              const isSelected = c.id === activeConversationId;
+                              const isRenaming = renamingConvId === c.id;
+                              const isConfirmingDelete = confirmDeleteConvId === c.id;
+                              const cachedTurns = turnsByConversationId[c.id];
+                              const fallbackPreview =
+                                cachedTurns && cachedTurns.length > 0
+                                  ? cachedTurns[cachedTurns.length - 1].content.slice(0, 95)
+                                  : 'New blank conversation — ready for your question';
+                              const previewText =
+                                c.last_message_preview || fallbackPreview;
+
+                              return (
+                                <div
+                                  key={c.id}
+                                  data-testid={`saved-chat-item-${c.id}`}
+                                  data-selected={isSelected ? 'true' : 'false'}
+                                  className={`rounded-2xl border p-3 transition ${
+                                    isSelected
+                                      ? 'border-emerald-700 bg-emerald-50/90 shadow-2xs'
+                                      : 'border-stone-200/90 bg-white hover:border-emerald-300'
+                                  }`}
+                                >
+                                  {isRenaming ? (
+                                    <div className="flex items-center gap-1.5">
+                                      <input
+                                        type="text"
+                                        data-testid={`rename-chat-input-${c.id}`}
+                                        value={renameDraft}
+                                        onChange={(e) => setRenameDraft(e.target.value)}
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter') {
+                                            void handleRenameConversation(c.id);
+                                          } else if (e.key === 'Escape') {
+                                            setRenamingConvId(null);
+                                          }
+                                        }}
+                                        className="flex-1 rounded-lg border border-emerald-600 bg-white px-2.5 py-1 text-xs font-bold text-stone-900 focus:outline-none"
+                                      />
+                                      <button
+                                        type="button"
+                                        data-testid={`save-rename-chat-btn-${c.id}`}
+                                        onClick={() => void handleRenameConversation(c.id)}
+                                        className="rounded-lg bg-emerald-800 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-emerald-700"
+                                      >
+                                        Save
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setRenamingConvId(null)}
+                                        className="rounded-lg border border-stone-300 bg-stone-50 px-2 py-1 text-[11px] font-bold text-stone-600"
+                                      >
+                                        Cancel
+                                      </button>
+                                    </div>
+                                  ) : isConfirmingDelete ? (
+                                    <div
+                                      data-testid={`delete-confirm-box-${c.id}`}
+                                      className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-rose-50 border border-rose-200 px-2.5 py-2 text-xs text-rose-950"
+                                    >
+                                      <span className="font-bold">
+                                        Delete “{c.title}” permanently?
+                                      </span>
+                                      <div className="flex items-center gap-1.5">
+                                        <button
+                                          type="button"
+                                          data-testid={`confirm-delete-chat-btn-${c.id}`}
+                                          onClick={() =>
+                                            void handleDeleteConversationById(c.id)
+                                          }
+                                          className="rounded-lg bg-rose-700 px-2.5 py-1 text-[11px] font-extrabold text-white hover:bg-rose-800"
+                                        >
+                                          Confirm Delete
+                                        </button>
+                                        <button
+                                          type="button"
+                                          data-testid={`cancel-delete-chat-btn-${c.id}`}
+                                          onClick={() => setConfirmDeleteConvId(null)}
+                                          className="rounded-lg border border-stone-300 bg-white px-2.5 py-1 text-[11px] font-bold text-stone-700"
+                                        >
+                                          Cancel
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div className="flex items-start justify-between gap-2">
+                                      <button
+                                        type="button"
+                                        data-testid={`saved-chat-open-${c.id}`}
+                                        onClick={() => void loadConversationMessages(c.id)}
+                                        className="min-w-0 flex-1 text-left space-y-1"
+                                      >
+                                        <div className="flex items-center gap-1.5">
+                                          <span
+                                            data-testid={`saved-chat-title-${c.id}`}
+                                            className="truncate text-xs font-extrabold text-stone-900"
+                                          >
+                                            {c.title}
+                                          </span>
+                                          {isSelected && (
+                                            <span
+                                              data-testid={`saved-chat-active-badge-${c.id}`}
+                                              className="shrink-0 rounded-full bg-emerald-800 px-2 py-0.5 text-[9px] font-extrabold uppercase tracking-wider text-white"
+                                            >
+                                              Active
+                                            </span>
+                                          )}
+                                        </div>
+                                        <p
+                                          data-testid={`saved-chat-preview-${c.id}`}
+                                          className="line-clamp-1 text-[11px] text-stone-600"
+                                        >
+                                          {previewText}
+                                        </p>
+                                        <div
+                                          data-testid={`saved-chat-time-${c.id}`}
+                                          className="text-[10px] font-medium text-stone-400"
+                                        >
+                                          {formatConversationUpdatedTime(c.updated_at)} ·{' '}
+                                          {c.message_count} msgs
+                                        </div>
+                                      </button>
+
+                                      <div className="flex items-center gap-1 shrink-0">
+                                        <button
+                                          type="button"
+                                          data-testid={`rename-chat-btn-${c.id}`}
+                                          title="Rename conversation"
+                                          onClick={() => {
+                                            setRenamingConvId(c.id);
+                                            setRenameDraft(c.title);
+                                            setConfirmDeleteConvId(null);
+                                          }}
+                                          className="rounded-lg border border-stone-200 bg-stone-50 px-2 py-1 text-[10px] font-bold text-stone-700 hover:bg-stone-100"
+                                        >
+                                          Rename
+                                        </button>
+                                        <button
+                                          type="button"
+                                          data-testid={`delete-chat-btn-${c.id}`}
+                                          title="Delete conversation"
+                                          onClick={() => {
+                                            setConfirmDeleteConvId(c.id);
+                                            setRenamingConvId(null);
+                                          }}
+                                          className="rounded-lg border border-rose-200 bg-rose-50 px-2 py-1 text-[10px] font-bold text-rose-700 hover:bg-rose-100"
+                                        >
+                                          Delete
+                                        </button>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Distinct Scrollable Chat Conversation Area (Keyed by Active Conversation ID & Nonce for Strict Isolation) */}
+            <div
+              key={`conv-${activeConversationId ?? 'new'}-${chatViewNonce}`}
+              data-testid="assistant-messages-viewport"
+              data-active-conversation-id={activeConversationId ?? 'new'}
+              className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4"
+            >
               {turns.length === 0 ? (
-                <div className="rounded-3xl border border-stone-200/90 bg-white p-5 shadow-xs space-y-3.5 text-xs text-stone-700">
-                  <div className="flex items-center gap-2.5">
-                    <span className="flex h-9 w-9 items-center justify-center rounded-2xl bg-emerald-100 text-lg">
+                <div
+                  data-testid="assistant-empty-welcome"
+                  className="rounded-3xl border border-stone-200/90 bg-white p-5 sm:p-6 shadow-xs space-y-4 text-xs text-stone-700"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-100 text-xl shadow-2xs">
                       🌿
                     </span>
                     <div>
-                      <div className="font-extrabold text-stone-900 text-sm">
-                        Ask anything about what’s on this page or in GharPlate
-                      </div>
+                      <h3 className="font-black text-emerald-950 text-base sm:text-lg tracking-tight">
+                        What would you like to explore today?
+                      </h3>
                       <div className="text-[11px] text-stone-500">
-                        Drag the {dockSide === 'right' ? 'left' : 'right'} edge anytime to resize this window
+                        Ask anything about Indian foods, packaged product labels, or health conditions
                       </div>
                     </div>
                   </div>
                   <p className="text-stone-600 leading-relaxed">
-                    The assistant queries GharPlate’s verified SQLite database, condition rules, and external barcode providers first — never guessing nutrient values or ingredients.
+                    GharPlate Assistant queries verified ICMR-NIN / IFCT 2017 food records, condition rules, and barcode providers first — never guessing missing (`NULL`) nutrient values or ingredients.
                   </p>
-                  <div className="space-y-2 pt-1">
+                  <div
+                    data-testid="assistant-suggested-questions"
+                    className="space-y-2 pt-1"
+                  >
                     <div className="text-[11px] font-bold uppercase tracking-wider text-stone-400">
-                      Suggested Questions:
+                      Suggested Food &amp; Nutrition Questions:
                     </div>
                     <div className="flex flex-wrap gap-1.5">
                       {suggestedFollowups.map((q) => (
@@ -799,29 +1508,28 @@ export const AssistantDrawer: React.FC = () => {
                               </span>
                             )}
                           </div>
+
                           <div className="flex items-center gap-2">
-                            <span className="text-[10px] text-stone-400">
-                              {turn.timestamp}
-                            </span>
+                            <span className="text-[10px] text-stone-400">{turn.timestamp}</span>
                             <button
                               type="button"
                               data-testid="copy-answer-btn"
                               onClick={() => handleCopyAnswer(turn.id, turn.content)}
-                              className="rounded-lg border border-stone-200 bg-stone-50 px-2 py-0.5 text-[10px] font-bold text-stone-700 hover:bg-emerald-50 hover:text-emerald-900 transition"
+                              className="rounded-lg border border-stone-200 bg-stone-50 px-2 py-0.5 text-[10px] font-bold text-stone-700 hover:bg-stone-100 transition"
                             >
                               {copiedTurnId === turn.id ? '✓ Copied' : 'Copy'}
                             </button>
                           </div>
                         </div>
 
-                        {/* Rich Markdown Answer Content */}
+                        {/* Rich Structured Markdown Body */}
                         <AssistantMarkdown content={turn.content} />
 
-                        {/* Tool Execution Trace Badges */}
+                        {/* Tool Execution Trace Pills */}
                         {turn.toolTraces && turn.toolTraces.length > 0 && (
                           <div className="border-t border-stone-100 pt-2.5 space-y-1.5">
                             <div className="text-[10px] font-bold uppercase tracking-wider text-stone-400">
-                              Verified Tools Executed ({turn.modeUsed}):
+                              Verified Backend Tools Executed:
                             </div>
                             <div className="flex flex-wrap gap-1.5">
                               {turn.toolTraces.map((tr, idx) => (
@@ -858,7 +1566,7 @@ export const AssistantDrawer: React.FC = () => {
                                 ) : (
                                   <span
                                     key={idx}
-                                    className="rounded-lg bg-stone-100 px-2.5 py-1 text-[11px] font-semibold text-stone-600"
+                                    className="rounded-lg bg-stone-100 px-2.5 py-1 text-[11px] font-semibold text-stone-700"
                                   >
                                     {s.title}
                                   </span>
@@ -875,34 +1583,38 @@ export const AssistantDrawer: React.FC = () => {
 
               {loading && (
                 <div
-                  data-testid="assistant-loading"
-                  className="rounded-2xl border border-stone-200 bg-white p-4 text-xs font-bold text-emerald-900 animate-pulse"
+                  data-testid="assistant-loading-indicator"
+                  className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-3.5 text-xs font-semibold text-emerald-900 animate-pulse"
                 >
-                  🔍 Checking GharPlate database & running verified tools...
+                  Querying GharPlate database &amp; synthesising evidence-backed response…
                 </div>
               )}
 
               {error && (
                 <div
-                  data-testid="assistant-error"
-                  className="rounded-2xl border border-rose-300 bg-rose-50 p-3.5 text-xs font-bold text-rose-900"
+                  data-testid="assistant-error-banner"
+                  className="rounded-2xl border border-rose-200 bg-rose-50 p-3.5 text-xs font-semibold text-rose-900"
                 >
-                  ⚠️ {error}
+                  {error}
                 </div>
               )}
 
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Follow-up Suggestions Strip */}
+            {/* Suggested Follow-Up Chips (when conversation has started) */}
             {turns.length > 0 && suggestedFollowups.length > 0 && (
-              <div className="border-t border-stone-200/80 bg-stone-50 px-4 py-2 flex items-center gap-1.5 overflow-x-auto shrink-0">
-                {suggestedFollowups.slice(0, 3).map((q) => (
+              <div className="border-t border-stone-200/80 bg-white/95 px-4 py-2 flex items-center gap-1.5 overflow-x-auto shrink-0">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-stone-400 shrink-0">
+                  Follow-up:
+                </span>
+                {suggestedFollowups.map((q) => (
                   <button
                     key={q}
                     type="button"
                     onClick={() => void handleSendMessage(q)}
-                    className="shrink-0 rounded-full border border-stone-300 bg-white px-3 py-1 text-[11px] font-bold text-stone-700 hover:border-emerald-600 hover:text-emerald-900 transition"
+                    disabled={loading}
+                    className="shrink-0 rounded-full border border-emerald-200 bg-emerald-50/80 px-2.5 py-1 text-[11px] font-bold text-emerald-900 hover:bg-emerald-100 transition disabled:opacity-50"
                   >
                     {q}
                   </button>
@@ -910,42 +1622,35 @@ export const AssistantDrawer: React.FC = () => {
               </div>
             )}
 
-            {/* Fixed Bottom Message Composer */}
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                void handleSendMessage();
-              }}
-              className="border-t border-stone-200/90 bg-white p-3.5 sm:p-4 space-y-2 shrink-0"
-            >
-              <div className="flex items-end gap-2.5 rounded-2xl border border-stone-300 bg-stone-50/70 p-2 focus-within:border-emerald-700 focus-within:bg-white focus-within:ring-2 focus-within:ring-emerald-700/15 transition">
+            {/* Pinned Multi-Line Input Area */}
+            <div className="border-t border-stone-200 bg-white p-3.5 sm:p-4 space-y-2 shrink-0">
+              <div className="flex items-end gap-2">
                 <textarea
                   ref={textareaRef}
-                  rows={2}
+                  rows={1}
+                  aria-label="Ask GharPlate Input"
                   value={input}
                   onChange={handleInputChange}
                   onKeyDown={handleKeyDown}
-                  placeholder={
-                    activeFoodSlug
-                      ? `Ask about ${activeFoodSlug} (ingredients, allergens, barcode, missing nutrients)...`
-                      : 'Ask about any food, barcode, ingredient list, or health condition...'
-                  }
-                  aria-label="Ask GharPlate Input"
-                  className="flex-1 resize-none border-0 bg-transparent px-2 py-1 text-xs sm:text-[13px] leading-relaxed text-stone-900 placeholder-stone-400 focus:outline-none"
+                  placeholder="Ask about this food, ingredients, allergens, barcode, or condition..."
+                  className="flex-1 resize-none rounded-2xl border border-stone-300 bg-stone-50/70 px-3.5 py-2.5 text-xs sm:text-[13px] text-stone-900 placeholder:text-stone-400 focus:border-emerald-700 focus:bg-white focus:outline-none"
                 />
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={() => void handleSendMessage()}
                   disabled={loading || !input.trim()}
-                  className="rounded-xl bg-emerald-800 px-4 py-2.5 text-xs font-extrabold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-40 transition shrink-0"
+                  className="rounded-2xl bg-emerald-900 px-4 py-2.5 text-xs font-extrabold text-white shadow-sm hover:bg-emerald-800 transition disabled:opacity-50 shrink-0"
                 >
-                  {loading ? 'Sending...' : 'Send ↑'}
+                  Send ↑
                 </button>
               </div>
-              <div className="text-[10px] text-stone-400 flex flex-wrap items-center justify-between gap-2 px-1">
-                <span>Press Enter to send • Shift+Enter for new line</span>
-                <span>Educational only — not medical advice</span>
+              <div className="flex items-center justify-between text-[10px] text-stone-400">
+                <span>
+                  Educational nutrition information only · Not a medical diagnosis
+                </span>
+                <span className="hidden sm:inline">Enter to send · Shift+Enter for new line</span>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}

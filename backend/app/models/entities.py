@@ -1,5 +1,5 @@
 from datetime import datetime, UTC
-from typing import Optional
+from typing import Any, Optional
 from sqlalchemy import (
     Boolean,
     DateTime,
@@ -18,6 +18,120 @@ from app.db.session import Base
 
 def utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+class UserAccount(Base):
+    """
+    Authenticated user account stored in the database.
+    Passwords are hashed with Argon2id; plaintext passwords are never stored.
+    """
+    __tablename__ = "user_accounts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    full_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utc_now, onupdate=utc_now, nullable=False
+    )
+
+    sessions: Mapped[list["UserSession"]] = relationship(
+        "UserSession", back_populates="user", cascade="all, delete-orphan"
+    )
+    households: Mapped[list["Household"]] = relationship(
+        "Household", back_populates="owner", cascade="all, delete-orphan"
+    )
+    conversations: Mapped[list["AssistantConversation"]] = relationship(
+        "AssistantConversation", back_populates="user", cascade="all, delete-orphan"
+    )
+
+
+class UserSession(Base):
+    """
+    Server-validated authentication session.
+    Stores only SHA-256 hashes of the opaque session secret and CSRF token.
+    """
+    __tablename__ = "user_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    session_token_hash: Mapped[str] = mapped_column(
+        String(128), unique=True, index=True, nullable=False
+    )
+    csrf_token_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    remember_me: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    ip_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, index=True, nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, index=True, nullable=True)
+
+    user: Mapped["UserAccount"] = relationship("UserAccount", back_populates="sessions")
+
+
+class AssistantConversation(Base):
+    """
+    Persistent AI Assistant conversation thread owned by an authenticated user account.
+    """
+    __tablename__ = "assistant_conversations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    household_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("households.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    title: Mapped[str] = mapped_column(
+        String(200), default="New Nutrition Conversation", nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utc_now, onupdate=utc_now, index=True, nullable=False
+    )
+
+    user: Mapped["UserAccount"] = relationship("UserAccount", back_populates="conversations")
+    messages: Mapped[list["AssistantMessage"]] = relationship(
+        "AssistantMessage",
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        order_by="AssistantMessage.id.asc()",
+    )
+
+
+class AssistantMessage(Base):
+    """
+    Individual message turn (user or assistant) within an AssistantConversation.
+    """
+    __tablename__ = "assistant_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    conversation_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("assistant_conversations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    role: Mapped[str] = mapped_column(String(30), nullable=False)  # "user" or "assistant"
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    mode_used: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    model_used: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    ollama_connected: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    tool_traces: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, nullable=False)
+    sources: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+
+    conversation: Mapped["AssistantConversation"] = relationship(
+        "AssistantConversation", back_populates="messages"
+    )
 
 
 class DataSource(Base):
@@ -472,6 +586,9 @@ class Household(Base):
     __tablename__ = "households"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    owner_user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     household_token: Mapped[str] = mapped_column(String(80), unique=True, index=True, nullable=False)
     name: Mapped[str] = mapped_column(String(120), default="My Household", nullable=False)
     default_member_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -479,6 +596,7 @@ class Household(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
 
+    owner: Mapped[Optional["UserAccount"]] = relationship("UserAccount", back_populates="households")
     members: Mapped[list["HouseholdMember"]] = relationship(
         "HouseholdMember", back_populates="household", cascade="all, delete-orphan"
     )

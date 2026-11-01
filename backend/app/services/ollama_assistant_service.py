@@ -840,16 +840,27 @@ def execute_allowlisted_tool(
             h_token = arguments.get("household_token")
             m_id = arguments.get("member_id")
             member: HouseholdMember | None = None
+            hh = (
+                db.query(Household)
+                .filter(Household.household_token == str(h_token))
+                .first()
+                if h_token
+                else None
+            )
             if m_id is not None:
-                member = db.query(HouseholdMember).filter(HouseholdMember.id == int(m_id)).first()
-            elif h_token:
-                hh = db.query(Household).filter(Household.household_token == str(h_token)).first()
-                if hh and hh.default_member_id:
-                    member = (
-                        db.query(HouseholdMember)
-                        .filter(HouseholdMember.id == hh.default_member_id)
-                        .first()
+                q_mem = db.query(HouseholdMember).filter(HouseholdMember.id == int(m_id))
+                if hh is not None:
+                    q_mem = q_mem.filter(HouseholdMember.household_id == hh.id)
+                member = q_mem.first()
+            elif hh and hh.default_member_id:
+                member = (
+                    db.query(HouseholdMember)
+                    .filter(
+                        HouseholdMember.id == hh.default_member_id,
+                        HouseholdMember.household_id == hh.id,
                     )
+                    .first()
+                )
             if not member:
                 trace = AssistantToolExecutionTrace(
                     tool_name=tool_name,

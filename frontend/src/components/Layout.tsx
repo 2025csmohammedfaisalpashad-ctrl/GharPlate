@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { useAuthGate } from '../App';
 import { useHousehold } from '../hooks/useHousehold';
+import { GharPlateBrandMark } from '../pages/AuthLandingPage';
 import { AssistantDrawer } from './AssistantDrawer';
 import { MedicalSafetyBanner } from './UIWidgets';
 
@@ -60,6 +62,7 @@ const NAV_GROUPS: NavGroup[] = [
 
 export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { household, activeMember, setActiveMemberId } = useHousehold();
+  const { authProfile, signOut } = useAuthGate();
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
@@ -90,9 +93,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               ☰
             </button>
             <Link to="/" className="flex items-center gap-2.5 group">
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-800 text-white font-black text-xl shadow-sm group-hover:bg-emerald-700 transition">
-                G
-              </div>
+              <GharPlateBrandMark size="sm" />
               <div>
                 <span className="text-xl font-black tracking-tight text-stone-900">
                   GharPlate
@@ -129,7 +130,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
             })}
           </nav>
 
-          {/* Right: Active Member Pill Switcher & Scan Shortcut */}
+          {/* Right: Active Member Pill Switcher, Scan Shortcut & Account Control */}
           <div className="flex items-center gap-2.5">
             <Link
               to="/barcode"
@@ -171,6 +172,26 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                 className="rounded-xl bg-emerald-800 px-3.5 py-2 text-xs font-bold text-white shadow-sm hover:bg-emerald-700 transition"
               >
                 + Add Family Member
+              </Link>
+            )}
+
+            {authProfile ? (
+              <button
+                type="button"
+                data-testid="header-signout-btn"
+                onClick={signOut}
+                title={`Signed in as ${authProfile.email} — Click to sign out`}
+                className="rounded-xl border border-stone-200 bg-white px-3 py-2 text-xs font-bold text-stone-700 hover:bg-rose-50 hover:text-rose-800 hover:border-rose-200 transition"
+              >
+                Sign Out
+              </button>
+            ) : (
+              <Link
+                to="/login"
+                data-testid="header-signin-link"
+                className="hidden md:inline-flex rounded-xl border border-stone-200 bg-white px-3 py-2 text-xs font-bold text-stone-700 hover:bg-stone-100 transition"
+              >
+                Sign In
               </Link>
             )}
           </div>
@@ -296,12 +317,12 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               GharPlate — Indian Household Food Intelligence
             </p>
             <p className="mt-0.5 text-stone-500">
-              Powered by ICMR-NIN IFCT 2017, Dietary Guidelines for Indians 2024, Open Food Facts, USDA FDC, WHO, KDIGO & FSSAI data.
+              Powered by ICMR-NIN IFCT 2017, Dietary Guidelines for Indians 2024, Open Food Facts, USDA FDC, WHO, KDIGO &amp; FSSAI data.
             </p>
           </div>
           <div className="flex flex-wrap gap-4 font-bold text-emerald-800">
             <Link to="/sources" className="hover:underline">Data Sources</Link>
-            <Link to="/privacy-safety" className="hover:underline">Privacy & Safety</Link>
+            <Link to="/privacy-safety" className="hover:underline">Privacy &amp; Safety</Link>
             <Link to="/about" className="hover:underline">About</Link>
             <Link to="/settings" className="hover:underline">Settings</Link>
           </div>

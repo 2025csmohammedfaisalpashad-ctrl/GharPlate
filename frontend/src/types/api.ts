@@ -641,6 +641,8 @@ export interface AssistantSourceReference {
 }
 
 export interface AssistantChatResponse {
+  conversation_id?: number | null;
+  conversation_title?: string | null;
   reply: string;
   mode_used: string;
   model_used: string;
@@ -664,3 +666,54 @@ export interface AssistantStatusResponse {
   available_modes: { id: string; label: string; description: string }[];
   allowlisted_tools: string[];
 }
+
+export interface AssistantMessageRecord {
+  id: number;
+  conversation_id: number;
+  role: 'user' | 'assistant';
+  content: string;
+  mode_used?: string | null;
+  model_used?: string | null;
+  ollama_connected: boolean;
+  tool_traces: AssistantToolExecutionTrace[];
+  sources: AssistantSourceReference[];
+  created_at: string;
+}
+
+export interface AssistantConversationSummary {
+  id: number;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+  last_message_preview?: string | null;
+}
+
+export interface AssistantConversationDetail {
+  id: number;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  messages: AssistantMessageRecord[];
+}
+
+// ==========================================
+// REAL DATABASE-BACKED AUTHENTICATION TYPES
+// ==========================================
+export interface AuthUser {
+  id: number;
+  email: string;
+  full_name: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface AuthSessionResponse {
+  authenticated: boolean;
+  user: AuthUser;
+  household: Household;
+  csrf_token: string;
+  session_expires_at: string;
+  message: string;
+}
+

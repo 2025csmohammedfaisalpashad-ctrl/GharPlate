@@ -1,11 +1,11 @@
 import io
 from PIL import Image
 import pytest
-from fastapi.testclient import TestClient
 
 from app.main import app
 from app.db.session import Base, SessionLocal, engine
 from app.db.init_db import seed_database
+from tests.conftest import AuthenticatedTestClient
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -19,7 +19,7 @@ def setup_test_db():
     yield
 
 
-client = TestClient(app)
+client = AuthenticatedTestClient(app)
 
 
 def create_in_memory_png(color=(210, 180, 120), size=(120, 120)) -> bytes:
@@ -157,15 +157,17 @@ def test_07_short_term_illness_and_pediatric_scoping():
 
 
 def test_08_household_and_member_profiles_allergies_vs_intolerances():
+    client.ensure_authenticated()
+    owned_token = client.household_token
     hh_resp = client.post(
         "/api/v1/households",
-        json={"household_token": "hh_test_token_12345", "name": "Sharma-Rao Family"},
+        json={"household_token": owned_token, "name": "Sharma-Rao Family"},
     )
     assert hh_resp.status_code == 200
-    assert hh_resp.json()["household_token"] == "hh_test_token_12345"
+    assert hh_resp.json()["household_token"] == owned_token
 
     mem_resp = client.post(
-        "/api/v1/households/hh_test_token_12345/members",
+        f"/api/v1/households/{owned_token}/members",
         json={
             "display_name": "Ajji",
             "age_group": "older_adult",
@@ -208,10 +210,12 @@ def test_08_household_and_member_profiles_allergies_vs_intolerances():
 
 def test_09_recipe_calculator_and_missing_nutrient_preservation():
     # Combine Ragi (known nutrients) + Packaged Glucose Biscuits (NULL potassium)
+    client.ensure_authenticated()
+    owned_token = client.household_token
     resp = client.post(
         "/api/v1/recipes/calculate",
         json={
-            "household_token": "hh_test_token_12345",
+            "household_token": owned_token,
             "title": "Test Mixed Recipe",
             "description": "Testing unit conversion and NULL nutrient handling",
             "servings": 2.0,

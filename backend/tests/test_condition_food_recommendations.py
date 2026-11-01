@@ -7,7 +7,6 @@ Covers:
 """
 
 from pathlib import Path
-from fastapi.testclient import TestClient
 
 from app.main import app
 from app.core.config import settings
@@ -18,8 +17,9 @@ from app.models.entities import (
     FoodItem,
     HealthCondition,
 )
+from tests.conftest import AuthenticatedTestClient
 
-client = TestClient(app)
+client = AuthenticatedTestClient(app)
 
 
 def test_test_suite_uses_isolated_database():
@@ -159,7 +159,8 @@ def test_vegetarian_member_excludes_egg_meat_and_fish():
     """
     1. A vegetarian household member does not receive egg, meat, poultry, or fish foods.
     """
-    token = "hh_cond_veg_test"
+    client.ensure_authenticated()
+    token = client.household_token
     client.post("/api/v1/households", json={"household_token": token, "name": "Veg Test Household"})
     mem = client.post(
         f"/api/v1/households/{token}/members",
@@ -203,7 +204,8 @@ def test_vegan_member_excludes_dairy_egg_meat_and_fish():
     """
     2. A vegan household member does not receive dairy, egg, meat, poultry, or fish foods.
     """
-    token = "hh_cond_vegan_test"
+    client.ensure_authenticated()
+    token = client.household_token
     client.post("/api/v1/households", json={"household_token": token, "name": "Vegan Test Household"})
     mem = client.post(
         f"/api/v1/households/{token}/members",
@@ -354,7 +356,8 @@ def test_allergen_and_intolerance_warnings_for_household_member():
     """
     4. Member allergies and intolerances generate explicit warnings on condition-recommended foods.
     """
-    token = "hh_cond_allergy_test"
+    client.ensure_authenticated()
+    token = client.household_token
     client.post("/api/v1/households", json={"household_token": token, "name": "Allergy Test Household"})
     mem = client.post(
         f"/api/v1/households/{token}/members",

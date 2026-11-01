@@ -12,8 +12,6 @@ Covers:
 
 from unittest.mock import MagicMock, patch
 import httpx
-from fastapi.testclient import TestClient
-
 from app.main import app
 from app.schemas.api_schemas import AssistantChatRequest
 from app.services.ollama_assistant_service import (
@@ -21,8 +19,9 @@ from app.services.ollama_assistant_service import (
     execute_allowlisted_tool,
 )
 from app.db.session import SessionLocal
+from tests.conftest import AuthenticatedTestClient
 
-client = TestClient(app)
+client = AuthenticatedTestClient(app)
 
 
 def test_01_assistant_status_and_model_discovery():

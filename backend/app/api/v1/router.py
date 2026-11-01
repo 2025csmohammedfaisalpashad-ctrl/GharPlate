@@ -1,10 +1,16 @@
+from datetime import datetime, UTC
 from typing import Annotated
-import uuid
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session, joinedload
 
+from app.api.v1.auth_router import AUTHENTICATED_PRIVACY_NOTICE, auth_router
 from app.core.config import settings
+from app.core.security import (
+    ensure_user_owned_household,
+    get_current_user,
+    verify_household_ownership,
+)
 from app.db.session import get_db
 from app.integrations.normalizer import check_allergen_consistency
 from app.integrations.provider_registry import (
@@ -13,23 +19,34 @@ from app.integrations.provider_registry import (
     search_multi_source_external_products,
 )
 from app.models.entities import (
+    AssistantConversation,
+    AssistantMessage,
     ConditionConflictRule,
     DataSource,
     FoodCategory,
     FoodItem,
     FoodNutrientValue,
     HealthCondition,
-    Household,
     HouseholdMember,
     NutritionRule,
     Recipe,
+    UserAccount,
 )
 from app.rules.guidance_engine import evaluate_food_guidance
 from app.schemas.api_schemas import (
     AllergenConsistencyOut,
+    AssistantChatMessage,
     AssistantChatRequest,
     AssistantChatResponse,
+    AssistantConversationCreateRequest,
+    AssistantConversationDetailOut,
+    AssistantConversationSummaryOut,
+    AssistantConversationUpdateRequest,
+    AssistantMessageOut,
+    AssistantPageContext,
+    AssistantSourceReference,
     AssistantStatusResponse,
+    AssistantToolExecutionTrace,
     BarcodeLookupResponse,
     ConditionConflictOut,
     ConditionFoodRecommendationResponse,
@@ -88,13 +105,10 @@ from app.services.ollama_assistant_service import (
 from app.services.recipe_service import create_or_update_recipe, serialize_recipe_detail
 
 api_router = APIRouter()
+api_router.include_router(auth_router)
 
 DbSession = Annotated[Session, Depends(get_db)]
-
-PRIVACY_NOTICE_TEXT = (
-    "Convenience Browser Identifier Only: Your household token is a randomly generated UUID stored locally in your browser. "
-    "It is NOT strong authentication or identity verification. Uploaded food or label images are processed strictly in memory and never stored without explicit consent."
-)
+CurrentUser = Annotated[UserAccount, Depends(get_current_user)]
 
 
 # ==========================================
@@ -120,7 +134,7 @@ def health_check(db: DbSession):
 
 
 @api_router.get("/sources", response_model=list[DataSourceOut], tags=["Sources"])
-def list_data_sources(db: DbSession):
+def list_data_sources(db: DbSession, _current_user: CurrentUser):
     sources = db.query(DataSource).order_by(DataSource.publication_year.desc(), DataSource.id.asc()).all()
     return [DataSourceOut.model_validate(s) for s in sources]
 
@@ -129,7 +143,7 @@ def list_data_sources(db: DbSession):
 # 2. FOOD INTELLIGENCE & ADVANCED SEARCH
 # ==========================================
 @api_router.get("/foods/categories", response_model=list[FoodCategoryOut], tags=["Foods"])
-def list_food_categories(db: DbSession):
+def list_food_categories(db: DbSession, _current_user: CurrentUser):
     cats = db.query(FoodCategory).order_by(FoodCategory.display_order.asc()).all()
     return [FoodCategoryOut.model_validate(c) for c in cats]
 
@@ -137,6 +151,7 @@ def list_food_categories(db: DbSession):
 @api_router.get("/foods", response_model=FoodSearchResponse, tags=["Foods"])
 def search_food_items(
     db: DbSession,
+    _current_user: CurrentUser,
     q: Annotated[str | None, Query(description="Search by English, Hindi, or Kannada name/alias")] = None,
     category: Annotated[str | None, Query(description="Filter by category slug")] = None,
     is_packaged: Annotated[bool | None, Query(description="Filter packaged vs whole/cooked foods")] = None,
@@ -166,7 +181,7 @@ def search_food_items(
 
 
 @api_router.get("/foods/{slug}", response_model=FoodDetailOut, tags=["Foods"])
-def get_food_detail(slug: str, db: DbSession):
+def get_food_detail(slug: str, db: DbSession, _current_user: CurrentUser):
     food = (
         db.query(FoodItem)
         .options(
@@ -192,7 +207,7 @@ def get_food_detail(slug: str, db: DbSession):
 # 3. CONDITIONS & DETERMINISTIC GUIDANCE
 # ==========================================
 @api_router.get("/conditions", response_model=list[HealthConditionSummaryOut], tags=["Conditions & Guidance"])
-def list_health_conditions(db: DbSession):
+def list_health_conditions(db: DbSession, _current_user: CurrentUser):
     conds = (
         db.query(HealthCondition)
         .options(joinedload(HealthCondition.source))
@@ -220,7 +235,7 @@ def list_health_conditions(db: DbSession):
 
 
 @api_router.get("/conditions/conflicts", response_model=list[ConditionConflictOut], tags=["Conditions & Guidance"])
-def list_condition_conflicts(db: DbSession):
+def list_condition_conflicts(db: DbSession, _current_user: CurrentUser):
     conflicts = (
         db.query(ConditionConflictRule)
         .options(joinedload(ConditionConflictRule.source))
@@ -243,7 +258,7 @@ def list_condition_conflicts(db: DbSession):
 
 
 @api_router.get("/conditions/{code}", response_model=HealthConditionDetailOut, tags=["Conditions & Guidance"])
-def get_health_condition_detail(code: str, db: DbSession):
+def get_health_condition_detail(code: str, db: DbSession, _current_user: CurrentUser):
     cond = (
         db.query(HealthCondition)
         .options(
@@ -314,9 +329,10 @@ def get_health_condition_detail(code: str, db: DbSession):
 def explore_foods_by_condition(
     code: str,
     db: DbSession,
+    current_user: CurrentUser,
     household_token: Annotated[
         str | None,
-        Query(description="Optional household convenience token for member context resolution"),
+        Query(description="Optional household token (must belong to the authenticated user)"),
     ] = None,
     member_id: Annotated[
         int | None,
@@ -327,11 +343,20 @@ def explore_foods_by_condition(
         Query(description="Optional explicit dietary preference override (vegetarian, vegan, eggetarian, non_vegetarian, jain)"),
     ] = None,
 ):
+    owned_hh = verify_household_ownership(db, current_user, requested_token=household_token)
+    if member_id is not None:
+        member_belongs = any(m.id == member_id for m in (owned_hh.members or []))
+        if not member_belongs:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: Requested family member does not belong to your household.",
+            )
+
     try:
         return get_condition_food_recommendations(
             db=db,
             condition_code=code,
-            household_token=household_token,
+            household_token=owned_hh.household_token if (household_token or member_id is not None) else None,
             member_id=member_id,
             dietary_preference=dietary_preference,
         )
@@ -343,7 +368,7 @@ def explore_foods_by_condition(
 
 @api_router.post("/guidance/evaluate", response_model=GuidanceEvaluationResponse, tags=["Conditions & Guidance"])
 def evaluate_guidance_endpoint(
-    req: GuidanceEvaluationRequest, db: DbSession
+    req: GuidanceEvaluationRequest, db: DbSession, _current_user: CurrentUser
 ):
     try:
         return evaluate_food_guidance(db, req)
@@ -352,22 +377,19 @@ def evaluate_guidance_endpoint(
 
 
 # ==========================================
-# 4. HOUSEHOLD & FAMILY PROFILES (NO LOGIN)
+# 4. AUTHENTICATED HOUSEHOLD & FAMILY PROFILES
 # ==========================================
 @api_router.post("/households", response_model=HouseholdOut, tags=["Households"])
 def create_or_get_household(
-    req: HouseholdCreateRequest, db: DbSession
+    req: HouseholdCreateRequest, db: DbSession, current_user: CurrentUser
 ):
-    token = req.household_token or f"hh_{uuid.uuid4().hex}"
-    hh = (
-        db.query(Household)
-        .options(joinedload(Household.members))
-        .filter(Household.household_token == token)
-        .first()
-    )
-    if not hh:
-        hh = Household(household_token=token, name=req.name)
-        db.add(hh)
+    """
+    Returns or updates the authenticated user's owned household.
+    Never allows claiming or accessing another user's household token.
+    """
+    hh = verify_household_ownership(db, current_user, requested_token=req.household_token)
+    if req.name and req.name.strip() and req.name.strip() != "My Household":
+        hh.name = req.name.strip()[:120]
         db.commit()
         db.refresh(hh)
     return HouseholdOut(
@@ -375,43 +397,37 @@ def create_or_get_household(
         household_token=hh.household_token,
         name=hh.name,
         default_member_id=hh.default_member_id,
-        privacy_notice=PRIVACY_NOTICE_TEXT,
+        privacy_notice=AUTHENTICATED_PRIVACY_NOTICE,
         created_at=hh.created_at,
         members=[HouseholdMemberOut.model_validate(m) for m in hh.members],
     )
 
 
 @api_router.get("/households/{token}", response_model=HouseholdOut, tags=["Households"])
-def get_household(token: str, db: DbSession):
-    hh = (
-        db.query(Household)
-        .options(joinedload(Household.members))
-        .filter(Household.household_token == token)
-        .first()
-    )
-    if not hh:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Household not found")
+def get_household(token: str, db: DbSession, current_user: CurrentUser):
+    hh = verify_household_ownership(db, current_user, requested_token=token)
     return HouseholdOut(
         id=hh.id,
         household_token=hh.household_token,
         name=hh.name,
         default_member_id=hh.default_member_id,
-        privacy_notice=PRIVACY_NOTICE_TEXT,
+        privacy_notice=AUTHENTICATED_PRIVACY_NOTICE,
         created_at=hh.created_at,
         members=[HouseholdMemberOut.model_validate(m) for m in hh.members],
     )
 
 
 @api_router.delete("/households/{token}", tags=["Households"])
-def delete_household(token: str, db: DbSession):
-    hh = db.query(Household).filter(Household.household_token == token).first()
-    if hh:
-        db.delete(hh)
-        db.commit()
+def delete_household(token: str, db: DbSession, current_user: CurrentUser):
+    hh = verify_household_ownership(db, current_user, requested_token=token)
+    # Clear members and custom recipes inside the user's household and recreate a clean household
+    db.delete(hh)
+    db.commit()
+    fresh_hh = ensure_user_owned_household(db, current_user)
     return {
         "deleted": True,
-        "household_token": token,
-        "message": "All household profile and recipe records associated with this convenience token have been permanently removed.",
+        "household_token": fresh_hh.household_token,
+        "message": "Your household member profiles and saved recipes have been reset.",
     }
 
 
@@ -421,13 +437,9 @@ def delete_household(token: str, db: DbSession):
     tags=["Households"],
 )
 def add_household_member(
-    token: str, req: HouseholdMemberCreate, db: DbSession
+    token: str, req: HouseholdMemberCreate, db: DbSession, current_user: CurrentUser
 ):
-    hh = db.query(Household).filter(Household.household_token == token).first()
-    if not hh:
-        hh = Household(household_token=token, name="My Household")
-        db.add(hh)
-        db.flush()
+    hh = verify_household_ownership(db, current_user, requested_token=token)
 
     member = HouseholdMember(
         household_id=hh.id,
@@ -459,10 +471,9 @@ def update_household_member(
     member_id: int,
     req: HouseholdMemberCreate,
     db: DbSession,
+    current_user: CurrentUser,
 ):
-    hh = db.query(Household).filter(Household.household_token == token).first()
-    if not hh:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Household not found")
+    hh = verify_household_ownership(db, current_user, requested_token=token)
     member = (
         db.query(HouseholdMember)
         .filter(
@@ -472,7 +483,7 @@ def update_household_member(
         .first()
     )
     if not member:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found in your household")
 
     member.display_name = req.display_name
     member.age_group = req.age_group
@@ -489,18 +500,11 @@ def update_household_member(
 
 @api_router.post("/households/{token}/default-member/{member_id}", response_model=HouseholdOut, tags=["Households"])
 def set_default_household_member(
-    token: str, member_id: int, db: DbSession
+    token: str, member_id: int, db: DbSession, current_user: CurrentUser
 ):
-    hh = (
-        db.query(Household)
-        .options(joinedload(Household.members))
-        .filter(Household.household_token == token)
-        .first()
-    )
-    if not hh:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Household not found")
+    hh = verify_household_ownership(db, current_user, requested_token=token)
     if not any(m.id == member_id for m in hh.members):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not in household")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not in your household")
     hh.default_member_id = member_id
     db.commit()
     db.refresh(hh)
@@ -509,50 +513,66 @@ def set_default_household_member(
         household_token=hh.household_token,
         name=hh.name,
         default_member_id=hh.default_member_id,
-        privacy_notice=PRIVACY_NOTICE_TEXT,
+        privacy_notice=AUTHENTICATED_PRIVACY_NOTICE,
         created_at=hh.created_at,
         members=[HouseholdMemberOut.model_validate(m) for m in hh.members],
     )
 
 
 @api_router.delete("/households/{token}/members/{member_id}", tags=["Households"])
-def delete_household_member(token: str, member_id: int, db: DbSession):
-    hh = db.query(Household).filter(Household.household_token == token).first()
-    if not hh:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Household not found")
+def delete_household_member(
+    token: str, member_id: int, db: DbSession, current_user: CurrentUser
+):
+    hh = verify_household_ownership(db, current_user, requested_token=token)
     member = (
         db.query(HouseholdMember)
         .filter(HouseholdMember.id == member_id, HouseholdMember.household_id == hh.id)
         .first()
     )
     if not member:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found in your household")
     db.delete(member)
     if hh.default_member_id == member_id:
-        hh.default_member_id = None
+        remaining = [m for m in hh.members if m.id != member_id]
+        hh.default_member_id = remaining[0].id if remaining else None
     db.commit()
     return {"deleted": True, "member_id": member_id}
 
 
 # ==========================================
-# 5. RECIPE & MEAL NUTRITION CALCULATOR
+# 5. RECIPE & MEAL NUTRITION CALCULATOR (SCOPED TO USER HOUSEHOLD)
 # ==========================================
 @api_router.post("/recipes/calculate", response_model=RecipeDetailOut, tags=["Recipes"])
 def create_and_calculate_recipe(
-    req: RecipeCreateRequest, db: DbSession
+    req: RecipeCreateRequest, db: DbSession, current_user: CurrentUser
 ):
+    hh = verify_household_ownership(db, current_user, requested_token=req.household_token)
     try:
-        return create_or_update_recipe(db, req)
+        return create_or_update_recipe(
+            db,
+            req,
+            household_id=hh.id,
+            household_token=hh.household_token,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @api_router.put("/recipes/{recipe_id}", response_model=RecipeDetailOut, tags=["Recipes"])
 def update_existing_recipe(
-    recipe_id: int, req: RecipeCreateRequest, db: DbSession
+    recipe_id: int, req: RecipeCreateRequest, db: DbSession, current_user: CurrentUser
 ):
+    hh = verify_household_ownership(db, current_user, requested_token=req.household_token)
     try:
-        return create_or_update_recipe(db, req, recipe_id=recipe_id)
+        return create_or_update_recipe(
+            db,
+            req,
+            recipe_id=recipe_id,
+            household_id=hh.id,
+            household_token=hh.household_token,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -560,32 +580,44 @@ def update_existing_recipe(
 @api_router.get("/recipes", response_model=list[RecipeDetailOut], tags=["Recipes"])
 def list_recipes(
     db: DbSession,
+    current_user: CurrentUser,
     household_token: Annotated[str | None, Query()] = None,
 ):
-    query = db.query(Recipe).options(joinedload(Recipe.ingredients))
-    if household_token:
-        query = query.filter(
-            (Recipe.household_token == household_token) | (Recipe.is_system_template.is_(True))
-        )
-    else:
-        query = query.filter(Recipe.is_system_template.is_(True))
+    hh = verify_household_ownership(db, current_user, requested_token=household_token)
+    query = (
+        db.query(Recipe)
+        .options(joinedload(Recipe.ingredients))
+        .filter((Recipe.household_id == hh.id) | (Recipe.is_system_template.is_(True)))
+    )
     recipes = query.order_by(Recipe.id.desc()).all()
     return [serialize_recipe_detail(db, r) for r in recipes]
 
 
 @api_router.get("/recipes/{recipe_id}", response_model=RecipeDetailOut, tags=["Recipes"])
-def get_recipe_by_id(recipe_id: int, db: DbSession):
+def get_recipe_by_id(recipe_id: int, db: DbSession, current_user: CurrentUser):
+    hh = ensure_user_owned_household(db, current_user)
     recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
     if not recipe:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recipe not found")
+    if not recipe.is_system_template and recipe.household_id != hh.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: You do not have permission to view another household's recipe.",
+        )
     return serialize_recipe_detail(db, recipe)
 
 
 @api_router.delete("/recipes/{recipe_id}", tags=["Recipes"])
-def delete_recipe(recipe_id: int, db: DbSession):
+def delete_recipe(recipe_id: int, db: DbSession, current_user: CurrentUser):
+    hh = ensure_user_owned_household(db, current_user)
     recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
     if not recipe:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recipe not found")
+    if recipe.is_system_template or recipe.household_id != hh.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: You can only delete recipes belonging to your household.",
+        )
     db.delete(recipe)
     db.commit()
     return {"deleted": True, "recipe_id": recipe_id}
@@ -595,7 +627,7 @@ def delete_recipe(recipe_id: int, db: DbSession):
 # 6. OCR SCANNER, BARCODE & MULTI-SOURCE PRODUCT INTELLIGENCE
 # ==========================================
 @api_router.post("/scan/ocr-text", response_model=OCRScanResponse, tags=["Scanner & OCR"])
-def parse_ocr_label_text_endpoint(req: OCRTextParseRequest):
+def parse_ocr_label_text_endpoint(req: OCRTextParseRequest, _current_user: CurrentUser):
     return parse_nutrition_label_text(req.raw_label_text)
 
 
@@ -603,6 +635,7 @@ def parse_ocr_label_text_endpoint(req: OCRTextParseRequest):
 @api_router.post("/scan/ocr-image", response_model=OCRScanResponse, tags=["Scanner & OCR"])
 async def scan_nutrition_label_image(
     file: Annotated[UploadFile, File(...)],
+    _current_user: CurrentUser,
     ingredients_file: Annotated[UploadFile | None, File()] = None,
     hint_text: Annotated[str | None, Form()] = None,
 ):
@@ -626,7 +659,7 @@ async def scan_nutrition_label_image(
 
 @api_router.post("/scan/confirm-product", response_model=FoodDetailOut, tags=["Scanner & OCR"])
 def confirm_and_save_product(
-    req: ManualProductCreateRequest, db: DbSession
+    req: ManualProductCreateRequest, db: DbSession, _current_user: CurrentUser
 ):
     try:
         return create_user_confirmed_product(db, req)
@@ -638,6 +671,7 @@ def confirm_and_save_product(
 def get_product_by_barcode(
     barcode: str,
     db: DbSession,
+    _current_user: CurrentUser,
     force_refresh: Annotated[bool, Query(description="Force fresh external provider lookup")] = False,
 ):
     return lookup_barcode(db, barcode, force_refresh=force_refresh)
@@ -647,6 +681,7 @@ def get_product_by_barcode(
 def search_products_multi_source(
     q: Annotated[str, Query(min_length=1, description="Product name or barcode query")],
     db: DbSession,
+    _current_user: CurrentUser,
     brand: Annotated[str | None, Query(description="Optional brand filter")] = None,
     include_external: Annotated[bool, Query(description="Query Open Food Facts & USDA FDC")] = True,
 ):
@@ -705,7 +740,7 @@ def search_products_multi_source(
 
 @api_router.post("/products/enrich", response_model=BarcodeLookupResponse, tags=["Product Intelligence"])
 def enrich_product_endpoint(
-    req: ProductEnrichRequest, db: DbSession
+    req: ProductEnrichRequest, db: DbSession, _current_user: CurrentUser
 ):
     target_barcode = req.barcode
     if not target_barcode and req.food_slug:
@@ -734,7 +769,7 @@ def enrich_product_endpoint(
     response_model=ProductProvenanceResponse,
     tags=["Product Intelligence"],
 )
-def get_product_provenance_endpoint(slug: str, db: DbSession):
+def get_product_provenance_endpoint(slug: str, db: DbSession, _current_user: CurrentUser):
     food = (
         db.query(FoodItem)
         .options(
@@ -786,6 +821,7 @@ def get_product_provenance_endpoint(slug: str, db: DbSession):
 async def recognize_dish_endpoint(
     file: Annotated[UploadFile, File(...)],
     db: DbSession,
+    _current_user: CurrentUser,
     user_hint: Annotated[str | None, Form()] = None,
 ):
     raw_bytes = await file.read()
@@ -808,7 +844,7 @@ async def recognize_dish_endpoint(
 # ==========================================
 @api_router.post("/products/compare", response_model=ProductComparisonResponse, tags=["Product Comparison"])
 def compare_products_endpoint(
-    req: ProductComparisonRequest, db: DbSession
+    req: ProductComparisonRequest, db: DbSession, _current_user: CurrentUser
 ):
     try:
         return compare_packaged_products(db, req)
@@ -818,23 +854,24 @@ def compare_products_endpoint(
 
 @api_router.post("/meals/suggestions", response_model=MealSuggestionResponse, tags=["Meal Suggestions"])
 def suggest_meals_endpoint(
-    req: MealSuggestionRequest, db: DbSession
+    req: MealSuggestionRequest, db: DbSession, _current_user: CurrentUser
 ):
     return generate_meal_suggestions(db, req)
 
 
 # ==========================================
-# 8. LOCAL OLLAMA-POWERED GHARPLATE AI ASSISTANT
+# 8. LOCAL OLLAMA-POWERED GHARPLATE AI ASSISTANT & PERSISTENT CONVERSATIONS
 # ==========================================
 @api_router.get("/assistant/status", response_model=AssistantStatusResponse, tags=["AI Assistant"])
 def assistant_status_endpoint(
+    _current_user: CurrentUser,
     model: Annotated[str | None, Query()] = None,
 ):
     return get_ollama_assistant_status(requested_model=model)
 
 
 @api_router.get("/assistant/models", tags=["AI Assistant"])
-def assistant_models_endpoint():
+def assistant_models_endpoint(_current_user: CurrentUser):
     reachable, installed, err_msg = discover_ollama_models()
     return {
         "ollama_reachable": reachable,
@@ -845,8 +882,321 @@ def assistant_models_endpoint():
     }
 
 
+def _build_message_preview(messages: list[AssistantMessage]) -> str | None:
+    if not messages:
+        return None
+    ordered = sorted(messages, key=lambda m: (m.created_at, m.id))
+    latest = ordered[-1]
+    cleaned = " ".join((latest.content or "").replace("#", "").replace("*", "").split())
+    if not cleaned:
+        return None
+    prefix = "You: " if latest.role == "user" else ""
+    text = f"{prefix}{cleaned}"
+    return text[:110] + ("…" if len(text) > 110 else "")
+
+
+@api_router.get(
+    "/assistant/conversations",
+    response_model=list[AssistantConversationSummaryOut],
+    tags=["AI Assistant"],
+)
+def list_assistant_conversations(
+    db: DbSession,
+    current_user: CurrentUser,
+    q: Annotated[str | None, Query(description="Optional search filter for conversations")] = None,
+):
+    convs = (
+        db.query(AssistantConversation)
+        .options(joinedload(AssistantConversation.messages))
+        .filter(AssistantConversation.user_id == current_user.id)
+        .order_by(AssistantConversation.updated_at.desc(), AssistantConversation.id.desc())
+        .all()
+    )
+    search_term = (q or "").strip().lower()
+    summaries: list[AssistantConversationSummaryOut] = []
+    for c in convs:
+        msgs = c.messages or []
+        preview = _build_message_preview(msgs)
+        if search_term:
+            title_match = search_term in (c.title or "").lower()
+            msg_match = any(search_term in (m.content or "").lower() for m in msgs)
+            if not (title_match or msg_match):
+                continue
+        summaries.append(
+            AssistantConversationSummaryOut(
+                id=c.id,
+                title=c.title,
+                created_at=c.created_at,
+                updated_at=c.updated_at,
+                message_count=len(msgs),
+                last_message_preview=preview,
+            )
+        )
+    return summaries
+
+
+@api_router.post(
+    "/assistant/conversations",
+    response_model=AssistantConversationDetailOut,
+    status_code=status.HTTP_201_CREATED,
+    tags=["AI Assistant"],
+)
+def create_assistant_conversation(
+    req: AssistantConversationCreateRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    hh = ensure_user_owned_household(db, current_user)
+    now = datetime.now(UTC)
+    conv = AssistantConversation(
+        user_id=current_user.id,
+        household_id=hh.id,
+        title=(req.title or "New Nutrition Conversation").strip()[:200],
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(conv)
+    db.commit()
+    db.refresh(conv)
+    return AssistantConversationDetailOut(
+        id=conv.id,
+        title=conv.title,
+        created_at=conv.created_at,
+        updated_at=conv.updated_at,
+        messages=[],
+    )
+
+
+@api_router.patch(
+    "/assistant/conversations/{conversation_id}",
+    response_model=AssistantConversationSummaryOut,
+    tags=["AI Assistant"],
+)
+@api_router.put(
+    "/assistant/conversations/{conversation_id}",
+    response_model=AssistantConversationSummaryOut,
+    tags=["AI Assistant"],
+)
+def rename_assistant_conversation(
+    conversation_id: int,
+    req: AssistantConversationUpdateRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    conv = (
+        db.query(AssistantConversation)
+        .options(joinedload(AssistantConversation.messages))
+        .filter(AssistantConversation.id == conversation_id)
+        .first()
+    )
+    if not conv:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found."
+        )
+    if conv.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: You cannot rename another account's conversation.",
+        )
+    cleaned_title = req.title.strip()[:200]
+    if not cleaned_title:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Conversation title cannot be empty.",
+        )
+    conv.title = cleaned_title
+    conv.updated_at = datetime.now(UTC)
+    db.commit()
+    db.refresh(conv)
+    msgs = conv.messages or []
+    return AssistantConversationSummaryOut(
+        id=conv.id,
+        title=conv.title,
+        created_at=conv.created_at,
+        updated_at=conv.updated_at,
+        message_count=len(msgs),
+        last_message_preview=_build_message_preview(msgs),
+    )
+
+
+@api_router.get(
+    "/assistant/conversations/{conversation_id}",
+    response_model=AssistantConversationDetailOut,
+    tags=["AI Assistant"],
+)
+def get_assistant_conversation(
+    conversation_id: int, db: DbSession, current_user: CurrentUser
+):
+    conv = (
+        db.query(AssistantConversation)
+        .options(joinedload(AssistantConversation.messages))
+        .filter(AssistantConversation.id == conversation_id)
+        .first()
+    )
+    if not conv:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found."
+        )
+    if conv.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: You do not have permission to view another account's conversation.",
+        )
+
+    ordered_messages = sorted(
+        conv.messages or [], key=lambda m: (m.created_at, m.id)
+    )
+    messages_out = [
+        AssistantMessageOut(
+            id=m.id,
+            conversation_id=m.conversation_id,
+            role=m.role,
+            content=m.content,
+            mode_used=m.mode_used,
+            model_used=m.model_used,
+            ollama_connected=m.ollama_connected,
+            tool_traces=[
+                AssistantToolExecutionTrace(**t) for t in (m.tool_traces or [])
+            ],
+            sources=[AssistantSourceReference(**s) for s in (m.sources or [])],
+            created_at=m.created_at,
+        )
+        for m in ordered_messages
+    ]
+    return AssistantConversationDetailOut(
+        id=conv.id,
+        title=conv.title,
+        created_at=conv.created_at,
+        updated_at=conv.updated_at,
+        messages=messages_out,
+    )
+
+
+@api_router.delete("/assistant/conversations/{conversation_id}", tags=["AI Assistant"])
+def delete_assistant_conversation(
+    conversation_id: int, db: DbSession, current_user: CurrentUser
+):
+    conv = (
+        db.query(AssistantConversation)
+        .filter(AssistantConversation.id == conversation_id)
+        .first()
+    )
+    if not conv:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found."
+        )
+    if conv.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: You cannot delete another account's conversation.",
+        )
+    db.delete(conv)
+    db.commit()
+    return {"deleted": True, "conversation_id": conversation_id}
+
+
 @api_router.post("/assistant/chat", response_model=AssistantChatResponse, tags=["AI Assistant"])
 def assistant_chat_endpoint(
-    req: AssistantChatRequest, db: DbSession
+    req: AssistantChatRequest, db: DbSession, current_user: CurrentUser
 ):
-    return chat_with_gharplate_assistant(db, req)
+    owned_hh = ensure_user_owned_household(db, current_user)
+
+    # Verify any context household_token or member_id belongs to current_user
+    if req.context:
+        if (
+            req.context.household_token
+            and req.context.household_token != owned_hh.household_token
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: Context household token does not belong to your account.",
+            )
+        if req.context.member_id is not None:
+            if not any(m.id == req.context.member_id for m in (owned_hh.members or [])):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied: Context member does not belong to your household.",
+                )
+        req.context.household_token = owned_hh.household_token
+    else:
+        req.context = AssistantPageContext(
+            household_token=owned_hh.household_token,
+            member_id=owned_hh.default_member_id,
+        )
+
+    derived_title = req.message.strip().splitlines()[0][:80] or "Nutrition Conversation"
+
+    # Resolve or create the user's persistent conversation
+    conv: AssistantConversation | None = None
+    if req.conversation_id is not None:
+        conv = (
+            db.query(AssistantConversation)
+            .options(joinedload(AssistantConversation.messages))
+            .filter(AssistantConversation.id == req.conversation_id)
+            .first()
+        )
+        if not conv:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Conversation not found.",
+            )
+        if conv.user_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: You cannot access or append to another account's conversation.",
+            )
+        if not (conv.messages or []) and conv.title in (
+            "New Nutrition Conversation",
+            "New Chat",
+            "Nutrition Conversation",
+        ):
+            conv.title = derived_title
+    else:
+        conv = AssistantConversation(
+            user_id=current_user.id,
+            household_id=owned_hh.id,
+            title=derived_title,
+        )
+        db.add(conv)
+        db.flush()
+
+    # Populate history strictly from this conversation's own stored messages
+    ordered_existing = sorted(
+        conv.messages or [], key=lambda m: (m.created_at, m.id)
+    )
+    req.history = [
+        AssistantChatMessage(role=m.role, content=m.content)
+        for m in ordered_existing[-8:]
+    ]
+
+    # Execute the GharPlate AI Assistant tool & LLM pipeline
+    chat_resp = chat_with_gharplate_assistant(db, req)
+
+    now = datetime.now(UTC)
+    user_msg = AssistantMessage(
+        conversation_id=conv.id,
+        user_id=current_user.id,
+        role="user",
+        content=req.message,
+        created_at=now,
+    )
+    ai_msg = AssistantMessage(
+        conversation_id=conv.id,
+        user_id=current_user.id,
+        role="assistant",
+        content=chat_resp.reply,
+        mode_used=chat_resp.mode_used,
+        model_used=chat_resp.model_used,
+        ollama_connected=chat_resp.ollama_connected,
+        tool_traces=[t.model_dump() for t in chat_resp.tool_traces],
+        sources=[s.model_dump() for s in chat_resp.sources],
+        created_at=now,
+    )
+    conv.updated_at = now
+    db.add(user_msg)
+    db.add(ai_msg)
+    db.commit()
+
+    chat_resp.conversation_id = conv.id
+    chat_resp.conversation_title = conv.title
+    return chat_resp

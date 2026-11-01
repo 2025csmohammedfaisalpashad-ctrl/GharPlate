@@ -16,10 +16,18 @@ class Settings(BaseSettings):
     DATABASE_URL: str = os.getenv("DATABASE_URL", f"sqlite:///{DEFAULT_SQLITE_PATH}")
 
     CORS_ORIGINS: str = (
-        "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://localhost:8080"
+        "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://localhost:8080,http://127.0.0.1:8080"
     )
     MAX_UPLOAD_SIZE_BYTES: int = 5 * 1024 * 1024  # 5 MB strict limit
     ALLOWED_IMAGE_MIMES: str = "image/jpeg,image/png,image/webp"
+
+    # Authentication & Server-Side Session Cookie Settings
+    SESSION_COOKIE_NAME: str = "gharplate_session"
+    CSRF_COOKIE_NAME: str = "gharplate_csrf"
+    SESSION_EXPIRE_HOURS: int = 24
+    SESSION_REMEMBER_ME_DAYS: int = 30
+    SESSION_COOKIE_SECURE: bool = False  # Automatically True when APP_ENV == "production"
+    SESSION_COOKIE_SAMESITE: str = "lax"
 
     # Local Ollama AI Assistant
     ENABLE_LOCAL_AI_ASSISTANT: bool = True
@@ -68,6 +76,10 @@ class Settings(BaseSettings):
     @property
     def allowed_image_mimes_list(self) -> list[str]:
         return [mime.strip() for mime in self.ALLOWED_IMAGE_MIMES.split(",") if mime.strip()]
+
+    @property
+    def cookie_secure_flag(self) -> bool:
+        return bool(self.SESSION_COOKIE_SECURE or self.APP_ENV.lower() == "production")
 
 
 settings = Settings()

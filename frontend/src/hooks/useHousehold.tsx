@@ -1,16 +1,19 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { api } from '../services/api';
-import type { Household, HouseholdMember } from '../types/api';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { api, setCsrfToken } from '../services/api';
+import type { AuthSessionResponse, AuthUser, Household, HouseholdMember } from '../types/api';
 
-const STORAGE_KEY = 'gharplate_household_token';
 const SEARCH_HISTORY_KEY = 'gharplate_search_history';
 
 interface HouseholdContextValue {
+  authenticated: boolean;
+  user: AuthUser | null;
   household: Household | null;
   activeMember: HouseholdMember | null;
   loading: boolean;
   error: string | null;
   searchHistory: string[];
+  applyAuthenticatedSession: (session: AuthSessionResponse) => void;
+  signOut: () => Promise<void>;
   setActiveMemberId: (id: number) => Promise<void>;
   refreshHousehold: () => Promise<void>;
   createNewHousehold: (name?: string) => Promise<void>;
@@ -21,15 +24,9 @@ interface HouseholdContextValue {
 
 const HouseholdContext = createContext<HouseholdContextValue | undefined>(undefined);
 
-function generateBrowserToken(): string {
-  const randomPart =
-    typeof crypto !== 'undefined' && crypto.randomUUID
-      ? crypto.randomUUID().replace(/-/g, '')
-      : Math.random().toString(36).substring(2) + Date.now().toString(36);
-  return `hh_${randomPart.slice(0, 24)}`;
-}
-
 export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [authenticated, setAuthenticated] = useState<boolean>(false);
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [household, setHousehold] = useState<Household | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -42,39 +39,64 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   });
 
-  const initHousehold = async () => {
+  const applyAuthenticatedSession = useCallback((session: AuthSessionResponse) => {
+    if (session.csrf_token) {
+      setCsrfToken(session.csrf_token);
+    }
+    setAuthenticated(Boolean(session.authenticated));
+    setUser(session.user);
+    setHousehold(session.household);
+    setError(null);
+    setLoading(false);
+  }, []);
+
+  const restoreSessionFromBackend = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      let token = localStorage.getItem(STORAGE_KEY);
-      if (!token) {
-        token = generateBrowserToken();
-        localStorage.setItem(STORAGE_KEY, token);
-      }
-      const hh = await api.initOrGetHousehold(token, 'My GharPlate Household');
-      setHousehold(hh);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to load household profile');
+      const session = await api.getAuthMe();
+      applyAuthenticatedSession(session);
+    } catch {
+      setAuthenticated(false);
+      setUser(null);
+      setHousehold(null);
+      setCsrfToken(null);
     } finally {
       setLoading(false);
     }
-  };
+  }, [applyAuthenticatedSession]);
 
   useEffect(() => {
-    void initHousehold();
-  }, []);
+    void restoreSessionFromBackend();
+  }, [restoreSessionFromBackend]);
+
+  const signOut = async () => {
+    try {
+      await api.logoutAccount();
+    } catch {
+      // Even if session already expired on server, clear client state
+    }
+    setCsrfToken(null);
+    setAuthenticated(false);
+    setUser(null);
+    setHousehold(null);
+    setError(null);
+  };
 
   const refreshHousehold = async () => {
-    const token = localStorage.getItem(STORAGE_KEY);
-    if (!token) {
-      await initHousehold();
+    if (!authenticated) {
+      await restoreSessionFromBackend();
       return;
     }
     try {
-      const hh = await api.getHousehold(token);
+      const hh = await api.getHousehold(household?.household_token || 'me');
       setHousehold(hh);
-    } catch {
-      await initHousehold();
+    } catch (err) {
+      if (err instanceof Error && err.message.includes('401')) {
+        setAuthenticated(false);
+        setUser(null);
+        setHousehold(null);
+      }
     }
   };
 
@@ -85,32 +107,31 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const createNewHousehold = async (name = 'My GharPlate Household') => {
-    const newToken = generateBrowserToken();
-    localStorage.setItem(STORAGE_KEY, newToken);
-    const hh = await api.initOrGetHousehold(newToken, name);
+    if (!authenticated) return;
+    const hh = await api.initOrGetHousehold(household?.household_token, name);
     setHousehold(hh);
   };
 
   const clearLocalHousehold = async () => {
-    const token = localStorage.getItem(STORAGE_KEY);
-    if (token) {
-      try {
-        await api.deleteHousehold(token);
-      } catch {
-        // ignore if already absent
-      }
-      localStorage.removeItem(STORAGE_KEY);
+    if (!household) return;
+    try {
+      await api.deleteHousehold(household.household_token);
+    } catch {
+      // ignore if error
     }
     localStorage.removeItem(SEARCH_HISTORY_KEY);
     setSearchHistory([]);
-    await createNewHousehold('My GharPlate Household');
+    await refreshHousehold();
   };
 
   const addSearchHistory = (q: string) => {
     const trimmed = q.trim();
     if (!trimmed) return;
     setSearchHistory((prev) => {
-      const next = [trimmed, ...prev.filter((item) => item.toLowerCase() !== trimmed.toLowerCase())].slice(0, 8);
+      const next = [
+        trimmed,
+        ...prev.filter((item) => item.toLowerCase() !== trimmed.toLowerCase()),
+      ].slice(0, 8);
       try {
         localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(next));
       } catch {
@@ -133,11 +154,15 @@ export const HouseholdProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   return (
     <HouseholdContext.Provider
       value={{
+        authenticated,
+        user,
         household,
         activeMember,
         loading,
         error,
         searchHistory,
+        applyAuthenticatedSession,
+        signOut,
         setActiveMemberId,
         refreshHousehold,
         createNewHousehold,

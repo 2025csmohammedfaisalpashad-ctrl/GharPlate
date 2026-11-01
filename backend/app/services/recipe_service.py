@@ -181,22 +181,30 @@ def serialize_recipe_detail(db: Session, recipe: Recipe) -> RecipeDetailOut:
 
 
 def create_or_update_recipe(
-    db: Session, req: RecipeCreateRequest, recipe_id: int | None = None
+    db: Session,
+    req: RecipeCreateRequest,
+    recipe_id: int | None = None,
+    household_id: int | None = None,
+    household_token: str | None = None,
 ) -> RecipeDetailOut:
-    household_id: int | None = None
-    if req.household_token:
+    resolved_hh_id = household_id
+    resolved_hh_token = household_token or req.household_token
+    if resolved_hh_id is None and resolved_hh_token:
         hh = (
             db.query(Household)
-            .filter(Household.household_token == req.household_token)
+            .filter(Household.household_token == resolved_hh_token)
             .first()
         )
         if hh:
-            household_id = hh.id
+            resolved_hh_id = hh.id
+            resolved_hh_token = hh.household_token
 
     if recipe_id is not None:
         recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
         if not recipe:
             raise ValueError(f"Recipe {recipe_id} not found")
+        if resolved_hh_id is not None and recipe.household_id != resolved_hh_id:
+            raise PermissionError("You do not have permission to modify this recipe.")
         recipe.title = req.title
         recipe.description = req.description
         recipe.servings = req.servings
@@ -205,8 +213,8 @@ def create_or_update_recipe(
         db.query(RecipeIngredient).filter(RecipeIngredient.recipe_id == recipe.id).delete()
     else:
         recipe = Recipe(
-            household_id=household_id,
-            household_token=req.household_token,
+            household_id=resolved_hh_id,
+            household_token=resolved_hh_token,
             title=req.title,
             description=req.description,
             servings=req.servings,

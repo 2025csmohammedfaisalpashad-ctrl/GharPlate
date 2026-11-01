@@ -6,11 +6,10 @@ and Regression Verification that OCR Failure NEVER Inserts Synthetic Nutrition V
 import io
 from unittest.mock import patch
 from PIL import Image
-from fastapi.testclient import TestClient
-
 from app.main import app
+from tests.conftest import AuthenticatedTestClient
 
-client = TestClient(app)
+client = AuthenticatedTestClient(app)
 
 
 def _make_test_image(width: int = 160, height: int = 120, color=(240, 240, 240)) -> bytes:

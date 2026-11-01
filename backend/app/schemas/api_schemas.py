@@ -718,6 +718,7 @@ class AssistantChatMessage(BaseModel):
 
 class AssistantChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=2000)
+    conversation_id: int | None = None
     mode: str = Field(
         default="automatic",
         description="Search mode: 'database_only' (My GharPlate Database), 'automatic' (Automatic), or 'online_search' (Search Online)",
@@ -744,6 +745,8 @@ class AssistantSourceReference(BaseModel):
 
 
 class AssistantChatResponse(BaseModel):
+    conversation_id: int | None = None
+    conversation_title: str | None = None
     reply: str
     mode_used: str
     model_used: str
@@ -766,3 +769,80 @@ class AssistantStatusResponse(BaseModel):
     remediation_command: str | None = None
     available_modes: list[dict[str, str]] = Field(default_factory=list)
     allowlisted_tools: list[str] = Field(default_factory=list)
+
+
+class AssistantConversationCreateRequest(BaseModel):
+    title: str = Field(default="New Nutrition Conversation", min_length=1, max_length=200)
+
+
+class AssistantConversationUpdateRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=200)
+
+
+class AssistantMessageOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    conversation_id: int
+    role: str
+    content: str
+    mode_used: str | None = None
+    model_used: str | None = None
+    ollama_connected: bool = False
+    tool_traces: list[AssistantToolExecutionTrace] = Field(default_factory=list)
+    sources: list[AssistantSourceReference] = Field(default_factory=list)
+    created_at: datetime
+
+
+class AssistantConversationSummaryOut(BaseModel):
+    id: int
+    title: str
+    created_at: datetime
+    updated_at: datetime
+    message_count: int = 0
+    last_message_preview: str | None = None
+
+
+class AssistantConversationDetailOut(BaseModel):
+    id: int
+    title: str
+    created_at: datetime
+    updated_at: datetime
+    messages: list[AssistantMessageOut] = Field(default_factory=list)
+
+
+# ==========================================
+# REAL DATABASE-BACKED AUTHENTICATION SCHEMAS
+# ==========================================
+class AuthRegisterRequest(BaseModel):
+    name: str = Field(..., min_length=2, max_length=120)
+    email: str = Field(..., min_length=3, max_length=255)
+    password: str = Field(..., min_length=6, max_length=128)
+    password_confirmation: str = Field(..., min_length=6, max_length=128)
+    remember_me: bool = False
+
+
+class AuthLoginRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=255)
+    password: str = Field(..., min_length=1, max_length=128)
+    remember_me: bool = False
+
+
+class AuthUserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    email: str
+    full_name: str
+    is_active: bool
+    created_at: datetime
+
+
+class AuthSessionResponse(BaseModel):
+    authenticated: bool = True
+    user: AuthUserOut
+    household: HouseholdOut
+    csrf_token: str
+    session_expires_at: datetime
+    message: str
+

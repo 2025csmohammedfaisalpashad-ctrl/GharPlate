@@ -7,6 +7,8 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.models.entities import (
+    AssistantConversation,
+    AssistantMessage,
     ConditionConflictRule,
     ConditionFoodMapping,
     DataSource,
@@ -25,6 +27,8 @@ from app.models.entities import (
     Recipe,
     RecipeIngredient,
     ServingConversion,
+    UserAccount,
+    UserSession,
 )
 from app.db.seed_catalog import (
     DATA_SOURCES_SEED,
@@ -70,7 +74,7 @@ def normalize_alias(text_str: str) -> str:
 
 
 def ensure_image_and_intelligence_columns(db: Session) -> None:
-    """Safely adds image_url and product intelligence columns to existing SQLite tables non-destructively."""
+    """Safely adds image_url, product intelligence, and authentication columns/tables to existing SQLite files non-destructively."""
     for table_name in ("food_categories", "food_items"):
         try:
             db.execute(text(f"ALTER TABLE {table_name} ADD COLUMN image_url VARCHAR(500)"))
@@ -93,8 +97,18 @@ def ensure_image_and_intelligence_columns(db: Session) -> None:
         except Exception:
             db.rollback()
 
+    try:
+        db.execute(text("ALTER TABLE households ADD COLUMN owner_user_id INTEGER"))
+        db.commit()
+    except Exception:
+        db.rollback()
+
     # Ensure new tables exist on existing SQLite files
     bind = db.get_bind()
+    UserAccount.__table__.create(bind=bind, checkfirst=True)
+    UserSession.__table__.create(bind=bind, checkfirst=True)
+    AssistantConversation.__table__.create(bind=bind, checkfirst=True)
+    AssistantMessage.__table__.create(bind=bind, checkfirst=True)
     ProductFieldProvenance.__table__.create(bind=bind, checkfirst=True)
     ProductDataConflict.__table__.create(bind=bind, checkfirst=True)
     ExternalLookupCache.__table__.create(bind=bind, checkfirst=True)

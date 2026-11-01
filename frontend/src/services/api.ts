@@ -2,8 +2,11 @@
 import type {
   AssistantChatMessage,
   AssistantChatResponse,
+  AssistantConversationDetail,
+  AssistantConversationSummary,
   AssistantPageContext,
   AssistantStatusResponse,
+  AuthSessionResponse,
   BarcodeLookupResponse,
   ConditionFoodRecommendationResponse,
   DataSource,
@@ -27,19 +30,47 @@ import type {
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api/v1';
 
+let csrfTokenMemory: string | null = null;
+
+export function setCsrfToken(token: string | null): void {
+  csrfTokenMemory = token;
+}
+
+export function getCsrfToken(): string | null {
+  if (csrfTokenMemory) return csrfTokenMemory;
+  if (typeof document !== 'undefined' && document.cookie) {
+    const match = document.cookie.match(/(?:^|;\s*)gharplate_csrf=([^;]+)/);
+    if (match) return decodeURIComponent(match[1]);
+  }
+  return null;
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const method = (options?.method || 'GET').toUpperCase();
+  const isStateChanging = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
+  const csrf = getCsrfToken();
+
+  const headers: Record<string, string> = {
+    ...(options?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
+    ...(isStateChanging && csrf ? { 'X-CSRF-Token': csrf } : {}),
+    ...((options?.headers as Record<string, string>) || {}),
+  };
+
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
-    headers: {
-      ...(options?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
-      ...(options?.headers || {}),
-    },
+    credentials: 'include',
+    headers,
   });
+
   if (!res.ok) {
     let errMsg = `HTTP ${res.status}`;
     try {
       const data = await res.json();
-      errMsg = data.detail || errMsg;
+      if (typeof data?.detail === 'string') {
+        errMsg = data.detail;
+      } else if (Array.isArray(data?.detail) && data.detail[0]?.msg) {
+        errMsg = data.detail[0].msg;
+      }
     } catch {
       // ignore json parse error
     }
@@ -49,6 +80,62 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  // ==========================================
+  // 1. REAL DATABASE-BACKED AUTHENTICATION APIs
+  // ==========================================
+  registerAccount: async (payload: {
+    name: string;
+    email: string;
+    password: string;
+    password_confirmation: string;
+    remember_me?: boolean;
+  }): Promise<AuthSessionResponse> => {
+    const res = await request<AuthSessionResponse>('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    if (res.csrf_token) setCsrfToken(res.csrf_token);
+    return res;
+  },
+
+  loginAccount: async (payload: {
+    email: string;
+    password: string;
+    remember_me?: boolean;
+  }): Promise<AuthSessionResponse> => {
+    const res = await request<AuthSessionResponse>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    if (res.csrf_token) setCsrfToken(res.csrf_token);
+    return res;
+  },
+
+  getAuthMe: async (): Promise<AuthSessionResponse> => {
+    const res = await request<AuthSessionResponse>('/auth/me');
+    if (res.csrf_token) setCsrfToken(res.csrf_token);
+    return res;
+  },
+
+  logoutAccount: async (): Promise<{
+    authenticated: boolean;
+    logged_out: boolean;
+    message: string;
+  }> => {
+    const res = await request<{
+      authenticated: boolean;
+      logged_out: boolean;
+      message: string;
+    }>('/auth/logout', {
+      method: 'POST',
+    });
+    setCsrfToken(null);
+    return res;
+  },
+
+  // ==========================================
+  // 2. HEALTH, SOURCES & FOOD INTELLIGENCE
+  // ==========================================
   getHealth: () =>
     request<{
       status: string;
@@ -128,18 +215,25 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  // ==========================================
+  // 3. AUTHENTICATED HOUSEHOLD & FAMILY PROFILES
+  // ==========================================
   initOrGetHousehold: (household_token?: string, name = 'My Household') =>
     request<Household>('/households', {
       method: 'POST',
       body: JSON.stringify({ household_token, name }),
     }),
 
-  getHousehold: (token: string) => request<Household>(`/households/${encodeURIComponent(token)}`),
+  getHousehold: (token = 'me') =>
+    request<Household>(`/households/${encodeURIComponent(token)}`),
 
-  deleteHousehold: (token: string) =>
-    request<{ deleted: boolean; message: string }>(`/households/${encodeURIComponent(token)}`, {
-      method: 'DELETE',
-    }),
+  deleteHousehold: (token = 'me') =>
+    request<{ deleted: boolean; household_token: string; message: string }>(
+      `/households/${encodeURIComponent(token)}`,
+      {
+        method: 'DELETE',
+      }
+    ),
 
   addMember: (
     token: string,
@@ -170,6 +264,9 @@ export const api = {
       method: 'DELETE',
     }),
 
+  // ==========================================
+  // 4. RECIPES, OCR, BARCODE, COMPARISON & MEALS
+  // ==========================================
   calculateRecipe: (payload: {
     household_token?: string;
     title: string;
@@ -312,7 +409,9 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  // Local Ollama AI Assistant Endpoints
+  // ==========================================
+  // 5. LOCAL OLLAMA AI ASSISTANT & PERSISTENT CONVERSATIONS
+  // ==========================================
   getAssistantStatus: (model?: string) =>
     request<AssistantStatusResponse>(
       `/assistant/status${model ? `?model=${encodeURIComponent(model)}` : ''}`
@@ -327,8 +426,38 @@ export const api = {
       error_message?: string | null;
     }>('/assistant/models'),
 
+  listAssistantConversations: (q?: string) =>
+    request<AssistantConversationSummary[]>(
+      `/assistant/conversations${q ? `?q=${encodeURIComponent(q)}` : ''}`
+    ),
+
+  createAssistantConversation: (title = 'New Chat') =>
+    request<AssistantConversationDetail>('/assistant/conversations', {
+      method: 'POST',
+      body: JSON.stringify({ title }),
+    }),
+
+  renameAssistantConversation: (conversationId: number, title: string) =>
+    request<AssistantConversationSummary>(
+      `/assistant/conversations/${conversationId}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ title }),
+      }
+    ),
+
+  getAssistantConversation: (conversationId: number) =>
+    request<AssistantConversationDetail>(`/assistant/conversations/${conversationId}`),
+
+  deleteAssistantConversation: (conversationId: number) =>
+    request<{ deleted: boolean; conversation_id: number }>(
+      `/assistant/conversations/${conversationId}`,
+      { method: 'DELETE' }
+    ),
+
   chatWithAssistant: (payload: {
     message: string;
+    conversation_id?: number | null;
     mode: string;
     model?: string;
     history: AssistantChatMessage[];

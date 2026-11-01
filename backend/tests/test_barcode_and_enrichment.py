@@ -8,16 +8,15 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 from PIL import Image
-from fastapi.testclient import TestClient
-
 from app.main import app
 from app.db.seed_images import CATEGORY_IMAGE_URLS, FOOD_IMAGE_URLS
 from app.db.session import SessionLocal
 from app.integrations.normalizer import NormalizedExternalProduct
 from app.integrations.open_food_facts import ProviderLookupAttempt
 from app.models.entities import FoodItem, ProductDataConflict
+from tests.conftest import AuthenticatedTestClient
 
-client = TestClient(app)
+client = AuthenticatedTestClient(app)
 
 
 def test_01_pineapple_cake_baseline_record_and_allergen_consistency():
