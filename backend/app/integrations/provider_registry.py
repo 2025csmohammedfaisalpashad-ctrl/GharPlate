@@ -3,8 +3,8 @@ Multi-Source Provider Registry, Completeness Evaluator, Field-Level Merge Engine
 and Provenance Recorder for GharPlate Packaged Products.
 """
 
-from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from datetime import datetime, timedelta, UTC
+from typing import Any
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -67,12 +67,12 @@ def evaluate_local_product_completeness(food: FoodItem) -> dict[str, Any]:
     has_ingredients = bool(food.ingredients_text and food.ingredients_text.strip())
     has_nutrients = len(available_key_nutrients) >= 4
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     is_stale = True
     if food.external_updated_at:
         ext_ts = food.external_updated_at
         if ext_ts.tzinfo is None:
-            ext_ts = ext_ts.replace(tzinfo=timezone.utc)
+            ext_ts = ext_ts.replace(tzinfo=UTC)
         if now - ext_ts < timedelta(hours=settings.PRODUCT_CACHE_HOURS):
             is_stale = False
 
@@ -110,7 +110,7 @@ def ensure_external_data_source(
         name=provider_name,
         organization=provider_name,
         document_title=f"{provider_name} Live Product & Nutrition API",
-        publication_year=datetime.now(timezone.utc).year,
+        publication_year=datetime.now(UTC).year,
         version="v3" if provider_code == "OPEN_FOOD_FACTS" else "v1",
         url=url,
         license_notes=license_notes,
@@ -126,14 +126,14 @@ def record_field_provenance(
     food_id: int,
     field_name: str,
     field_type: str,
-    field_value: Optional[str],
+    field_value: str | None,
     source_code: str,
     source_name: str,
-    source_url: Optional[str] = None,
-    source_record_id: Optional[str] = None,
+    source_url: str | None = None,
+    source_record_id: str | None = None,
     confidence_status: str = "user_confirmed",
     review_status: str = "confirmed",
-    notes: Optional[str] = None,
+    notes: str | None = None,
 ) -> ProductFieldProvenance:
     existing = (
         db.query(ProductFieldProvenance)
@@ -144,7 +144,7 @@ def record_field_provenance(
         )
         .first()
     )
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if existing:
         existing.field_value = field_value
         existing.source_name = source_name
@@ -178,11 +178,11 @@ def record_data_conflict(
     db: Session,
     food_id: int,
     field_name: str,
-    local_value: Optional[str],
+    local_value: str | None,
     local_source: str,
-    external_value: Optional[str],
+    external_value: str | None,
     external_source: str,
-    external_source_url: Optional[str] = None,
+    external_source_url: str | None = None,
 ) -> ProductDataConflict:
     existing = (
         db.query(ProductDataConflict)
@@ -193,7 +193,7 @@ def record_data_conflict(
         )
         .first()
     )
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if existing:
         existing.local_value = local_value
         existing.external_value = external_value
@@ -328,7 +328,7 @@ def merge_external_product_into_local(
             external_source=ext.provider_name,
             external_source_url=ext.source_url,
         )
-        local_food.external_updated_at = datetime.now(timezone.utc)
+        local_food.external_updated_at = datetime.now(UTC)
         db.commit()
         return {
             "identity_verified": False,
@@ -517,7 +517,7 @@ def merge_external_product_into_local(
                 )
                 conflicts_recorded.append(nut_code)
 
-    local_food.external_updated_at = datetime.now(timezone.utc)
+    local_food.external_updated_at = datetime.now(UTC)
     db.commit()
     db.refresh(local_food)
 
@@ -532,7 +532,7 @@ def merge_external_product_into_local(
 
 def query_external_providers_for_barcode(
     db: Session, barcode: str, force_refresh: bool = False
-) -> tuple[Optional[NormalizedExternalProduct], list[ProviderLookupAttempt]]:
+) -> tuple[NormalizedExternalProduct | None, list[ProviderLookupAttempt]]:
     """
     Queries configured external barcode providers in priority order:
     1. Open Food Facts (API v3)
@@ -546,7 +546,7 @@ def query_external_providers_for_barcode(
     )
     attempts.append(off_attempt)
 
-    best_product: Optional[NormalizedExternalProduct] = off_attempt.product
+    best_product: NormalizedExternalProduct | None = off_attempt.product
 
     # Check USDA FoodData Central if Open Food Facts did not find the product or if key nutrients are still missing
     off_has_nutrients = bool(
@@ -563,7 +563,7 @@ def query_external_providers_for_barcode(
 
 
 def search_multi_source_external_products(
-    db: Session, query: str, brand: Optional[str] = None, page_size: int = 5
+    db: Session, query: str, brand: str | None = None, page_size: int = 5
 ) -> tuple[list[NormalizedExternalProduct], list[ProviderLookupAttempt]]:
     """
     Searches Open Food Facts and USDA FoodData Central for candidate products matching `query` / `brand`.

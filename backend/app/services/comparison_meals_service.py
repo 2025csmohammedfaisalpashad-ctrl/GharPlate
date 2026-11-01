@@ -2,7 +2,6 @@
 Packaged Product Comparison (Module 9) and Personalised Indian Meal Suggestions (Module 10).
 """
 
-from typing import Optional
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.seed_images import resolve_food_image_url
@@ -63,13 +62,13 @@ def compare_packaged_products(
         if not food:
             raise ValueError(f"Product '{slug}' not found")
 
-        nv_map: dict[str, Optional[float]] = {
+        nv_map: dict[str, float | None] = {
             nv.nutrient_code: nv.value for nv in food.nutrient_values
         }
         serving_factor = food.standard_serving_grams / 100.0
 
-        nut_100: dict[str, Optional[float]] = {}
-        nut_serv: dict[str, Optional[float]] = {}
+        nut_100: dict[str, float | None] = {}
+        nut_serv: dict[str, float | None] = {}
         unavailable: list[str] = []
 
         for code in TRACKED_COMPARISON_NUTRIENTS:
@@ -298,7 +297,7 @@ def generate_meal_suggestions(
             continue
 
         summary_keys = ["energy_kcal", "protein_g", "carbs_g", "fibre_g", "fat_total_g", "sodium_mg", "calcium_mg", "iron_mg"]
-        agg_nut: dict[str, Optional[float]] = {k: 0.0 for k in summary_keys}
+        agg_nut: dict[str, float | None] = {k: 0.0 for k in summary_keys}
         missing_set = set()
         sources_set = set()
 

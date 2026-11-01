@@ -8,8 +8,8 @@ to fill unknown nutrient values of a branded packaged product (e.g., 'Pineapple 
 Packaged products may only be enriched from exact GTIN/UPC barcode matches or user-confirmed package labels.
 """
 
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import datetime, UTC
+from typing import Any
 import httpx
 from sqlalchemy.orm import Session
 
@@ -86,7 +86,7 @@ def parse_fdc_food_item(item: dict[str, Any]) -> NormalizedExternalProduct:
         f"{serving_size} {serving_unit}" if serving_size is not None else None
     )
 
-    nutrients_per_100: dict[str, Optional[float]] = {}
+    nutrients_per_100: dict[str, float | None] = {}
     for fn in item.get("foodNutrients") or []:
         n_num = str(
             fn.get("nutrientNumber")
@@ -128,7 +128,7 @@ def parse_fdc_food_item(item: dict[str, Any]) -> NormalizedExternalProduct:
         available_fields=available_fields,
         is_branded_packaged=(data_type.lower() == "branded"),
         data_version="v1",
-        retrieved_at=datetime.now(timezone.utc),
+        retrieved_at=datetime.now(UTC),
         license_attribution=FDC_LICENSE_ATTRIBUTION,
     )
 

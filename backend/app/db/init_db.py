@@ -1,6 +1,6 @@
 import json
 import re
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 from typing import Any
 from sqlalchemy import text
@@ -606,7 +606,7 @@ def seed_database(db: Session, write_report: bool = True) -> dict[str, Any]:
     )
 
     report = {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "total_data_sources": db.query(DataSource).count(),
         "total_food_categories": db.query(FoodCategory).count(),
         "total_food_items": db.query(FoodItem).count(),

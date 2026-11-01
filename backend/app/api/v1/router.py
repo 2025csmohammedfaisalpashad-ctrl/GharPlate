@@ -1,4 +1,4 @@
-from typing import Annotated, Optional
+from typing import Annotated
 import uuid
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
@@ -137,12 +137,12 @@ def list_food_categories(db: DbSession):
 @api_router.get("/foods", response_model=FoodSearchResponse, tags=["Foods"])
 def search_food_items(
     db: DbSession,
-    q: Annotated[Optional[str], Query(description="Search by English, Hindi, or Kannada name/alias")] = None,
-    category: Annotated[Optional[str], Query(description="Filter by category slug")] = None,
-    is_packaged: Annotated[Optional[bool], Query(description="Filter packaged vs whole/cooked foods")] = None,
+    q: Annotated[str | None, Query(description="Search by English, Hindi, or Kannada name/alias")] = None,
+    category: Annotated[str | None, Query(description="Filter by category slug")] = None,
+    is_packaged: Annotated[bool | None, Query(description="Filter packaged vs whole/cooked foods")] = None,
     vegetarian_only: Annotated[bool, Query(description="Filter vegetarian foods only")] = False,
     nutrient_filter: Annotated[
-        Optional[str],
+        str | None,
         Query(description="Optional filter: high_protein, high_fibre, high_calcium, high_iron, low_sodium"),
     ] = None,
     sort_by: Annotated[
@@ -315,15 +315,15 @@ def explore_foods_by_condition(
     code: str,
     db: DbSession,
     household_token: Annotated[
-        Optional[str],
+        str | None,
         Query(description="Optional household convenience token for member context resolution"),
     ] = None,
     member_id: Annotated[
-        Optional[int],
+        int | None,
         Query(description="Optional household member ID to filter by dietary preference and flag allergens"),
     ] = None,
     dietary_preference: Annotated[
-        Optional[str],
+        str | None,
         Query(description="Optional explicit dietary preference override (vegetarian, vegan, eggetarian, non_vegetarian, jain)"),
     ] = None,
 ):
@@ -560,7 +560,7 @@ def update_existing_recipe(
 @api_router.get("/recipes", response_model=list[RecipeDetailOut], tags=["Recipes"])
 def list_recipes(
     db: DbSession,
-    household_token: Annotated[Optional[str], Query()] = None,
+    household_token: Annotated[str | None, Query()] = None,
 ):
     query = db.query(Recipe).options(joinedload(Recipe.ingredients))
     if household_token:
@@ -603,8 +603,8 @@ def parse_ocr_label_text_endpoint(req: OCRTextParseRequest):
 @api_router.post("/scan/ocr-image", response_model=OCRScanResponse, tags=["Scanner & OCR"])
 async def scan_nutrition_label_image(
     file: Annotated[UploadFile, File(...)],
-    ingredients_file: Annotated[Optional[UploadFile], File()] = None,
-    hint_text: Annotated[Optional[str], Form()] = None,
+    ingredients_file: Annotated[UploadFile | None, File()] = None,
+    hint_text: Annotated[str | None, Form()] = None,
 ):
     raw_bytes = await file.read()
     ing_bytes = await ingredients_file.read() if ingredients_file is not None else None
@@ -647,7 +647,7 @@ def get_product_by_barcode(
 def search_products_multi_source(
     q: Annotated[str, Query(min_length=1, description="Product name or barcode query")],
     db: DbSession,
-    brand: Annotated[Optional[str], Query(description="Optional brand filter")] = None,
+    brand: Annotated[str | None, Query(description="Optional brand filter")] = None,
     include_external: Annotated[bool, Query(description="Query Open Food Facts & USDA FDC")] = True,
 ):
     local_res = search_foods(db=db, q=q, page_size=8)
@@ -786,7 +786,7 @@ def get_product_provenance_endpoint(slug: str, db: DbSession):
 async def recognize_dish_endpoint(
     file: Annotated[UploadFile, File(...)],
     db: DbSession,
-    user_hint: Annotated[Optional[str], Form()] = None,
+    user_hint: Annotated[str | None, Form()] = None,
 ):
     raw_bytes = await file.read()
     try:
@@ -828,7 +828,7 @@ def suggest_meals_endpoint(
 # ==========================================
 @api_router.get("/assistant/status", response_model=AssistantStatusResponse, tags=["AI Assistant"])
 def assistant_status_endpoint(
-    model: Annotated[Optional[str], Query()] = None,
+    model: Annotated[str | None, Query()] = None,
 ):
     return get_ollama_assistant_status(requested_model=model)
 

@@ -6,7 +6,6 @@ Full creator and license attribution is documented in `docs/IMAGE_ATTRIBUTION.md
 `frontend/public/images/foods/attribution.json`.
 """
 
-from typing import Optional
 
 CATEGORY_IMAGE_URLS: dict[str, str] = {
     "cereals-millets": "/images/categories/cereals-millets.webp",
@@ -108,7 +107,7 @@ FOOD_IMAGE_URLS: dict[str, str] = {
 }
 
 
-def resolve_food_image_url(slug: str, category_slug: str = "indian-dishes") -> Optional[str]:
+def resolve_food_image_url(slug: str, category_slug: str = "indian-dishes") -> str | None:
     """
     Resolves the exact food-specific local photograph for a given food slug.
     Does NOT substitute a generic category photograph for an individual food item.

@@ -13,8 +13,8 @@ import gc
 import io
 import re
 import uuid
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import datetime, UTC
+from typing import Any
 from PIL import Image, ImageFilter, ImageOps, ImageStat
 from sqlalchemy.orm import Session, joinedload
 
@@ -57,7 +57,7 @@ from app.services.food_service import normalize_query, serialize_food_detail
 
 
 def validate_and_inspect_image_in_memory(
-    file_bytes: bytes, content_type: Optional[str]
+    file_bytes: bytes, content_type: str | None
 ) -> tuple[int, int, tuple[float, float, float]]:
     if not file_bytes:
         raise ValueError("Uploaded image file is empty.")
@@ -101,7 +101,7 @@ def preprocess_label_image_for_ocr(img: Image.Image) -> Image.Image:
 
 def extract_text_from_image_bytes_in_memory(
     file_bytes: bytes,
-) -> tuple[str, str, Optional[str]]:
+) -> tuple[str, str, str | None]:
     """
     Attempts OCR extraction across upright and rotated orientations using pytesseract if installed.
     Returns (extracted_text, engine_status, error_reason).
@@ -151,7 +151,7 @@ def extract_text_from_image_bytes_in_memory(
         buf.close()
 
 
-def clean_ocr_numeric_token(raw_token: str) -> tuple[Optional[float], bool, Optional[float]]:
+def clean_ocr_numeric_token(raw_token: str) -> tuple[float | None, bool, float | None]:
     """
     Detects OCR character errors such as 'O' for '0' or 'l'/'I' for '1'.
     Does NOT silently overwrite uncertain values — returns (parsed_val, had_ocr_typo, proposed_correction).
@@ -219,7 +219,7 @@ def parse_nutrition_label_text(
     raw_text: str,
     ocr_status: str = "success",
     ocr_engine: str = "text_parser",
-    ocr_error_reason: Optional[str] = None,
+    ocr_error_reason: str | None = None,
 ) -> OCRScanResponse:
     """
     Parses FSSAI / Indian packaged food nutrition label text, validates units,
@@ -543,10 +543,10 @@ def parse_nutrition_label_text(
 
 def process_uploaded_label_image(
     file_bytes: bytes,
-    content_type: Optional[str],
-    hint_text: Optional[str] = None,
-    ingredients_image_bytes: Optional[bytes] = None,
-    ingredients_content_type: Optional[str] = None,
+    content_type: str | None,
+    hint_text: str | None = None,
+    ingredients_image_bytes: bytes | None = None,
+    ingredients_content_type: str | None = None,
 ) -> OCRScanResponse:
     """
     Processes one or more uploaded package label photographs (Nutrition panel + optional Ingredients panel)
@@ -671,7 +671,7 @@ def _create_local_product_from_external(
         allergen_declaration_complete=bool(ext.ingredients_text),
         source_id=ext_src.id,
         confidence_level="label_declared",
-        external_updated_at=datetime.now(timezone.utc),
+        external_updated_at=datetime.now(UTC),
     )
     db.add(food)
     db.flush()
@@ -789,7 +789,7 @@ def lookup_barcode(
     11. Update local cache safely.
     12. Return consolidated `BarcodeLookupResponse`.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     clean_code, is_valid, b_format, val_msg = validate_and_normalize_barcode(barcode)
 
     if not is_valid:
@@ -997,7 +997,7 @@ def create_user_confirmed_product(
             name="User-Confirmed Packaged Food Label Declaration",
             organization="GharPlate Household Label Verification",
             document_title="FSSAI Package Label Reviewed & Confirmed by User",
-            publication_year=datetime.now(timezone.utc).year,
+            publication_year=datetime.now(UTC).year,
             version="User-Confirmed",
             url="https://fssai.gov.in/upload/uploadfiles/files/Comp_Labelling.pdf",
             license_notes="User-entered/confirmed packaged label record.",
@@ -1006,13 +1006,13 @@ def create_user_confirmed_product(
         db.add(src)
         db.flush()
 
-    clean_barcode: Optional[str] = None
+    clean_barcode: str | None = None
     if req.barcode and req.barcode.strip():
         norm_bc, _, _, _ = validate_and_normalize_barcode(req.barcode)
         clean_barcode = norm_bc or req.barcode.strip()
 
     # Check if updating an existing product by slug or barcode (prevents duplicate barcode IntegrityError!)
-    existing_food: Optional[FoodItem] = None
+    existing_food: FoodItem | None = None
     if req.slug:
         existing_food = db.query(FoodItem).filter(FoodItem.slug == req.slug).first()
     if not existing_food and clean_barcode:
@@ -1220,9 +1220,9 @@ def create_user_confirmed_product(
 def recognize_indian_dish_from_image(
     db: Session,
     file_bytes: bytes,
-    filename: Optional[str] = None,
-    content_type: Optional[str] = None,
-    user_hint: Optional[str] = None,
+    filename: str | None = None,
+    content_type: str | None = None,
+    user_hint: str | None = None,
 ) -> DishRecognitionResponse:
     """
     Experimental Indian Dish Image Recognition (Module 8).

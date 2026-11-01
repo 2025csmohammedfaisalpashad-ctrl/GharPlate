@@ -8,8 +8,8 @@ context-aware, grounded answers without ever fabricating nutrient values, ingred
 
 import json
 import re
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import datetime, UTC
+from typing import Any
 import httpx
 from sqlalchemy.orm import Session, joinedload
 
@@ -258,7 +258,7 @@ OLLAMA_TOOLS_SCHEMA: list[dict[str, Any]] = [
 ]
 
 
-def discover_ollama_models() -> tuple[bool, list[str], Optional[str]]:
+def discover_ollama_models() -> tuple[bool, list[str], str | None]:
     """
     Queries the local Ollama instance (`GET /api/tags`) to check connectivity
     and list locally installed models without downloading anything automatically.
@@ -299,12 +299,12 @@ def discover_ollama_models() -> tuple[bool, list[str], Optional[str]]:
         )
 
 
-def get_ollama_assistant_status(requested_model: Optional[str] = None) -> AssistantStatusResponse:
+def get_ollama_assistant_status(requested_model: str | None = None) -> AssistantStatusResponse:
     reachable, installed, err_msg = discover_ollama_models()
     configured = (requested_model or settings.OLLAMA_MODEL or "").strip() or None
 
-    active_model: Optional[str] = None
-    remediation: Optional[str] = None
+    active_model: str | None = None
+    remediation: str | None = None
 
     if not settings.ENABLE_LOCAL_AI_ASSISTANT:
         status_msg = "Local Ollama AI Assistant is disabled via ENABLE_LOCAL_AI_ASSISTANT=false."
@@ -365,7 +365,7 @@ def execute_allowlisted_tool(
     Executes one of the 11 allowlisted backend tools with strict argument validation
     and mode enforcement (`database_only` blocks external network tools).
     """
-    now_iso = datetime.now(timezone.utc).isoformat()
+    now_iso = datetime.now(UTC).isoformat()
     sources: list[AssistantSourceReference] = []
 
     if tool_name not in ALLOWLISTED_TOOL_NAMES:
@@ -839,7 +839,7 @@ def execute_allowlisted_tool(
         if tool_name == "get_household_member_context":
             h_token = arguments.get("household_token")
             m_id = arguments.get("member_id")
-            member: Optional[HouseholdMember] = None
+            member: HouseholdMember | None = None
             if m_id is not None:
                 member = db.query(HouseholdMember).filter(HouseholdMember.id == int(m_id)).first()
             elif h_token:
@@ -981,8 +981,8 @@ def execute_allowlisted_tool(
 
 
 def _resolve_context_food_slug(
-    db: Session, message: str, context: Optional[AssistantPageContext]
-) -> Optional[str]:
+    db: Session, message: str, context: AssistantPageContext | None
+) -> str | None:
     """
     Resolves the relevant food slug from either:
     1. Explicit `context.food_slug` (e.g., when viewing `/foods/pkg-pineapple-cake-6b35c3`)

@@ -6,22 +6,21 @@ and Identity Verification for GharPlate.
 import difflib
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import datetime, UTC
 
 
 @dataclass
 class ParsedIngredientAnalysis:
-    raw_text: Optional[str] = None
-    cleaned_ingredients: Optional[str] = None
+    raw_text: str | None = None
+    cleaned_ingredients: str | None = None
     ingredient_items: list[str] = field(default_factory=list)
     ingredient_percentages: list[str] = field(default_factory=list)
     additives: list[str] = field(default_factory=list)
-    allergen_declaration: Optional[str] = None
+    allergen_declaration: str | None = None
     label_warnings: list[str] = field(default_factory=list)
-    net_weight: Optional[str] = None
-    manufacturer_info: Optional[str] = None
-    lot_and_date_info: Optional[str] = None
+    net_weight: str | None = None
+    manufacturer_info: str | None = None
+    lot_and_date_info: str | None = None
     ocr_uncertainty_notes: list[str] = field(default_factory=list)
 
 
@@ -42,25 +41,25 @@ class NormalizedExternalProduct:
     provider_name: str
     source_url: str
     source_record_id: str
-    barcode: Optional[str] = None
-    product_name: Optional[str] = None
-    brand: Optional[str] = None
-    quantity: Optional[str] = None
-    serving_size_label: Optional[str] = None
-    serving_size_grams: Optional[float] = None
-    image_url: Optional[str] = None
-    front_image_url: Optional[str] = None
-    nutrition_image_url: Optional[str] = None
-    ingredients_image_url: Optional[str] = None
-    ingredients_text: Optional[str] = None
+    barcode: str | None = None
+    product_name: str | None = None
+    brand: str | None = None
+    quantity: str | None = None
+    serving_size_label: str | None = None
+    serving_size_grams: float | None = None
+    image_url: str | None = None
+    front_image_url: str | None = None
+    nutrition_image_url: str | None = None
+    ingredients_image_url: str | None = None
+    ingredients_text: str | None = None
     allergen_tags: list[str] = field(default_factory=list)
     categories: list[str] = field(default_factory=list)
-    nutrients_per_100: dict[str, Optional[float]] = field(default_factory=dict)
+    nutrients_per_100: dict[str, float | None] = field(default_factory=dict)
     available_fields: list[str] = field(default_factory=list)
     missing_fields: list[str] = field(default_factory=list)
     is_branded_packaged: bool = True
     data_version: str = "v3"
-    retrieved_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    retrieved_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     license_attribution: str = ""
 
 
@@ -76,7 +75,7 @@ def compute_gs1_check_digit(digits_without_check: str) -> int:
 
 def validate_and_normalize_barcode(
     raw_barcode: str,
-) -> tuple[str, bool, str, Optional[str]]:
+) -> tuple[str, bool, str, str | None]:
     """
     Validates and normalizes EAN-8 (8), UPC-A (12), EAN-13 (13), and GTIN-14 (14) barcodes.
     Returns: (cleaned_barcode, is_valid, barcode_format, validation_message)
@@ -121,7 +120,7 @@ def validate_and_normalize_barcode(
     return cleaned, True, b_format, None
 
 
-def parse_and_clean_package_ingredients(raw_text: Optional[str]) -> ParsedIngredientAnalysis:
+def parse_and_clean_package_ingredients(raw_text: str | None) -> ParsedIngredientAnalysis:
     """
     Distinguishes and separates:
     - Ingredient statement
@@ -309,8 +308,8 @@ def normalize_allergen_tag_name(raw_tag: str) -> str:
 
 
 def check_allergen_consistency(
-    ingredients_text: Optional[str],
-    stored_allergen_tags: Optional[list[str]],
+    ingredients_text: str | None,
+    stored_allergen_tags: list[str] | None,
     allergen_declaration_complete: bool = True,
 ) -> AllergenConsistencyReport:
     """
@@ -375,9 +374,9 @@ def check_allergen_consistency(
 
 
 def verify_product_identity_match(
-    local_barcode: Optional[str],
+    local_barcode: str | None,
     local_name: str,
-    local_brand: Optional[str],
+    local_brand: str | None,
     ext: NormalizedExternalProduct,
 ) -> tuple[bool, str, float]:
     """

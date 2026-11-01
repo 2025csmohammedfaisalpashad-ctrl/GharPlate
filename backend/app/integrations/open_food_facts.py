@@ -7,9 +7,9 @@ Official documentation:
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 import re
-from typing import Any, Optional
+from typing import Any
 import httpx
 from sqlalchemy.orm import Session
 
@@ -34,14 +34,14 @@ class ProviderLookupAttempt:
     provider_code: str
     provider_name: str
     status: str  # found, not_found, cached_found, cached_not_found, timeout, rate_limited, http_error, network_error, disabled, unconfigured_api_key
-    http_status: Optional[int] = None
+    http_status: int | None = None
     message: str = ""
-    retrieved_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    retrieved_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     from_cache: bool = False
-    product: Optional[NormalizedExternalProduct] = None
+    product: NormalizedExternalProduct | None = None
 
 
-def _safe_float(val: Any) -> Optional[float]:
+def _safe_float(val: Any) -> float | None:
     if val is None or val == "":
         return None
     try:
@@ -51,7 +51,7 @@ def _safe_float(val: Any) -> Optional[float]:
         return None
 
 
-def _parse_serving_grams(serving_size_str: Optional[str], serving_qty: Any) -> Optional[float]:
+def _parse_serving_grams(serving_size_str: str | None, serving_qty: Any) -> float | None:
     q_val = _safe_float(serving_qty)
     if q_val and q_val > 0:
         return q_val
@@ -63,7 +63,7 @@ def _parse_serving_grams(serving_size_str: Optional[str], serving_qty: Any) -> O
 
 
 def parse_off_product_dict(
-    prod: dict[str, Any], fallback_barcode: Optional[str] = None, api_version: str = "v3"
+    prod: dict[str, Any], fallback_barcode: str | None = None, api_version: str = "v3"
 ) -> NormalizedExternalProduct:
     """
     Normalizes an Open Food Facts API v3 (or v2 search) product payload into NormalizedExternalProduct.
@@ -130,7 +130,7 @@ def parse_off_product_dict(
     nutr = prod.get("nutriments") or {}
 
     # Compute sodium_mg carefully (Open Food Facts stores sodium_100g in grams by convention, or salt_100g in grams)
-    sodium_mg: Optional[float] = None
+    sodium_mg: float | None = None
     if nutr.get("sodium_100g") is not None:
         raw_sod = _safe_float(nutr.get("sodium_100g"))
         if raw_sod is not None:
@@ -146,7 +146,7 @@ def parse_off_product_dict(
         if kj is not None:
             energy_kcal = round(kj / 4.184, 1)
 
-    nutrients_per_100: dict[str, Optional[float]] = {
+    nutrients_per_100: dict[str, float | None] = {
         "energy_kcal": energy_kcal,
         "protein_g": _safe_float(nutr.get("proteins_100g")),
         "carbs_g": _safe_float(nutr.get("carbohydrates_100g")),
@@ -228,7 +228,7 @@ def parse_off_product_dict(
         missing_fields=missing_fields,
         is_branded_packaged=True,
         data_version=api_version,
-        retrieved_at=datetime.now(timezone.utc),
+        retrieved_at=datetime.now(UTC),
         license_attribution=OFF_LICENSE_ATTRIBUTION,
     )
 
@@ -402,7 +402,7 @@ def fetch_open_food_facts_by_barcode(
 
 
 def search_open_food_facts_products(
-    db: Session, query: str, brand: Optional[str] = None, page_size: int = 5
+    db: Session, query: str, brand: str | None = None, page_size: int = 5
 ) -> tuple[list[NormalizedExternalProduct], ProviderLookupAttempt]:
     """
     Searches Open Food Facts by product name and optional brand.

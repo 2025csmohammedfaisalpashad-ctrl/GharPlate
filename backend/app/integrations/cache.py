@@ -5,8 +5,8 @@ Prevents repeated API calls for the same barcode or search query and enforces po
 
 import json
 import time
-from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from datetime import datetime, timedelta, UTC
+from typing import Any
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -15,7 +15,7 @@ from app.models.entities import ExternalLookupCache
 _LAST_PROVIDER_CALL_TS: dict[str, float] = {}
 
 
-def enforce_provider_rate_limit(provider_name: str, min_interval_sec: Optional[float] = None) -> None:
+def enforce_provider_rate_limit(provider_name: str, min_interval_sec: float | None = None) -> None:
     """Enforces a polite minimum interval between outbound requests to the same external provider."""
     interval = (
         min_interval_sec
@@ -38,7 +38,7 @@ def get_cached_lookup(
     provider_name: str,
     lookup_type: str,
     query_value: str,
-) -> Optional[tuple[ExternalLookupCache, Optional[dict[str, Any]]]]:
+) -> tuple[ExternalLookupCache, dict[str, Any] | None] | None:
     """
     Returns (cache_row, parsed_payload) if a non-expired cache entry exists for the given key.
     """
@@ -54,15 +54,15 @@ def get_cached_lookup(
     if not row:
         return None
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     expires = row.expires_at
     if expires.tzinfo is None:
-        expires = expires.replace(tzinfo=timezone.utc)
+        expires = expires.replace(tzinfo=UTC)
 
     if now > expires:
         return None
 
-    payload: Optional[dict[str, Any]] = None
+    payload: dict[str, Any] | None = None
     if row.payload_json:
         try:
             payload = json.loads(row.payload_json)
@@ -78,14 +78,14 @@ def set_cached_lookup(
     query_value: str,
     http_status: int,
     response_status: str,
-    payload: Optional[dict[str, Any]],
-    ttl_hours: Optional[int] = None,
+    payload: dict[str, Any] | None,
+    ttl_hours: int | None = None,
 ) -> ExternalLookupCache:
     """
     Stores or updates a cached external lookup result in `external_lookup_cache`.
     """
     hours = ttl_hours if ttl_hours is not None else settings.PRODUCT_CACHE_HOURS
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     expires = now + timedelta(hours=max(hours, 1))
     cache_key = f"{provider_name}:{lookup_type}:{query_value.strip().lower()}"
     payload_str = json.dumps(payload) if payload is not None else None

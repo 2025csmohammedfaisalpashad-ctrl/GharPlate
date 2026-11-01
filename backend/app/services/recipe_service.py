@@ -4,7 +4,6 @@ Calculates total and per-serving nutrition across ingredients, converts househol
 and NEVER replaces missing (NULL) ingredient nutrients with zero.
 """
 
-from typing import Optional
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.seed_images import resolve_food_image_url
@@ -57,7 +56,7 @@ def serialize_recipe_detail(db: Session, recipe: Recipe) -> RecipeDetailOut:
     serving_weight = round(total_weight / servings_count, 2)
 
     contributions: list[RecipeIngredientContributionOut] = []
-    primary_img_url: Optional[str] = None
+    primary_img_url: str | None = None
 
     for ing in recipe.ingredients:
         food = ing.food
@@ -66,7 +65,7 @@ def serialize_recipe_detail(db: Session, recipe: Recipe) -> RecipeDetailOut:
             primary_img_url = img
 
         factor = ing.grams_equivalent / 100.0
-        nv_map: dict[str, Optional[float]] = {
+        nv_map: dict[str, float | None] = {
             nv.nutrient_code: nv.value for nv in food.nutrient_values
         }
         missing_codes = [
@@ -182,9 +181,9 @@ def serialize_recipe_detail(db: Session, recipe: Recipe) -> RecipeDetailOut:
 
 
 def create_or_update_recipe(
-    db: Session, req: RecipeCreateRequest, recipe_id: Optional[int] = None
+    db: Session, req: RecipeCreateRequest, recipe_id: int | None = None
 ) -> RecipeDetailOut:
-    household_id: Optional[int] = None
+    household_id: int | None = None
     if req.household_token:
         hh = (
             db.query(Household)

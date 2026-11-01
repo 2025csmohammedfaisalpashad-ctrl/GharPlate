@@ -1,4 +1,3 @@
-from typing import Optional
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.entities import (
@@ -56,7 +55,7 @@ CONDITION_FOOD_MEDICAL_DISCLAIMER = (
 )
 
 
-def _normalize_dietary_preference(pref: Optional[str]) -> Optional[str]:
+def _normalize_dietary_preference(pref: str | None) -> str | None:
     if not pref:
         return None
     cleaned = pref.strip().lower().replace("-", "_").replace(" ", "_")
@@ -65,7 +64,7 @@ def _normalize_dietary_preference(pref: Optional[str]) -> Optional[str]:
 
 
 def _is_food_compatible_with_preference(
-    food: FoodItem, tag_codes: list[str], dietary_preference: Optional[str]
+    food: FoodItem, tag_codes: list[str], dietary_preference: str | None
 ) -> bool:
     """
     Evaluate whether a food item is compatible with the requested dietary preference.
@@ -136,9 +135,9 @@ def _is_food_compatible_with_preference(
 def get_condition_food_recommendations(
     db: Session,
     condition_code: str,
-    household_token: Optional[str] = None,
-    member_id: Optional[int] = None,
-    dietary_preference: Optional[str] = None,
+    household_token: str | None = None,
+    member_id: int | None = None,
+    dietary_preference: str | None = None,
 ) -> ConditionFoodRecommendationResponse:
     """
     7-step condition-aware food recommendation pipeline:
@@ -183,7 +182,7 @@ def get_condition_food_recommendations(
     )
 
     # Step 4: Determine whether a household member or dietary preference has been supplied
-    resolved_member: Optional[HouseholdMember] = None
+    resolved_member: HouseholdMember | None = None
     if member_id is not None:
         query = db.query(HouseholdMember).filter(HouseholdMember.id == member_id)
         if household_token:
@@ -267,10 +266,10 @@ def get_condition_food_recommendations(
             continue
 
         # Step 3: Verify nutritional information or mark missing relevant nutrients honestly (never replace NULL with 0)
-        nv_map: dict[str, Optional[float]] = {
+        nv_map: dict[str, float | None] = {
             nv.nutrient_code: nv.value for nv in (food.nutrient_values or [])
         }
-        nutrition_highlights: dict[str, Optional[float]] = {
+        nutrition_highlights: dict[str, float | None] = {
             code: nv_map.get(code, None) for code in highlight_codes
         }
         missing_relevant = [
@@ -312,7 +311,7 @@ def get_condition_food_recommendations(
                     f"associated with '{mi}' intolerance."
                 )
 
-        incomplete_ingredient_warning: Optional[str] = None
+        incomplete_ingredient_warning: str | None = None
         if not food.allergen_declaration_complete or (
             food.is_packaged and not food.ingredients_text
         ):

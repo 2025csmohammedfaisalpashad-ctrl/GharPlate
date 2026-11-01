@@ -1,4 +1,4 @@
-from typing import Generator
+from collections.abc import Generator
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, sessionmaker, Session
 from app.core.config import settings

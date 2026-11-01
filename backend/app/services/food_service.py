@@ -1,6 +1,5 @@
 import difflib
 import re
-from typing import Optional
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.seed_images import (
@@ -37,7 +36,7 @@ def normalize_query(q: str) -> str:
     return re.sub(r"[^a-z0-9\u0900-\u097f\u0c80-\u0cff]+", " ", q.lower()).strip()
 
 
-def _resolve_display_image(food: FoodItem) -> tuple[Optional[str], bool]:
+def _resolve_display_image(food: FoodItem) -> tuple[str | None, bool]:
     """
     CRITICAL HONESTY RULE:
     For packaged products (`food.is_packaged == True`), NEVER substitute a generic category
@@ -75,7 +74,7 @@ def serialize_food_summary(food: FoodItem, total_nutrient_defs: int = 20) -> Foo
         "calcium_mg",
         "iron_mg",
     ]
-    val_map: dict[str, Optional[float]] = {nv.nutrient_code: nv.value for nv in food.nutrient_values}
+    val_map: dict[str, float | None] = {nv.nutrient_code: nv.value for nv in food.nutrient_values}
     key_nutrients = {code: val_map.get(code, None) for code in key_codes}
     unavailable = [nv.nutrient_code for nv in food.nutrient_values if nv.value is None]
     available_count = sum(1 for nv in food.nutrient_values if nv.value is not None)
@@ -292,11 +291,11 @@ def serialize_food_detail(db: Session, food: FoodItem) -> FoodDetailOut:
 
 def search_foods(
     db: Session,
-    q: Optional[str] = None,
-    category_slug: Optional[str] = None,
-    is_packaged: Optional[bool] = None,
+    q: str | None = None,
+    category_slug: str | None = None,
+    is_packaged: bool | None = None,
     vegetarian_only: bool = False,
-    nutrient_filter: Optional[str] = None,
+    nutrient_filter: str | None = None,
     sort_by: str = "relevance",
     page: int = 1,
     page_size: int = 20,

@@ -4,7 +4,6 @@ Separates clinical rules from business logic, evaluates single and multiple cond
 identifies competing nutritional considerations, and never labels foods as Safe/Unsafe/Allowed/Forbidden.
 """
 
-from typing import Optional
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.entities import (
@@ -75,7 +74,7 @@ def evaluate_food_guidance(
     nut_defs: dict[str, NutrientDefinition] = {
         nd.code: nd for nd in db.query(NutrientDefinition).all()
     }
-    nv_per_100: dict[str, Optional[float]] = {
+    nv_per_100: dict[str, float | None] = {
         nv.nutrient_code: nv.value for nv in food.nutrient_values
     }
 
@@ -261,9 +260,9 @@ def evaluate_food_guidance(
         # Evaluate each structured rule
         for rule in cond.rules:
             matched = False
-            eval_val: Optional[float] = None
-            nut_name: Optional[str] = None
-            unit_str: Optional[str] = None
+            eval_val: float | None = None
+            nut_name: str | None = None
+            unit_str: str | None = None
 
             if rule.nutrient_code:
                 nd_obj = nut_defs.get(rule.nutrient_code)

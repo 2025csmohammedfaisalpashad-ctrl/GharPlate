@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Optional
 from sqlalchemy import (
     Boolean,
@@ -17,7 +17,7 @@ from app.db.session import Base
 
 
 def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class DataSource(Base):
@@ -45,7 +45,7 @@ class FoodCategory(Base):
     slug: Mapped[str] = mapped_column(String(80), unique=True, index=True, nullable=False)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
-    image_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    image_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     display_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     foods: Mapped[list["FoodItem"]] = relationship("FoodItem", back_populates="category")
@@ -83,7 +83,7 @@ class FoodItemTag(Base):
     tag_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("food_tags.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    derivation_note: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    derivation_note: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
     food: Mapped["FoodItem"] = relationship("FoodItem", back_populates="structured_tags")
     tag: Mapped["FoodTag"] = relationship("FoodTag")
@@ -94,20 +94,20 @@ class FoodItem(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     slug: Mapped[str] = mapped_column(String(120), unique=True, index=True, nullable=False)
-    ifct_code: Mapped[Optional[str]] = mapped_column(String(40), nullable=True, index=True)
+    ifct_code: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
     name_en: Mapped[str] = mapped_column(String(200), index=True, nullable=False)
-    scientific_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    scientific_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     category_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("food_categories.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     description: Mapped[str] = mapped_column(Text, nullable=False)
-    image_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
-    region_state: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    image_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    region_state: Mapped[str | None] = mapped_column(String(120), nullable=True)
 
     is_packaged: Mapped[bool] = mapped_column(Boolean, default=False, index=True, nullable=False)
-    brand: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
-    barcode: Mapped[Optional[str]] = mapped_column(String(64), unique=True, index=True, nullable=True)
-    net_quantity: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    brand: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    barcode: Mapped[str | None] = mapped_column(String(64), unique=True, index=True, nullable=True)
+    net_quantity: Mapped[str | None] = mapped_column(String(80), nullable=True)
 
     default_basis: Mapped[str] = mapped_column(String(20), default="100g", nullable=False)  # 100g or 100ml
     standard_serving_name: Mapped[str] = mapped_column(String(100), default="1 standard serving", nullable=False)
@@ -118,11 +118,11 @@ class FoodItem(Base):
     allergen_tags: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     intolerance_tags: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     dietary_tags: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
-    ingredients_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    cleaned_ingredients_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    allergen_statement: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    raw_ocr_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    manufacturer_info: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    ingredients_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    cleaned_ingredients_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    allergen_statement: Mapped[str | None] = mapped_column(Text, nullable=True)
+    raw_ocr_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    manufacturer_info: Mapped[str | None] = mapped_column(Text, nullable=True)
     allergen_declaration_complete: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     source_id: Mapped[int] = mapped_column(
@@ -131,9 +131,9 @@ class FoodItem(Base):
     confidence_level: Mapped[str] = mapped_column(
         String(40), default="high", nullable=False
     )  # high, medium, label_declared, user_entered, incomplete
-    conversion_methodology: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    conversion_methodology: Mapped[str | None] = mapped_column(Text, nullable=True)
     date_imported: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
-    external_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    external_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     category: Mapped["FoodCategory"] = relationship("FoodCategory", back_populates="foods")
     source: Mapped["DataSource"] = relationship("DataSource")
@@ -180,11 +180,11 @@ class ProductFieldProvenance(Base):
     field_type: Mapped[str] = mapped_column(
         String(50), nullable=False, default="metadata"
     )  # metadata, ingredient, allergen, nutrient, image
-    field_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    field_value: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_code: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
     source_name: Mapped[str] = mapped_column(String(200), nullable=False)
-    source_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
-    source_record_id: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    source_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    source_record_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     confidence_status: Mapped[str] = mapped_column(
         String(50), nullable=False, default="user_confirmed"
     )  # user_confirmed, external_verified_barcode, ocr_extracted, verified_ifct, fdc_supplemental
@@ -192,7 +192,7 @@ class ProductFieldProvenance(Base):
         String(50), nullable=False, default="confirmed"
     )  # confirmed, pending_user_review, auto_merged_missing
     retrieved_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
-    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     food: Mapped["FoodItem"] = relationship("FoodItem", back_populates="field_provenance")
 
@@ -209,11 +209,11 @@ class ProductDataConflict(Base):
         Integer, ForeignKey("food_items.id", ondelete="CASCADE"), nullable=False, index=True
     )
     field_name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
-    local_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    local_value: Mapped[str | None] = mapped_column(Text, nullable=True)
     local_source: Mapped[str] = mapped_column(String(150), nullable=False)
-    external_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    external_value: Mapped[str | None] = mapped_column(Text, nullable=True)
     external_source: Mapped[str] = mapped_column(String(150), nullable=False)
-    external_source_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    external_source_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     resolution_status: Mapped[str] = mapped_column(
         String(50), nullable=False, default="requires_user_review"
     )  # requires_user_review, kept_local, accepted_external
@@ -241,7 +241,7 @@ class ExternalLookupCache(Base):
     response_status: Mapped[str] = mapped_column(
         String(60), nullable=False, default="ok"
     )  # found, not_found, error, rate_limited
-    payload_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     retrieved_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
@@ -259,7 +259,7 @@ class FoodAlias(Base):
     language: Mapped[str] = mapped_column(String(20), nullable=False, index=True)  # en, hi, kn, ta, te, etc.
     alias_text: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
     normalized_text: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
-    script_text: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    script_text: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
     food: Mapped["FoodItem"] = relationship("FoodItem", back_populates="aliases")
 
@@ -275,7 +275,7 @@ class NutrientDefinition(Base):
         String(50), nullable=False
     )  # macronutrient, mineral, vitamin
     display_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class FoodNutrientValue(Base):
@@ -295,7 +295,7 @@ class FoodNutrientValue(Base):
     nutrient_code: Mapped[str] = mapped_column(
         String(60), ForeignKey("nutrient_definitions.code", ondelete="RESTRICT"), nullable=False, index=True
     )
-    value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # NULL = unknown/unmeasured
+    value: Mapped[float | None] = mapped_column(Float, nullable=True)  # NULL = unknown/unmeasured
     basis: Mapped[str] = mapped_column(String(20), default="100g", nullable=False)
     source_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("data_sources.id", ondelete="RESTRICT"), nullable=False
@@ -303,7 +303,7 @@ class FoodNutrientValue(Base):
     confidence_status: Mapped[str] = mapped_column(
         String(50), default="verified_ifct", nullable=False
     )  # verified_ifct, verified_recipe_calc, label_declared, openfoodfacts, user_entered, not_measured
-    measurement_notes: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    measurement_notes: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     food: Mapped["FoodItem"] = relationship("FoodItem", back_populates="nutrient_values")
     nutrient: Mapped["NutrientDefinition"] = relationship("NutrientDefinition")
@@ -347,7 +347,7 @@ class HealthCondition(Base):
     portion_considerations: Mapped[str] = mapped_column(Text, nullable=False)
     individual_differences: Mapped[str] = mapped_column(Text, nullable=False)
     professional_advice_circumstances: Mapped[str] = mapped_column(Text, nullable=False)
-    red_flag_warning: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    red_flag_warning: Mapped[str | None] = mapped_column(Text, nullable=True)
     what_evidence_does_not_establish: Mapped[str] = mapped_column(Text, nullable=False)
 
     source_id: Mapped[int] = mapped_column(
@@ -402,7 +402,7 @@ class ConditionFoodMapping(Base):
         String(50), nullable=False, default="reviewed", index=True
     )  # reviewed, requires_research, unreviewed
     applicability_limitations: Mapped[str] = mapped_column(Text, nullable=False)
-    serving_consideration: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    serving_consideration: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
 
@@ -419,15 +419,15 @@ class NutritionRule(Base):
     condition_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("health_conditions.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    nutrient_code: Mapped[Optional[str]] = mapped_column(String(60), nullable=True, index=True)
-    food_category_slug: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
-    dietary_tag_match: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    nutrient_code: Mapped[str | None] = mapped_column(String(60), nullable=True, index=True)
+    food_category_slug: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    dietary_tag_match: Mapped[str | None] = mapped_column(String(80), nullable=True)
 
     comparison_operator: Mapped[str] = mapped_column(
         String(30), nullable=False
     )  # gt, gte, lt, lte, between, is_null, tag_present
-    threshold_low: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    threshold_high: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    threshold_low: Mapped[float | None] = mapped_column(Float, nullable=True)
+    threshold_high: Mapped[float | None] = mapped_column(Float, nullable=True)
     evaluation_basis: Mapped[str] = mapped_column(String(20), default="100g", nullable=False)  # 100g or serving
 
     educational_category: Mapped[str] = mapped_column(
@@ -474,7 +474,7 @@ class Household(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     household_token: Mapped[str] = mapped_column(String(80), unique=True, index=True, nullable=False)
     name: Mapped[str] = mapped_column(String(120), default="My Household", nullable=False)
-    default_member_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    default_member_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     privacy_notice_accepted: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
@@ -515,18 +515,18 @@ class Recipe(Base):
     __tablename__ = "recipes"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    household_id: Mapped[Optional[int]] = mapped_column(
+    household_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("households.id", ondelete="CASCADE"), nullable=True, index=True
     )
-    household_token: Mapped[Optional[str]] = mapped_column(String(80), nullable=True, index=True)
+    household_token: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     servings: Mapped[float] = mapped_column(Float, default=2.0, nullable=False)
     meal_type: Mapped[str] = mapped_column(
         String(40), default="lunch", nullable=False
     )  # breakfast, lunch, dinner, snack
     is_system_template: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    instructions_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    instructions_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
 

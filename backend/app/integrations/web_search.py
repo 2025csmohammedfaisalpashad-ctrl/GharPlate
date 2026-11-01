@@ -6,7 +6,7 @@ Never sends household medical profiles or personal identifiers to external searc
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 import httpx
 from sqlalchemy.orm import Session
@@ -37,7 +37,7 @@ def search_external_web(
     explaining how to enable it in `.env`.
     """
     clean_q = query.strip()
-    now_iso = datetime.now(timezone.utc).isoformat()
+    now_iso = datetime.now(UTC).isoformat()
     provider = (settings.WEB_SEARCH_PROVIDER or "").strip().lower()
 
     if not settings.ENABLE_EXTERNAL_WEB_SEARCH:
@@ -122,11 +122,11 @@ def _execute_brave_search(
                     "status": "http_error",
                     "http_status": resp.status_code,
                     "message": f"Brave Search returned HTTP {resp.status_code}.",
-                    "retrieved_at": datetime.now(timezone.utc).isoformat(),
+                    "retrieved_at": datetime.now(UTC).isoformat(),
                 }
             data = resp.json()
             web_results = (data.get("web") or {}).get("results") or []
-            now_iso = datetime.now(timezone.utc).isoformat()
+            now_iso = datetime.now(UTC).isoformat()
             normalized = [
                 {
                     "title": r.get("title", "Untitled"),
@@ -167,7 +167,7 @@ def _execute_brave_search(
             "provider": "Brave Search",
             "status": "network_error",
             "message": f"Brave Search request failed ({exc.__class__.__name__}).",
-            "retrieved_at": datetime.now(timezone.utc).isoformat(),
+            "retrieved_at": datetime.now(UTC).isoformat(),
         }
 
 
@@ -213,11 +213,11 @@ def _execute_tavily_search(
                     "status": "http_error",
                     "http_status": resp.status_code,
                     "message": f"Tavily Search returned HTTP {resp.status_code}.",
-                    "retrieved_at": datetime.now(timezone.utc).isoformat(),
+                    "retrieved_at": datetime.now(UTC).isoformat(),
                 }
             data = resp.json()
             results = data.get("results") or []
-            now_iso = datetime.now(timezone.utc).isoformat()
+            now_iso = datetime.now(UTC).isoformat()
             normalized = [
                 {
                     "title": r.get("title", "Untitled"),
@@ -258,5 +258,5 @@ def _execute_tavily_search(
             "provider": "Tavily Search",
             "status": "network_error",
             "message": f"Tavily Search request failed ({exc.__class__.__name__}).",
-            "retrieved_at": datetime.now(timezone.utc).isoformat(),
+            "retrieved_at": datetime.now(UTC).isoformat(),
         }
