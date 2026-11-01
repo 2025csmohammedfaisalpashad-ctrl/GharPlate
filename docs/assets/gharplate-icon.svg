@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 280 280" role="img" aria-labelledby="title">
+  <title id="title">GharPlate icon</title>
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#087A53"/><stop offset="1" stop-color="#064E3B"/></linearGradient>
+    <linearGradient id="o" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#F59E0B"/><stop offset="1" stop-color="#EA580C"/></linearGradient>
+  </defs>
+  <rect x="2" y="2" width="276" height="276" rx="48" fill="#F8FBF8" stroke="#E2EEE7" stroke-width="3"/>
+  <circle cx="140" cy="140" r="126" fill="#fff" stroke="url(#g)" stroke-width="13"/>
+  <circle cx="140" cy="140" r="105" fill="none" stroke="#A7D7C3" stroke-width="4"/>
+  <path d="M69 139 C75 192 106 222 140 222 C174 222 205 192 211 139 Z" fill="url(#g)"/>
+  <path d="M69 139 C94 124 116 119 140 119 C164 119 186 124 211 139" fill="none" stroke="#064E3B" stroke-width="9" stroke-linecap="round"/>
+  <g fill="#fff"><ellipse cx="112" cy="156" rx="5" ry="9" transform="rotate(-28 112 156)"/><ellipse cx="132" cy="151" rx="5" ry="9" transform="rotate(18 132 151)"/><ellipse cx="151" cy="157" rx="5" ry="9" transform="rotate(-12 151 157)"/><ellipse cx="171" cy="150" rx="5" ry="9" transform="rotate(28 171 150)"/></g>
+  <circle cx="184" cy="166" r="8" fill="url(#o)"/><circle cx="98" cy="169" r="7" fill="#F59E0B"/>
+  <path d="M111 111 C94 91 122 83 111 63 M148 108 C132 88 160 79 149 57" fill="none" stroke="url(#o)" stroke-width="8" stroke-linecap="round"/>
+  <path d="M154 77 C162 36 205 22 235 31 C229 67 195 91 154 77 Z" fill="#16A36A"/>
+  <path d="M160 75 C181 58 202 44 226 34" fill="none" stroke="#D1FAE5" stroke-width="4" stroke-linecap="round"/>
+</svg>

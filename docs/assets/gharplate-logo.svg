@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="320" viewBox="0 0 1120 320" role="img" aria-labelledby="title desc">
+  <title id="title">GharPlate logo</title>
+  <desc id="desc">A dark green plate and bowl with a fresh leaf and saffron accent, beside the GharPlate wordmark.</desc>
+  <defs>
+    <linearGradient id="green" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#087A53"/>
+      <stop offset="1" stop-color="#064E3B"/>
+    </linearGradient>
+    <linearGradient id="orange" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F59E0B"/>
+      <stop offset="1" stop-color="#EA580C"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="1112" height="312" rx="28" fill="#F8FBF8" stroke="#E2EEE7" stroke-width="3"/>
+  <!-- Brand mark: plate, bowl, steam and a leaf -->
+  <g transform="translate(28 20)" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="140" cy="140" r="119" fill="#FFFFFF" stroke="url(#green)" stroke-width="13"/>
+    <circle cx="140" cy="140" r="99" fill="none" stroke="#A7D7C3" stroke-width="4"/>
+    <!-- Bowl -->
+    <path d="M66 139 C72 191 105 220 140 220 C175 220 208 191 214 139 Z" fill="url(#green)"/>
+    <path d="M66 139 C91 124 113 119 140 119 C167 119 189 124 214 139" fill="none" stroke="#064E3B" stroke-width="9"/>
+    <path d="M85 146 C101 138 121 135 140 135 C159 135 179 138 195 146" fill="none" stroke="#FFFFFF" stroke-opacity=".9" stroke-width="5"/>
+    <!-- Food grains / ingredients -->
+    <g fill="#F8FAFC">
+      <ellipse cx="112" cy="156" rx="5" ry="9" transform="rotate(-28 112 156)"/>
+      <ellipse cx="132" cy="151" rx="5" ry="9" transform="rotate(18 132 151)"/>
+      <ellipse cx="151" cy="157" rx="5" ry="9" transform="rotate(-12 151 157)"/>
+      <ellipse cx="171" cy="150" rx="5" ry="9" transform="rotate(28 171 150)"/>
+    </g>
+    <circle cx="184" cy="166" r="8" fill="url(#orange)"/>
+    <circle cx="98" cy="169" r="7" fill="#F59E0B"/>
+    <!-- Steam -->
+    <path d="M111 111 C94 91 122 83 111 63" fill="none" stroke="url(#orange)" stroke-width="8"/>
+    <path d="M148 108 C132 88 160 79 149 57" fill="none" stroke="url(#orange)" stroke-width="8"/>
+    <!-- Leaf -->
+    <path d="M154 77 C162 36 205 22 235 31 C229 67 195 91 154 77 Z" fill="#16A36A"/>
+    <path d="M160 75 C181 58 202 44 226 34" fill="none" stroke="#D1FAE5" stroke-width="4"/>
+    <!-- Saffron accent -->
+    <path d="M48 236 C83 254 112 260 140 260" fill="none" stroke="url(#orange)" stroke-width="7"/>
+    <path d="M140 260 C168 260 197 254 232 236" fill="none" stroke="#16A36A" stroke-width="7"/>
+  </g>
+  <!-- Wordmark -->
+  <g font-family="Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif">
+    <text x="330" y="157" font-size="104" font-weight="800" letter-spacing="-4" fill="#064E3B">Ghar<tspan fill="#EA580C">Plate</tspan></text>
+    <text x="338" y="216" font-size="28" font-weight="600" letter-spacing="1.2" fill="#477565">INDIAN FOOD INTELLIGENCE</text>
+    <path d="M338 243 H930" stroke="#DCEFE6" stroke-width="3"/>
+    <text x="338" y="280" font-size="22" font-weight="500" fill="#64748B">Better food understanding for every household.</text>
+  </g>
+</svg>
