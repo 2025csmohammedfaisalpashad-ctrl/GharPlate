@@ -14,9 +14,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/requirements.txt backend/pyproject.toml ./backend/
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r backend/requirements.txt
+ENV PIP_DEFAULT_TIMEOUT=120
+ENV PIP_RETRIES=10
 
+RUN python -m pip install \
+    --no-cache-dir \
+    --timeout=120 \
+    --retries=10 \
+    -r backend/requirements.txt
 COPY backend/ ./backend/
 COPY scripts/ ./scripts/
 
