@@ -195,23 +195,31 @@ jobs:
           assert data["counts"]["conditions"] >= 18, f"Expected >=18 conditions, got {data}"
           '
 
-          echo "Verifying /api/v1/foods/categories endpoint..."
-          curl -fsS http://localhost:8000/api/v1/foods/categories > /tmp/categories.json
-          python3 -c '
-          import json
-          with open("/tmp/categories.json") as f:
-              cats = json.load(f)
-          assert len(cats) == 9, f"Expected 9 categories, got {len(cats)}"
-          '
+          # The food catalog APIs are protected after real authentication was added.
+          # In this unauthenticated smoke-test step, verify that private endpoints
+          # reject anonymous requests instead of expecting HTTP 200.
+          assert_unauthenticated_401() {
+            local path="$1"
+            local label="$2"
+            local body_file="$3"
+            local status
 
-          echo "Verifying /api/v1/foods search endpoint..."
-          curl -fsS "http://localhost:8000/api/v1/foods?q=Ragi" > /tmp/foods.json
-          python3 -c '
-          import json
-          with open("/tmp/foods.json") as f:
-              foods = json.load(f)
-          assert foods["total"] >= 1, "Expected at least 1 Ragi food item"
-          '
+            status=$(curl -sS -o "$body_file" -w "%{http_code}" "http://localhost:8000${path}")
+
+            if [ "$status" != "401" ]; then
+              echo "FAIL: ${label} should reject unauthenticated requests with HTTP 401; got HTTP ${status}."
+              cat "$body_file"
+              return 1
+            fi
+
+            echo "PASS: ${label} correctly rejected an unauthenticated request (HTTP 401)."
+          }
+
+          echo "Verifying protected /api/v1/foods/categories endpoint..."
+          assert_unauthenticated_401 "/api/v1/foods/categories" "Food categories endpoint" "/tmp/categories.json"
+
+          echo "Verifying protected /api/v1/foods search endpoint..."
+          assert_unauthenticated_401 "/api/v1/foods?q=Ragi" "Food search endpoint" "/tmp/foods.json"
 
           echo "Waiting for GharPlate Frontend Nginx Server at http://localhost:8080/ ..."
           for i in $(seq 1 20); do
