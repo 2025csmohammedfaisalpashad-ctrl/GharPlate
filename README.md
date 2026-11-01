@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="docs/assets/gharplate-mark.svg" alt="GharPlate logo" width="112" height="112" />
+  <img src="docs/assets/gharplate-logo.png" alt="GharPlate logo" width="112" height="112" />
   <h1>GharPlate</h1>
   <p><strong>Indian Household Food Intelligence &amp; Personalised Nutrition</strong></p>
   <p>Understand everyday food with clearer data, transparent sources, and household-aware nutrition context.</p>
