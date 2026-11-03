@@ -47,7 +47,7 @@ jobs:
         working-directory: backend
         run: |
           ruff --version
-          ruff check app tests
+          ruff check app tests --select E4,E7,E9,F
 
       - name: Verify Python bytecode compilation
         working-directory: backend
