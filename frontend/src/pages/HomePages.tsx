@@ -249,10 +249,54 @@ export const HomePage: React.FC = () => {
         </div>
       </section>
 
-      {/* C. QUICK ACTIONS — 6 Visual Shortcuts */}
+      {/* C. QUICK ACTIONS & PERSONAL ECOSYSTEM SHORTCUTS (ADAPTIVE TO ACTIVE MEMBER) */}
       <section className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-black text-stone-900">What Would You Like to Do?</h2>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-xl font-black text-stone-900">What Would You Like to Do?</h2>
+            <p className="text-xs text-stone-500">
+              {activeMember
+                ? `Personalised shortcuts for ${activeMember.display_name} (${(activeMember.primary_goal || 'maintain_balanced_diet').replace(/_/g, ' ')})`
+                : 'Quick shortcuts for daily tracking, recipes, health conditions, and grocery buying'}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2 text-xs">
+            <Link
+              to="/fitness/tracker"
+              data-testid="home-shortcut-log-food"
+              className="rounded-xl bg-emerald-800 px-3.5 py-2 font-extrabold text-white shadow-2xs hover:bg-emerald-700"
+            >
+              📒 Log Food
+            </Link>
+            <Link
+              to="/fitness/hydration"
+              data-testid="home-shortcut-add-water"
+              className="rounded-xl bg-sky-700 px-3.5 py-2 font-extrabold text-white shadow-2xs hover:bg-sky-600"
+            >
+              💧 Add Water
+            </Link>
+            <Link
+              to="/fitness/dashboard"
+              data-testid="home-shortcut-log-workout"
+              className="rounded-xl bg-stone-900 px-3.5 py-2 font-extrabold text-white shadow-2xs hover:bg-stone-800"
+            >
+              🏋️ Log Workout
+            </Link>
+            <Link
+              to="/fitness/analytics"
+              data-testid="home-shortcut-view-progress"
+              className="rounded-xl border border-emerald-700 bg-emerald-50 px-3.5 py-2 font-extrabold text-emerald-900 hover:bg-emerald-100"
+            >
+              📈 View Today’s Progress
+            </Link>
+            <Link
+              to="/recipes/discover"
+              data-testid="home-shortcut-discover-recipes"
+              className="rounded-xl bg-amber-400 px-3.5 py-2 font-extrabold text-stone-950 hover:bg-amber-300"
+            >
+              🍲 Discover Recipes
+            </Link>
+          </div>
         </div>
         <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-6">
           {[
@@ -271,31 +315,31 @@ export const HomePage: React.FC = () => {
               color: 'bg-rose-50 border-rose-200 text-rose-950',
             },
             {
-              title: 'Scan Barcode',
-              sub: 'Live camera & GTIN',
-              icon: '🏷️',
-              to: '/barcode',
+              title: 'My Daily Tracker',
+              sub: 'Food diary & water',
+              icon: '📒',
+              to: '/fitness/tracker',
               color: 'bg-amber-50 border-amber-200 text-amber-950',
             },
             {
-              title: 'Scan Food Label',
-              sub: 'Multi-panel OCR',
-              icon: '📸',
-              to: '/scanner',
+              title: 'Protein Intelligence',
+              sub: 'Cost per 10g protein',
+              icon: '🥚',
+              to: '/fitness/protein',
               color: 'bg-sky-50 border-sky-200 text-sky-950',
             },
             {
-              title: 'Compare Products',
-              sub: 'Side-by-side per 100g',
-              icon: '⚖️',
-              to: '/compare',
+              title: 'Smart Grocery List',
+              sub: 'Blinkit, Zepto, BigBasket',
+              icon: '🛒',
+              to: '/kitchen/grocery',
               color: 'bg-purple-50 border-purple-200 text-purple-950',
             },
             {
-              title: 'Discover Meals',
-              sub: 'Breakfast to dinner',
-              icon: '🍛',
-              to: '/meals',
+              title: 'Mess & Family Meals',
+              sub: 'Canteen & multi-goal portions',
+              icon: '🍱',
+              to: '/tools/mess-analyzer',
               color: 'bg-teal-50 border-teal-200 text-teal-950',
             },
           ].map((act) => (

@@ -355,6 +355,7 @@ export interface HouseholdMember {
   display_name: string;
   age_group: string;
   dietary_preference: string;
+  primary_goal?: string;
   selected_conditions: string[];
   allergies: string[];
   intolerances: string[];

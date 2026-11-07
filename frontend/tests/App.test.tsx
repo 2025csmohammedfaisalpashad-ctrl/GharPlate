@@ -1418,4 +1418,306 @@ describe('GharPlate Targeted Food Images, Barcode Camera Scanner & Resizable AI 
       expect(screen.queryByTestId('saved-chat-item-201')).not.toBeInTheDocument();
     });
   });
+
+  it('renders GharPlate 3.0 ecosystem modules: My Daily Tracker, Water Tracker, Visual Analytics, Smart Grocery List, and Protein Intelligence', async () => {
+    const prevImpl = mockFetch.getMockImplementation();
+    mockFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.includes('/tracker/daily')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            date: '2026-11-07',
+            weekday: 'saturday',
+            today_training: { is_training_day: true, workout_type: 'Strength & Conditioning' },
+            member: {
+              id: 1,
+              display_name: 'Ajji',
+              dietary_preference: 'vegetarian',
+              primary_goal: 'build_muscle',
+              selected_conditions: ['type_2_diabetes'],
+            },
+            targets: {
+              calories_kcal: 2100,
+              protein_g: 85,
+              carbs_g: 240,
+              fat_g: 55,
+              fiber_g: 30,
+            },
+            daily_nutrition: {
+              entry_count: 1,
+              totals: {
+                energy_kcal: 320,
+                protein_g: 14.5,
+                carbs_g: 52,
+                fat_total_g: 4.2,
+                fibre_g: 11.2,
+              },
+              has_incomplete_entries: false,
+              incomplete_entry_names: [],
+            },
+            meals: [
+              {
+                meal_category: 'breakfast',
+                meal_label: 'Breakfast',
+                summary: {
+                  entry_count: 1,
+                  totals: { energy_kcal: 320, protein_g: 14.5, carbs_g: 52 },
+                },
+                entries: [
+                  {
+                    id: 701,
+                    food_name: 'Ragi (Finger Millet)',
+                    quantity: 1,
+                    unit_name: '100g',
+                    grams_equivalent: 100,
+                    meal_category: 'breakfast',
+                    energy_kcal: 320,
+                    protein_g: 14.5,
+                  },
+                ],
+              },
+            ],
+            hydration: { total_ml: 1250, goal_ml: 2250, progress_pct: 55.6 },
+            meal_templates: [],
+            meal_categories_catalog: [{ code: 'breakfast', label: 'Breakfast' }],
+          }),
+        };
+      }
+      if (url.includes('/hydration/daily')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            date: '2026-11-07',
+            total_ml: 1250,
+            goal_ml: 2000,
+            remaining_ml: 750,
+            progress_pct: 62.5,
+            fluid_medical_notice:
+              'Individualised Fluid Guidance Notice: Follow physician fluid advice.',
+            individual_hydration_disclaimer: 'Fluid needs vary.',
+            settings: {
+              daily_goal_ml: 2000,
+              preferred_container: 'large_glass',
+              reminders_enabled: false,
+            },
+            entries: [
+              {
+                id: 801,
+                logged_date: '2026-11-07',
+                logged_time: '09:30',
+                amount_ml: 250,
+                container_type: 'large_glass',
+              },
+            ],
+            weekly_history: [],
+          }),
+        };
+      }
+      if (url.includes('/analytics/overview')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            targets: { calories_kcal: 2000, protein_g: 75, fiber_g: 30, water_ml: 2250 },
+            today_meal_pattern: [],
+            weekly_series: [
+              {
+                date: '2026-11-06',
+                food_data_status: 'recorded',
+                protein_g: 68,
+                energy_kcal: 1950,
+              },
+              {
+                date: '2026-11-07',
+                food_data_status: 'no_entry_recorded',
+                protein_g: null,
+                energy_kcal: null,
+              },
+            ],
+            monthly_series: [],
+            summary_metrics: {
+              logged_days_last_7: 5,
+              weekly_avg_protein_g: 71.2,
+              weekly_avg_calories_kcal: 1980,
+              training_day_avg_protein_g: 78.5,
+              training_day_avg_calories_kcal: 2120,
+              rest_day_avg_protein_g: 64.0,
+              rest_day_avg_calories_kcal: 1840,
+            },
+            chart_integrity_notice: 'Days without entries are marked no_entry_recorded.',
+          }),
+        };
+      }
+      if (url.includes('/shopping-lists')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            id: 1,
+            title: 'Household Smart Grocery List',
+            delivery_pincode: '570001',
+            location_consent_given: true,
+            total_items: 1,
+            unpurchased_count: 1,
+            total_estimated_cost_inr: 32,
+            retailer_transparency_notice:
+              'Official search destinations on Blinkit, Zepto, Swiggy Instamart, and BigBasket.',
+            items: [
+              {
+                id: 901,
+                ingredient_name: 'Curd (Dahi)',
+                grams_needed: 300,
+                is_purchased: false,
+                related_recipes: ['Ragi Bowl', 'Khichdi'],
+                retailer_destinations: [
+                  {
+                    retailer_code: 'blinkit',
+                    retailer_name: 'Blinkit',
+                    url: 'https://blinkit.com/',
+                    availability_note: 'Official search destination',
+                  },
+                  {
+                    retailer_code: 'swiggy_instamart',
+                    retailer_name: 'Swiggy Instamart',
+                    url: 'https://instamart.in/',
+                    availability_note: 'Official search destination',
+                  },
+                  {
+                    retailer_code: 'bigbasket',
+                    retailer_name: 'BigBasket',
+                    url: 'https://www.bigbasket.com/',
+                    availability_note: 'Official search destination',
+                  },
+                ],
+              },
+            ],
+          }),
+        };
+      }
+      if (url.includes('/pantry')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            {
+              id: 1,
+              ingredient_name: 'Spinach (Palak)',
+              grams_available: 500,
+              in_stock: true,
+            },
+          ],
+        };
+      }
+      if (url.includes('/protein-intelligence')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            whole_food_first_disclaimer: 'Whole Indian foods can meet protein goals.',
+            items: [
+              {
+                food_slug: 'soya-chunks-textured-veg-protein',
+                name_en: 'Soya Chunks (Textured Vegetable Protein)',
+                standard_serving_name: '1 bowl dry (50g)',
+                standard_serving_grams: 50,
+                is_vegetarian: true,
+                protein_per_100g: 52.0,
+                protein_per_serving_g: 26.0,
+                energy_per_100g_kcal: 345,
+                price_inr_per_100g: 16.0,
+                cost_per_10g_protein_inr: 3.08,
+              },
+            ],
+          }),
+        };
+      }
+      return prevImpl ? prevImpl(url, init) : { ok: true, json: async () => [] };
+    });
+
+    const { unmount } = render(
+      <HouseholdProvider>
+        <MemoryRouter initialEntries={['/fitness/tracker']}>
+          <AppRoutes />
+        </MemoryRouter>
+      </HouseholdProvider>
+    );
+
+    // 1. Verify My Daily Tracker page renders logged meals & macro progress
+    await waitFor(() => {
+      expect(screen.getByTestId('daily-tracker-page')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('food-log-entry-701')).toHaveTextContent(
+      /Ragi \(Finger Millet\)/i
+    );
+    expect(screen.getByTestId('tracker-stat-protein')).toHaveTextContent('14.5 g');
+    unmount();
+
+    // 2. Verify Water & Hydration Tracker page renders 1,250 ml / 2,000 ml and CKD notice
+    const r2 = render(
+      <HouseholdProvider>
+        <MemoryRouter initialEntries={['/fitness/hydration']}>
+          <AppRoutes />
+        </MemoryRouter>
+      </HouseholdProvider>
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId('water-tracker-page')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('hydration-readout-headline')).toHaveTextContent(
+      /1,250 ml/i
+    );
+    expect(screen.getByTestId('hydration-medical-notice')).toBeInTheDocument();
+    r2.unmount();
+
+    // 3. Verify Visual Progress Analytics page renders SVG line chart
+    const r3 = render(
+      <HouseholdProvider>
+        <MemoryRouter initialEntries={['/fitness/analytics']}>
+          <AppRoutes />
+        </MemoryRouter>
+      </HouseholdProvider>
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId('progress-analytics-page')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('analytics-svg-line-chart')).toBeInTheDocument();
+    r3.unmount();
+
+    // 4. Verify Smart Grocery & Pantry page renders consolidated item & Blinkit/Instamart/BigBasket links
+    const r4 = render(
+      <HouseholdProvider>
+        <MemoryRouter initialEntries={['/kitchen/grocery']}>
+          <AppRoutes />
+        </MemoryRouter>
+      </HouseholdProvider>
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId('smart-grocery-pantry-page')).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Curd \(Dahi\)/i)).toBeInTheDocument();
+    expect(screen.getByTestId('retailer-link-blinkit-901')).toBeInTheDocument();
+    expect(screen.getByTestId('retailer-link-swiggy_instamart-901')).toBeInTheDocument();
+    expect(screen.getByTestId('retailer-link-bigbasket-901')).toBeInTheDocument();
+    r4.unmount();
+
+    // 5. Verify Indian Protein & Budget Intelligence page
+    render(
+      <HouseholdProvider>
+        <MemoryRouter initialEntries={['/fitness/protein']}>
+          <AppRoutes />
+        </MemoryRouter>
+      </HouseholdProvider>
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId('protein-intelligence-page')).toBeInTheDocument();
+    });
+    expect(
+      screen.getByTestId('protein-row-soya-chunks-textured-veg-protein')
+    ).toHaveTextContent('52 g');
+    expect(
+      screen.getByTestId('protein-row-soya-chunks-textured-veg-protein')
+    ).toHaveTextContent('₹3.08 / 10g P');
+  });
 });

@@ -38,7 +38,7 @@ def test_01_assistant_status_and_model_discovery():
         assert st_data["ollama_reachable"] is True
         assert st_data["active_model"] == "llama3.2:latest"
         assert "llama3.2:latest" in st_data["installed_models"]
-        assert len(st_data["allowlisted_tools"]) == 11
+        assert len(st_data["allowlisted_tools"]) >= 27
 
     with patch(
         "app.services.ollama_assistant_service.discover_ollama_models",

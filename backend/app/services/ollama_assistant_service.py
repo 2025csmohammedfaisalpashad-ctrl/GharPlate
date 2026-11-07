@@ -20,10 +20,15 @@ from app.integrations.provider_registry import (
 )
 from app.integrations.web_search import search_external_web
 from app.models.entities import (
+    FitnessGoal,
     FoodItem,
     FoodNutrientValue,
+    HabitDefinition,
     Household,
     HouseholdMember,
+    MessMenuRecord,
+    PantryItem,
+    Recipe,
 )
 from app.rules.guidance_engine import evaluate_food_guidance
 from app.schemas.api_schemas import (
@@ -40,6 +45,19 @@ from app.schemas.api_schemas import (
 )
 from app.services.comparison_meals_service import compare_packaged_products
 from app.services.condition_food_service import get_condition_food_recommendations
+from app.services.fitness_ecosystem_service import (
+    add_recipe_ingredients_to_shopping_list,
+    create_daily_food_log_entry,
+    discover_and_recommend_recipes,
+    get_analytics_overview,
+    get_daily_hydration_summary,
+    get_daily_tracker_summary,
+    get_indian_protein_intelligence,
+    get_or_create_fitness_profile,
+    search_external_recipe_providers,
+    serialize_food_log_entry,
+    today_iso_str,
+)
 from app.services.food_service import search_foods, serialize_food_detail
 from app.services.ocr_barcode_service import lookup_barcode
 from app.services.recipe_service import create_or_update_recipe
@@ -79,6 +97,23 @@ ALLOWLISTED_TOOL_NAMES = [
     "compare_packaged_products",
     "calculate_recipe_nutrition",
     "search_external_web_sources",
+    # GharPlate 3.0 Ecosystem Tools (Module M)
+    "get_fitness_profile",
+    "get_daily_nutrition_log",
+    "log_food_intake",
+    "get_daily_nutrition_summary",
+    "get_water_intake",
+    "log_water_intake",
+    "get_goal_progress",
+    "update_user_goal",
+    "get_habit_history",
+    "get_recipe_suggestions",
+    "search_online_recipes",
+    "create_shopping_list",
+    "get_available_pantry_items",
+    "get_protein_comparisons",
+    "get_mess_menu",
+    "get_fitness_progress",
 ]
 
 OLLAMA_TOOLS_SCHEMA: list[dict[str, Any]] = [
@@ -978,6 +1013,500 @@ def execute_allowlisted_tool(
                 sources,
             )
 
+        # ==========================================
+        # GHARPLATE 3.0 ECOSYSTEM TOOLS (MODULE M)
+        # ==========================================
+        def _resolve_tool_hh_and_member() -> tuple[Household | None, HouseholdMember | None]:
+            h_token = arguments.get("household_token")
+            m_id = arguments.get("member_id")
+            hh = (
+                db.query(Household)
+                .filter(Household.household_token == str(h_token))
+                .first()
+                if h_token
+                else db.query(Household).order_by(Household.id.asc()).first()
+            )
+            member: HouseholdMember | None = None
+            if m_id is not None:
+                q_m = db.query(HouseholdMember).filter(HouseholdMember.id == int(m_id))
+                if hh:
+                    q_m = q_m.filter(HouseholdMember.household_id == hh.id)
+                member = q_m.first()
+            elif hh and hh.default_member_id:
+                member = (
+                    db.query(HouseholdMember)
+                    .filter(
+                        HouseholdMember.id == hh.default_member_id,
+                        HouseholdMember.household_id == hh.id,
+                    )
+                    .first()
+                )
+            elif hh and hh.members:
+                member = hh.members[0]
+            return hh, member
+
+        if tool_name == "get_fitness_profile":
+            _hh, member = _resolve_tool_hh_and_member()
+            if not member:
+                trace = AssistantToolExecutionTrace(
+                    tool_name=tool_name,
+                    arguments=arguments,
+                    status="error",
+                    summary="No active household member found for fitness profile.",
+                    source_type="local_database",
+                )
+                return {"found": False}, trace, []
+            prof = get_or_create_fitness_profile(db, member)
+            trace = AssistantToolExecutionTrace(
+                tool_name=tool_name,
+                arguments={"member_id": member.id},
+                status="success",
+                summary=f"Retrieved fitness profile & training schedule for '{member.display_name}' (Goal: {prof['primary_goal']}).",
+                source_type="local_database",
+            )
+            return prof, trace, sources
+
+        if tool_name in ("get_daily_nutrition_log", "get_daily_nutrition_summary"):
+            hh, member = _resolve_tool_hh_and_member()
+            if not hh or not member:
+                trace = AssistantToolExecutionTrace(
+                    tool_name=tool_name,
+                    arguments=arguments,
+                    status="error",
+                    summary="No active household member found for daily nutrition log.",
+                    source_type="local_database",
+                )
+                return {"found": False}, trace, []
+            d_str = str(arguments.get("date") or today_iso_str())
+            summary = get_daily_tracker_summary(db, hh, member, date_str=d_str)
+            tots = summary["daily_nutrition"]["totals"]
+            trace = AssistantToolExecutionTrace(
+                tool_name=tool_name,
+                arguments={"member_id": member.id, "date": d_str},
+                status="success",
+                summary=(
+                    f"Retrieved {summary['daily_nutrition']['entry_count']} food log(s) on {d_str}: "
+                    f"{tots.get('energy_kcal') or 0} kcal, {tots.get('protein_g') or 0}g protein."
+                ),
+                source_type="local_database",
+            )
+            return summary, trace, sources
+
+        if tool_name == "log_food_intake":
+            hh, member = _resolve_tool_hh_and_member()
+            if not hh or not member:
+                raise ValueError("Active household member required to log food intake.")
+            food_slug = arguments.get("food_slug")
+            food_query = str(arguments.get("food_query") or arguments.get("food_name") or "").strip()
+            qty = float(arguments.get("quantity") or 1.0)
+            unit_name = str(arguments.get("unit_name") or "standard_serving")
+            meal_category = str(arguments.get("meal_category") or "breakfast")
+            confirmed = bool(arguments.get("confirmed", False))
+
+            if not food_slug and food_query:
+                sr = search_foods(db, q=food_query, page_size=1)
+                if sr.items:
+                    food_slug = sr.items[0].slug
+            if not food_slug:
+                raise ValueError(f"Could not match '{food_query}' to a verified food slug.")
+
+            if not confirmed:
+                trace = AssistantToolExecutionTrace(
+                    tool_name=tool_name,
+                    arguments={
+                        "food_slug": food_slug,
+                        "quantity": qty,
+                        "unit_name": unit_name,
+                        "meal_category": meal_category,
+                        "confirmed": False,
+                    },
+                    status="success",
+                    summary=f"Prepared food log preview for '{food_slug}' ({qty} × {unit_name}) awaiting user confirmation.",
+                    source_type="local_database",
+                )
+                return (
+                    {
+                        "requires_user_confirmation": True,
+                        "proposed_entry": {
+                            "member_name": member.display_name,
+                            "food_slug": food_slug,
+                            "quantity": qty,
+                            "unit_name": unit_name,
+                            "meal_category": meal_category,
+                        },
+                        "message": f"Ready to log {qty} × {unit_name} of '{food_slug}' under {meal_category} for {member.display_name}. Please confirm to save.",
+                    },
+                    trace,
+                    sources,
+                )
+
+            entry = create_daily_food_log_entry(
+                db,
+                hh,
+                member,
+                {
+                    "food_slug": food_slug,
+                    "quantity": qty,
+                    "unit_name": unit_name,
+                    "meal_category": meal_category,
+                    "logged_date": str(arguments.get("date") or today_iso_str()),
+                },
+            )
+            trace = AssistantToolExecutionTrace(
+                tool_name=tool_name,
+                arguments={"food_slug": food_slug, "quantity": qty, "confirmed": True},
+                status="success",
+                summary=f"Logged {entry.food_name} ({entry.grams_equivalent}g) to {meal_category}.",
+                source_type="local_database",
+            )
+            return {"saved": True, "entry": serialize_food_log_entry(entry)}, trace, sources
+
+        if tool_name == "get_water_intake":
+            hh, member = _resolve_tool_hh_and_member()
+            if not hh or not member:
+                raise ValueError("Active household member required for water intake.")
+            d_str = str(arguments.get("date") or today_iso_str())
+            hyd = get_daily_hydration_summary(db, hh, member, date_str=d_str)
+            trace = AssistantToolExecutionTrace(
+                tool_name=tool_name,
+                arguments={"member_id": member.id, "date": d_str},
+                status="success",
+                summary=f"Water intake on {d_str}: {hyd['total_ml']} ml / {hyd['goal_ml']} ml ({hyd['progress_pct']}%).",
+                source_type="local_database",
+            )
+            return hyd, trace, sources
+
+        if tool_name == "log_water_intake":
+            hh, member = _resolve_tool_hh_and_member()
+            if not hh or not member:
+                raise ValueError("Active household member required to log water.")
+            amount_ml = int(arguments.get("amount_ml") or 250)
+            confirmed = bool(arguments.get("confirmed", False))
+            if not confirmed:
+                trace = AssistantToolExecutionTrace(
+                    tool_name=tool_name,
+                    arguments={"amount_ml": amount_ml, "confirmed": False},
+                    status="success",
+                    summary=f"Prepared {amount_ml} ml water entry awaiting user confirmation.",
+                    source_type="local_database",
+                )
+                return (
+                    {
+                        "requires_user_confirmation": True,
+                        "amount_ml": amount_ml,
+                        "message": f"Ready to log {amount_ml} ml of water for {member.display_name}. Please confirm to save.",
+                    },
+                    trace,
+                    sources,
+                )
+            from app.models.entities import WaterIntakeLog
+            w_log = WaterIntakeLog(
+                household_id=hh.id,
+                member_id=member.id,
+                logged_date=today_iso_str(),
+                logged_time=datetime.now(UTC).strftime("%H:%M"),
+                amount_ml=amount_ml,
+                container_type=str(arguments.get("container_type") or "large_glass"),
+            )
+            db.add(w_log)
+            db.commit()
+            hyd = get_daily_hydration_summary(db, hh, member)
+            trace = AssistantToolExecutionTrace(
+                tool_name=tool_name,
+                arguments={"amount_ml": amount_ml, "confirmed": True},
+                status="success",
+                summary=f"Logged {amount_ml} ml water. Total today: {hyd['total_ml']} ml.",
+                source_type="local_database",
+            )
+            return {"saved": True, "hydration": hyd}, trace, sources
+
+        if tool_name == "get_goal_progress":
+            hh, member = _resolve_tool_hh_and_member()
+            if not hh or not member:
+                raise ValueError("Active household member required for goals.")
+            goals = (
+                db.query(FitnessGoal)
+                .filter(FitnessGoal.member_id == member.id)
+                .all()
+            )
+            out_goals = [
+                {
+                    "id": g.id,
+                    "goal_name": g.goal_name,
+                    "goal_type": g.goal_type,
+                    "target_value": g.target_value,
+                    "current_value": g.current_value,
+                    "unit": g.unit,
+                    "status": g.status,
+                }
+                for g in goals
+            ]
+            trace = AssistantToolExecutionTrace(
+                tool_name=tool_name,
+                arguments={"member_id": member.id},
+                status="success",
+                summary=f"Retrieved {len(out_goals)} fitness/nutrition goal(s) for '{member.display_name}'.",
+                source_type="local_database",
+            )
+            return {"goals": out_goals}, trace, sources
+
+        if tool_name == "update_user_goal":
+            _hh, member = _resolve_tool_hh_and_member()
+            if not member:
+                raise ValueError("Active household member required to update goal.")
+            goal_name = str(arguments.get("goal_name") or "Updated Nutrition Goal")
+            target_value = float(arguments.get("target_value") or 100.0)
+            confirmed = bool(arguments.get("confirmed", False))
+            if not confirmed:
+                trace = AssistantToolExecutionTrace(
+                    tool_name=tool_name,
+                    arguments={"goal_name": goal_name, "target_value": target_value, "confirmed": False},
+                    status="success",
+                    summary=f"Prepared goal update ('{goal_name}' -> {target_value}) awaiting user confirmation.",
+                    source_type="local_database",
+                )
+                return (
+                    {
+                        "requires_user_confirmation": True,
+                        "goal_name": goal_name,
+                        "target_value": target_value,
+                    },
+                    trace,
+                    sources,
+                )
+            g = FitnessGoal(
+                member_id=member.id,
+                goal_name=goal_name,
+                goal_type=str(arguments.get("goal_type") or "custom"),
+                start_date=today_iso_str(),
+                target_value=target_value,
+                current_value=0.0,
+                unit=str(arguments.get("unit") or "g"),
+                tracking_frequency="daily",
+                status="active",
+            )
+            db.add(g)
+            db.commit()
+            trace = AssistantToolExecutionTrace(
+                tool_name=tool_name,
+                arguments={"goal_name": goal_name, "target_value": target_value, "confirmed": True},
+                status="success",
+                summary=f"Saved goal '{goal_name}' ({target_value} {g.unit}).",
+                source_type="local_database",
+            )
+            return {"saved": True, "goal_id": g.id}, trace, sources
+
+        if tool_name == "get_habit_history":
+            _hh, member = _resolve_tool_hh_and_member()
+            if not member:
+                raise ValueError("Active household member required for habits.")
+            habits = (
+                db.query(HabitDefinition)
+                .options(joinedload(HabitDefinition.completions))
+                .filter(HabitDefinition.member_id == member.id)
+                .all()
+            )
+            h_list = [
+                {
+                    "id": h.id,
+                    "title": h.title,
+                    "category": h.category,
+                    "frequency": h.frequency,
+                    "total_completions": len([c for c in (h.completions or []) if c.completed]),
+                }
+                for h in habits
+            ]
+            trace = AssistantToolExecutionTrace(
+                tool_name=tool_name,
+                arguments={"member_id": member.id},
+                status="success",
+                summary=f"Retrieved {len(h_list)} tracked habit(s) for '{member.display_name}'.",
+                source_type="local_database",
+            )
+            return {"habits": h_list}, trace, sources
+
+        if tool_name == "get_recipe_suggestions":
+            hh, member = _resolve_tool_hh_and_member()
+            if not hh:
+                raise ValueError("Household context required for recipe suggestions.")
+            disc = discover_and_recommend_recipes(
+                db,
+                hh,
+                member=member,
+                query=arguments.get("query"),
+                meal_type=arguments.get("meal_type"),
+                dietary_preference=arguments.get("dietary_preference"),
+                fitness_goal=arguments.get("fitness_goal"),
+                include_online=(mode != "database_only"),
+            )
+            trace = AssistantToolExecutionTrace(
+                tool_name=tool_name,
+                arguments={"query": arguments.get("query"), "meal_type": arguments.get("meal_type")},
+                status="success",
+                summary=f"Found {len(disc['local_verified_recipes'])} verified local recipe(s) matching profile.",
+                source_type="local_database",
+            )
+            return disc, trace, sources
+
+        if tool_name == "search_online_recipes":
+            if mode == "database_only":
+                trace = AssistantToolExecutionTrace(
+                    tool_name=tool_name,
+                    arguments=arguments,
+                    status="blocked",
+                    summary="Online recipe search is skipped in database_only mode.",
+                    source_type="external_provider",
+                )
+                return {"blocked_by_mode": True}, trace, []
+            q = str(arguments.get("query") or "indian").strip()
+            ext_recs, statuses = search_external_recipe_providers(
+                query=q, dietary_preference=arguments.get("dietary_preference")
+            )
+            for er in ext_recs[:3]:
+                sources.append(
+                    AssistantSourceReference(
+                        title=f"{er['title']} — {er['source_name']}",
+                        source_type="external_provider",
+                        url=er.get("source_url"),
+                        retrieved_at=now_iso,
+                        verification_status="external_recipe",
+                    )
+                )
+            trace = AssistantToolExecutionTrace(
+                tool_name=tool_name,
+                arguments={"query": q},
+                status="success",
+                summary=f"Searched online recipe providers for '{q}' ({len(ext_recs)} result(s)).",
+                source_type="external_provider",
+            )
+            return {"recipes": ext_recs, "provider_statuses": statuses}, trace, sources
+
+        if tool_name == "create_shopping_list":
+            hh, _member = _resolve_tool_hh_and_member()
+            if not hh:
+                raise ValueError("Household context required for shopping list.")
+            recipe_ids = arguments.get("recipe_ids") or []
+            confirmed = bool(arguments.get("confirmed", False))
+            if not recipe_ids:
+                all_recs = db.query(Recipe.id).limit(2).all()
+                recipe_ids = [r[0] for r in all_recs]
+            if not confirmed:
+                trace = AssistantToolExecutionTrace(
+                    tool_name=tool_name,
+                    arguments={"recipe_ids": recipe_ids, "confirmed": False},
+                    status="success",
+                    summary=f"Prepared shopping list consolidation preview for recipe IDs {recipe_ids} (awaiting confirmation).",
+                    source_type="local_database",
+                )
+                return (
+                    {
+                        "requires_user_confirmation": True,
+                        "recipe_ids": recipe_ids,
+                        "message": "Ready to consolidate missing ingredients into your Smart Shopping List. Confirm to save.",
+                    },
+                    trace,
+                    sources,
+                )
+            s_out = add_recipe_ingredients_to_shopping_list(
+                db, hh, recipe_ids=[int(x) for x in recipe_ids]
+            )
+            trace = AssistantToolExecutionTrace(
+                tool_name=tool_name,
+                arguments={"recipe_ids": recipe_ids, "confirmed": True},
+                status="success",
+                summary=f"Consolidated {s_out['total_items']} ingredient(s) into Smart Shopping List.",
+                source_type="local_database",
+            )
+            return s_out, trace, sources
+
+        if tool_name == "get_available_pantry_items":
+            hh, _member = _resolve_tool_hh_and_member()
+            if not hh:
+                raise ValueError("Household context required for pantry.")
+            p_items = (
+                db.query(PantryItem)
+                .filter(PantryItem.household_id == hh.id, PantryItem.in_stock.is_(True))
+                .all()
+            )
+            p_out = [
+                {
+                    "ingredient_name": p.ingredient_name,
+                    "food_slug": p.food_slug,
+                    "available_quantity": p.available_quantity,
+                    "unit_name": p.unit_name,
+                    "expiry_date": p.expiry_date,
+                }
+                for p in p_items
+            ]
+            trace = AssistantToolExecutionTrace(
+                tool_name=tool_name,
+                arguments={},
+                status="success",
+                summary=f"Retrieved {len(p_out)} available pantry item(s).",
+                source_type="local_database",
+            )
+            return {"pantry_items": p_out}, trace, sources
+
+        if tool_name == "get_protein_comparisons":
+            hh, _member = _resolve_tool_hh_and_member()
+            if not hh:
+                raise ValueError("Household context required for protein comparisons.")
+            prot_res = get_indian_protein_intelligence(
+                db, hh, dietary_filter=arguments.get("dietary_filter")
+            )
+            trace = AssistantToolExecutionTrace(
+                tool_name=tool_name,
+                arguments={"dietary_filter": arguments.get("dietary_filter")},
+                status="success",
+                summary=f"Compared {len(prot_res['items'])} Indian protein sources by protein/100g and cost per 10g protein.",
+                source_type="local_database",
+            )
+            return {"items": prot_res["items"][:10]}, trace, sources
+
+        if tool_name == "get_mess_menu":
+            hh, _member = _resolve_tool_hh_and_member()
+            if not hh:
+                raise ValueError("Household context required for mess menus.")
+            menus = (
+                db.query(MessMenuRecord)
+                .filter(MessMenuRecord.household_id == hh.id)
+                .order_by(MessMenuRecord.id.desc())
+                .limit(5)
+                .all()
+            )
+            m_out = [
+                {
+                    "id": m.id,
+                    "title": m.title,
+                    "institution_or_canteen": m.institution_or_canteen,
+                    "raw_menu_text": m.raw_menu_text,
+                    "matched_dishes": m.matched_dishes_json,
+                }
+                for m in menus
+            ]
+            trace = AssistantToolExecutionTrace(
+                tool_name=tool_name,
+                arguments={},
+                status="success",
+                summary=f"Retrieved {len(m_out)} saved college/hostel mess menu(s).",
+                source_type="local_database",
+            )
+            return {"menus": m_out}, trace, sources
+
+        if tool_name == "get_fitness_progress":
+            hh, member = _resolve_tool_hh_and_member()
+            if not hh or not member:
+                raise ValueError("Active household member required for fitness progress.")
+            overview = get_analytics_overview(db, hh, member, days=14)
+            trace = AssistantToolExecutionTrace(
+                tool_name=tool_name,
+                arguments={"member_id": member.id},
+                status="success",
+                summary=f"Retrieved 14-day nutrition, hydration, and training analytics for '{member.display_name}'.",
+                source_type="local_database",
+            )
+            return overview["summary_metrics"], trace, sources
+
     except Exception as exc:
         trace = AssistantToolExecutionTrace(
             tool_name=tool_name,
@@ -1198,7 +1727,34 @@ def _orchestrate_deterministic_tool_calls(
             {"condition_code": cond_code, "food_slug": target_slug},
         )
 
-    # 4. If mode is explicitly 'online_search', also invoke external web search adapter
+    # 4. GharPlate 3.0 Ecosystem Intent Routing (Daily Tracker, Water, Fitness, Goals, Habits, Pantry, Shopping, Protein, Mess)
+    base_ctx_args = {
+        "household_token": ctx.household_token if ctx else None,
+        "member_id": ctx.member_id if ctx else None,
+    }
+    if any(kw in msg_l for kw in ("consumed today", "logged today", "my daily", "how much protein have i", "calories today", "food log", "food diary")):
+        collected_data["daily_nutrition_summary"] = _run("get_daily_nutrition_summary", base_ctx_args)
+    if any(kw in msg_l for kw in ("water", "hydration", "hydrated", "drank")):
+        collected_data["water_intake"] = _run("get_water_intake", base_ctx_args)
+    if any(kw in msg_l for kw in ("fitness profile", "training schedule", "workout", "gym goal", "muscle", "fitness progress")):
+        collected_data["fitness_profile"] = _run("get_fitness_profile", base_ctx_args)
+        collected_data["fitness_progress"] = _run("get_fitness_progress", base_ctx_args)
+    if any(kw in msg_l for kw in ("goal", "target")):
+        collected_data["goal_progress"] = _run("get_goal_progress", base_ctx_args)
+    if "habit" in msg_l:
+        collected_data["habit_history"] = _run("get_habit_history", base_ctx_args)
+    if any(kw in msg_l for kw in ("cheap protein", "low-cost", "affordable protein", "cost per", "protein comparison", "budget")):
+        collected_data["protein_comparisons"] = _run("get_protein_comparisons", base_ctx_args)
+    if any(kw in msg_l for kw in ("pantry", "available at home")):
+        collected_data["pantry_items"] = _run("get_available_pantry_items", base_ctx_args)
+    if any(kw in msg_l for kw in ("shopping list", "grocery", "ingredients do i need")):
+        collected_data["shopping_list_preview"] = _run("create_shopping_list", {**base_ctx_args, "confirmed": False})
+    if any(kw in msg_l for kw in ("recipe", "suggest a", "meal for my")):
+        collected_data["recipe_suggestions"] = _run("get_recipe_suggestions", {**base_ctx_args, "query": None})
+    if "mess" in msg_l or "canteen" in msg_l or "hostel" in msg_l:
+        collected_data["mess_menus"] = _run("get_mess_menu", base_ctx_args)
+
+    # 5. If mode is explicitly 'online_search', also invoke external web search adapter
     if mode == "online_search":
         web_q = (
             f"{collected_data.get('food_details', {}).get('brand', '')} "
@@ -1379,6 +1935,55 @@ def _synthesize_grounded_response(
                 lines.append(f"  - [{r['title']}]({r['url']}) — {r['snippet'][:140]} *(via {r['provider']})*")
         elif p_stat.get("message"):
             lines.append(f"- **Web Search Status:** {p_stat['message']}")
+
+    if collected_data.get("daily_nutrition_summary"):
+        ds = collected_data["daily_nutrition_summary"]
+        dn = ds.get("daily_nutrition") or {}
+        tots = dn.get("totals") or {}
+        targs = ds.get("targets") or {}
+        lines.append(
+            f"- **Today's Logged Nutrition ({ds.get('date')} — {dn.get('entry_count', 0)} item(s)):** "
+            f"Energy: **{tots.get('energy_kcal') or 0} / {targs.get('calories_kcal')} kcal** • "
+            f"Protein: **{tots.get('protein_g') or 0} / {targs.get('protein_g')} g** • "
+            f"Fibre: **{tots.get('fibre_g') or 0} / {targs.get('fiber_g')} g**."
+        )
+        if dn.get("has_incomplete_entries"):
+            lines.append(
+                f"  - *Completeness Note:* {', '.join(dn.get('incomplete_entry_names') or [])} had unmeasured (`NULL`) nutrients which are never counted as zero."
+            )
+
+    if collected_data.get("water_intake"):
+        wi = collected_data["water_intake"]
+        lines.append(
+            f"- **Hydration Progress ({wi.get('date')}):** **{wi.get('total_ml')} ml / {wi.get('goal_ml')} ml** ({wi.get('progress_pct')}% complete; {wi.get('remaining_ml')} ml remaining)."
+        )
+        if wi.get("fluid_medical_notice"):
+            lines.append(f"  - ⚠️ *{wi['fluid_medical_notice']}*")
+
+    if collected_data.get("protein_comparisons"):
+        p_items = (collected_data["protein_comparisons"].get("items") or [])[:4]
+        if p_items:
+            lines.append("- **Top Affordable Indian Protein Sources (Verified IFCT 2017):**")
+            for pi in p_items:
+                lines.append(
+                    f"  - **{pi['name_en']}**: **{pi['protein_per_100g']}g protein/100g** ({pi['protein_per_serving_g']}g per serving) • "
+                    f"Cost per 10g protein: **₹{pi.get('cost_per_10g_protein_inr') or 'N/A'}**"
+                )
+
+    if collected_data.get("recipe_suggestions"):
+        recs = (collected_data["recipe_suggestions"].get("local_verified_recipes") or [])[:3]
+        if recs:
+            lines.append("- **Personalised GharPlate Recipe Suggestions:**")
+            for r in recs:
+                macros = r.get("per_serving_macros") or {}
+                lines.append(
+                    f"  - **{r['title']}** ({macros.get('energy_kcal')} kcal, {macros.get('protein_g')}g protein/serving) — {r['why_recommended']}"
+                )
+
+    if collected_data.get("shopping_list_preview"):
+        sl = collected_data["shopping_list_preview"]
+        if sl.get("requires_user_confirmation"):
+            lines.append(f"- **Smart Shopping List Preview:** {sl.get('message')}")
 
     if not lines:
         sr = (collected_data.get("search_results") or {}).get("items") or []

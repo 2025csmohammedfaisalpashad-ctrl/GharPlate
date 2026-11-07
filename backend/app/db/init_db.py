@@ -9,26 +9,41 @@ from sqlalchemy.orm import Session
 from app.models.entities import (
     AssistantConversation,
     AssistantMessage,
+    BodyMeasurementLog,
     ConditionConflictRule,
     ConditionFoodMapping,
+    DailyFoodLogEntry,
     DataSource,
     ExternalLookupCache,
+    FitnessGoal,
     FoodAlias,
     FoodCategory,
     FoodItem,
     FoodItemTag,
     FoodNutrientValue,
     FoodTag,
+    HabitCompletionLog,
+    HabitDefinition,
     HealthCondition,
+    HydrationSetting,
+    LocalFoodPrice,
+    MemberFitnessProfile,
+    MessMenuRecord,
     NutrientDefinition,
     NutritionRule,
+    PantryItem,
     ProductDataConflict,
     ProductFieldProvenance,
     Recipe,
     RecipeIngredient,
+    SavedMealTemplate,
     ServingConversion,
+    ShoppingList,
+    ShoppingListItem,
+    TrainingScheduleEntry,
     UserAccount,
     UserSession,
+    WaterIntakeLog,
 )
 from app.db.seed_catalog import (
     DATA_SOURCES_SEED,
@@ -103,15 +118,60 @@ def ensure_image_and_intelligence_columns(db: Session) -> None:
     except Exception:
         db.rollback()
 
+    try:
+        db.execute(
+            text(
+                "ALTER TABLE household_members ADD COLUMN primary_goal VARCHAR(80) DEFAULT 'maintain_balanced_diet' NOT NULL"
+            )
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+
+    for r_col, r_type in [
+        ("image_url", "VARCHAR(500)"),
+        ("prep_time_minutes", "INTEGER"),
+        ("cook_time_minutes", "INTEGER"),
+        ("estimated_cost_inr", "FLOAT"),
+        ("source_type", "VARCHAR(50) DEFAULT 'gharplate_verified'"),
+        ("source_name", "VARCHAR(200) DEFAULT 'GharPlate IFCT 2017 / ICMR-NIN DGI 2024 Kitchen'"),
+        ("source_url", "VARCHAR(500)"),
+        ("dietary_tags", "JSON DEFAULT '[]'"),
+        ("suitable_goals", "JSON DEFAULT '[]'"),
+    ]:
+        try:
+            db.execute(text(f"ALTER TABLE recipes ADD COLUMN {r_col} {r_type}"))
+            db.commit()
+        except Exception:
+            db.rollback()
+
     # Ensure new tables exist on existing SQLite files
     bind = db.get_bind()
-    UserAccount.__table__.create(bind=bind, checkfirst=True)
-    UserSession.__table__.create(bind=bind, checkfirst=True)
-    AssistantConversation.__table__.create(bind=bind, checkfirst=True)
-    AssistantMessage.__table__.create(bind=bind, checkfirst=True)
-    ProductFieldProvenance.__table__.create(bind=bind, checkfirst=True)
-    ProductDataConflict.__table__.create(bind=bind, checkfirst=True)
-    ExternalLookupCache.__table__.create(bind=bind, checkfirst=True)
+    for tbl_cls in (
+        UserAccount,
+        UserSession,
+        AssistantConversation,
+        AssistantMessage,
+        ProductFieldProvenance,
+        ProductDataConflict,
+        ExternalLookupCache,
+        MemberFitnessProfile,
+        TrainingScheduleEntry,
+        FitnessGoal,
+        HabitDefinition,
+        HabitCompletionLog,
+        BodyMeasurementLog,
+        DailyFoodLogEntry,
+        SavedMealTemplate,
+        WaterIntakeLog,
+        HydrationSetting,
+        PantryItem,
+        ShoppingList,
+        ShoppingListItem,
+        LocalFoodPrice,
+        MessMenuRecord,
+    ):
+        tbl_cls.__table__.create(bind=bind, checkfirst=True)
 
 
 def ensure_pineapple_cake_regression_record(
@@ -575,36 +635,149 @@ def seed_database(db: Session, write_report: bool = True) -> dict[str, Any]:
                 )
             )
 
-    if db.query(Recipe).count() == 0 and "ragi-finger-millet" in foods_by_slug:
-        sample_recipe = Recipe(
-            household_token="system_template",
-            title="Karnataka Ragi Mudde & Palak Toor Dal Sambar",
-            description="Balanced household meal pairing finger millet (ragi) with pigeon pea (toor dal), spinach (palak), and tomato.",
-            servings=2.0,
-            meal_type="lunch",
-            is_system_template=True,
-            instructions_notes="Cook ragi flour in boiling water to form mudde; serve alongside pressure-cooked toor dal sambar with spinach and tomatoes.",
+    system_recipes_seed = [
+        {
+            "title": "Karnataka Ragi Mudde & Palak Toor Dal Sambar",
+            "description": "Balanced South Indian meal pairing calcium-rich finger millet (ragi) with pigeon pea (toor dal), spinach (palak), and tomato.",
+            "servings": 2.0,
+            "meal_type": "lunch",
+            "prep_time_minutes": 15,
+            "cook_time_minutes": 25,
+            "estimated_cost_inr": 55.0,
+            "image_url": "/images/foods/cereals-millets/ragi-finger-millet.webp",
+            "dietary_tags": ["vegetarian", "vegan", "high_calcium", "high_fibre", "south_indian"],
+            "suitable_goals": ["manage_health_condition", "improve_everyday_nutrition", "maintain_balanced_diet", "lose_body_fat"],
+            "instructions_notes": "Whisk ragi flour into boiling salted water and knead over low heat into smooth mudde balls. Serve hot with pressure-cooked toor dal, palak, tomato, and onion sambar.",
+            "ingredients": [
+                ("ragi-finger-millet", 1.0, "100g", 100.0),
+                ("toor-dal-red-gram", 1.0, "standard_serving", 60.0),
+                ("spinach-palak", 1.0, "100g", 100.0),
+                ("tomato-ripe", 1.0, "standard_serving", 85.0),
+                ("onion-big", 1.0, "standard_serving", 80.0),
+            ],
+        },
+        {
+            "title": "High-Protein Soya Chunk, Paneer & Brown Rice Gym Bowl",
+            "description": "Affordable vegetarian muscle-building meal combining defatted soya chunks, fresh paneer, brown rice, and spinach.",
+            "servings": 2.0,
+            "meal_type": "post_workout",
+            "prep_time_minutes": 10,
+            "cook_time_minutes": 20,
+            "estimated_cost_inr": 85.0,
+            "image_url": "/images/foods/indian-dishes/palak-paneer-curry.webp",
+            "dietary_tags": ["vegetarian", "high_protein", "budget_friendly", "gym_friendly"],
+            "suitable_goals": ["build_muscle", "improve_strength", "gain_weight", "improve_general_fitness"],
+            "instructions_notes": "Boil and squeeze soya chunks, lightly pan-sear with paneer cubes, tomato, onion, and spinach, and serve over steamed brown rice with curd.",
+            "ingredients": [
+                ("soya-chunks-textured-veg-protein", 1.0, "100g", 100.0),
+                ("paneer-cottage-cheese-cow", 1.0, "100g", 100.0),
+                ("rice-brown-raw", 1.0, "100g", 100.0),
+                ("spinach-palak", 1.0, "100g", 100.0),
+                ("tomato-ripe", 1.0, "standard_serving", 85.0),
+            ],
+        },
+        {
+            "title": "Moong Dal & Vegetable Comfort Khichdi with Curd",
+            "description": "Gentle, easily digestible one-pot yellow moong dal and rice khichdi paired with probiotic plain curd.",
+            "servings": 2.0,
+            "meal_type": "dinner",
+            "prep_time_minutes": 10,
+            "cook_time_minutes": 20,
+            "estimated_cost_inr": 48.0,
+            "image_url": "/images/foods/indian-dishes/khichdi-moong-dal-rice.webp",
+            "dietary_tags": ["vegetarian", "gentle_digestion", "comfort_meal"],
+            "suitable_goals": ["manage_health_condition", "maintain_balanced_diet", "improve_everyday_nutrition"],
+            "instructions_notes": "Pressure-cook washed moong dal, rice, and diced carrots with turmeric and cumin until soft; serve warm with fresh curd.",
+            "ingredients": [
+                ("khichdi-moong-dal-rice", 2.0, "standard_serving", 400.0),
+                ("curd-dahi-cow-milk", 1.0, "katori", 150.0),
+                ("carrot-orange", 1.0, "100g", 100.0),
+            ],
+        },
+        {
+            "title": "Sprouted Moong, Chickpea & Peanut Protein Chaat",
+            "description": "No-cook hostel & student friendly high-protein snack with green gram, kabuli chana, roasted peanuts, tomato, and onion.",
+            "servings": 2.0,
+            "meal_type": "pre_workout",
+            "prep_time_minutes": 12,
+            "cook_time_minutes": 15,
+            "estimated_cost_inr": 42.0,
+            "image_url": "/images/foods/pulses-legumes/green-gram-whole-moong.webp",
+            "dietary_tags": ["vegetarian", "vegan", "high_protein", "high_fibre", "hostel_friendly"],
+            "suitable_goals": ["build_muscle", "lose_body_fat", "improve_endurance", "improve_general_fitness"],
+            "instructions_notes": "Toss steamed sprouted moong and boiled chickpeas with roasted peanuts, chopped onion, tomato, and lemon juice.",
+            "ingredients": [
+                ("green-gram-whole-moong", 1.0, "100g", 100.0),
+                ("chickpea-kabuli-chana", 1.0, "standard_serving", 60.0),
+                ("groundnut-peanut-raw", 1.0, "standard_serving", 30.0),
+                ("tomato-ripe", 1.0, "standard_serving", 85.0),
+                ("onion-big", 1.0, "standard_serving", 80.0),
+            ],
+        },
+        {
+            "title": "South Indian Steamed Idli, Sambar & Egg Protein Plate",
+            "description": "Balanced breakfast combining fermented steamed idlis, lentil vegetable sambar, and boiled eggs.",
+            "servings": 2.0,
+            "meal_type": "breakfast",
+            "prep_time_minutes": 10,
+            "cook_time_minutes": 15,
+            "estimated_cost_inr": 65.0,
+            "image_url": "/images/foods/indian-dishes/idli-steamed-rice-lentil.webp",
+            "dietary_tags": ["eggetarian", "high_protein", "south_indian", "fermented"],
+            "suitable_goals": ["build_muscle", "improve_strength", "maintain_current_fitness", "improve_everyday_nutrition"],
+            "instructions_notes": "Serve warm steamed rice-lentil idlis with vegetable toor dal sambar and two hard-boiled poultry eggs.",
+            "ingredients": [
+                ("idli-steamed-rice-lentil", 2.0, "standard_serving", 240.0),
+                ("sambar-lentil-vegetable-stew", 1.0, "katori", 150.0),
+                ("egg-poultry-whole-boiled", 2.0, "standard_serving", 100.0),
+            ],
+        },
+    ]
+
+    for s_rec in system_recipes_seed:
+        existing_rec = (
+            db.query(Recipe)
+            .filter(
+                Recipe.title == s_rec["title"],
+                Recipe.is_system_template.is_(True),
+            )
+            .first()
         )
-        db.add(sample_recipe)
-        db.flush()
-        for slug, qty, unit, grams in [
-            ("ragi-finger-millet", 100.0, "100g", 100.0),
-            ("toor-dal-red-gram", 60.0, "standard_serving", 60.0),
-            ("spinach-palak", 100.0, "100g", 100.0),
-            ("tomato-ripe", 85.0, "standard_serving", 85.0),
-            ("onion-big", 80.0, "standard_serving", 80.0),
-        ]:
-            f_obj = foods_by_slug.get(slug)
-            if f_obj:
-                db.add(
-                    RecipeIngredient(
-                        recipe_id=sample_recipe.id,
-                        food_id=f_obj.id,
-                        quantity=qty,
-                        unit_name=unit,
-                        grams_equivalent=grams,
-                    )
+        if not existing_rec:
+            new_rec = Recipe(
+                household_token="system_template",
+                title=s_rec["title"],
+                description=s_rec["description"],
+                servings=s_rec["servings"],
+                meal_type=s_rec["meal_type"],
+                is_system_template=True,
+                instructions_notes=s_rec["instructions_notes"],
+                image_url=s_rec["image_url"],
+                prep_time_minutes=s_rec["prep_time_minutes"],
+                cook_time_minutes=s_rec["cook_time_minutes"],
+                estimated_cost_inr=s_rec["estimated_cost_inr"],
+                source_type="gharplate_verified",
+                source_name="GharPlate IFCT 2017 / ICMR-NIN DGI 2024 Kitchen",
+                source_url="https://www.nin.res.in/",
+                dietary_tags=s_rec["dietary_tags"],
+                suitable_goals=s_rec["suitable_goals"],
+            )
+            db.add(new_rec)
+            db.flush()
+            for slug, qty, unit, grams in s_rec["ingredients"]:
+                f_obj = foods_by_slug.get(slug) or (
+                    db.query(FoodItem).filter(FoodItem.slug == slug).first()
                 )
+                if f_obj:
+                    db.add(
+                        RecipeIngredient(
+                            recipe_id=new_rec.id,
+                            food_id=f_obj.id,
+                            quantity=qty,
+                            unit_name=unit,
+                            grams_equivalent=grams,
+                        )
+                    )
 
     db.commit()
 

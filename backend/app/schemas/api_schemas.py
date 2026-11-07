@@ -396,6 +396,7 @@ class HouseholdMemberCreate(BaseModel):
     display_name: str = Field(..., min_length=1, max_length=100)
     age_group: str = Field(default="adult")  # child, adolescent, adult, older_adult
     dietary_preference: str = Field(default="vegetarian")
+    primary_goal: str = Field(default="maintain_balanced_diet")
     selected_conditions: list[str] = Field(default_factory=list)
     allergies: list[str] = Field(default_factory=list)
     intolerances: list[str] = Field(default_factory=list)

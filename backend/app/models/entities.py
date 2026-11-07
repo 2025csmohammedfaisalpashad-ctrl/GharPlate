@@ -624,9 +624,54 @@ class HouseholdMember(Base):
     intolerances: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     dietary_restrictions: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     food_preferences: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    primary_goal: Mapped[str] = mapped_column(
+        String(80), default="maintain_balanced_diet", nullable=False
+    )  # manage_health_condition, build_muscle, gain_weight, lose_body_fat, improve_strength, improve_endurance, improve_general_fitness, maintain_current_fitness, improve_everyday_nutrition, improve_hydration_habits, maintain_balanced_diet
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
 
     household: Mapped["Household"] = relationship("Household", back_populates="members")
+    fitness_profile: Mapped[Optional["MemberFitnessProfile"]] = relationship(
+        "MemberFitnessProfile",
+        back_populates="member",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    training_schedule: Mapped[list["TrainingScheduleEntry"]] = relationship(
+        "TrainingScheduleEntry",
+        back_populates="member",
+        cascade="all, delete-orphan",
+    )
+    fitness_goals: Mapped[list["FitnessGoal"]] = relationship(
+        "FitnessGoal",
+        back_populates="member",
+        cascade="all, delete-orphan",
+    )
+    habits: Mapped[list["HabitDefinition"]] = relationship(
+        "HabitDefinition",
+        back_populates="member",
+        cascade="all, delete-orphan",
+    )
+    measurements: Mapped[list["BodyMeasurementLog"]] = relationship(
+        "BodyMeasurementLog",
+        back_populates="member",
+        cascade="all, delete-orphan",
+    )
+    food_logs: Mapped[list["DailyFoodLogEntry"]] = relationship(
+        "DailyFoodLogEntry",
+        back_populates="member",
+        cascade="all, delete-orphan",
+    )
+    water_logs: Mapped[list["WaterIntakeLog"]] = relationship(
+        "WaterIntakeLog",
+        back_populates="member",
+        cascade="all, delete-orphan",
+    )
+    hydration_setting: Mapped[Optional["HydrationSetting"]] = relationship(
+        "HydrationSetting",
+        back_populates="member",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
 
 
 class Recipe(Base):
@@ -642,9 +687,22 @@ class Recipe(Base):
     servings: Mapped[float] = mapped_column(Float, default=2.0, nullable=False)
     meal_type: Mapped[str] = mapped_column(
         String(40), default="lunch", nullable=False
-    )  # breakfast, lunch, dinner, snack
+    )  # breakfast, lunch, dinner, snack, pre_workout, post_workout
     is_system_template: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     instructions_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    image_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    prep_time_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cook_time_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    estimated_cost_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
+    source_type: Mapped[str] = mapped_column(
+        String(50), default="gharplate_verified", nullable=False
+    )  # gharplate_verified, user_saved, generated_from_db, external_attributed
+    source_name: Mapped[str] = mapped_column(
+        String(200), default="GharPlate IFCT 2017 / ICMR-NIN DGI 2024 Kitchen", nullable=False
+    )
+    source_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    dietary_tags: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    suitable_goals: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
 
@@ -670,3 +728,484 @@ class RecipeIngredient(Base):
 
     recipe: Mapped["Recipe"] = relationship("Recipe", back_populates="ingredients")
     food: Mapped["FoodItem"] = relationship("FoodItem")
+
+
+class MemberFitnessProfile(Base):
+    """
+    Stores fitness profile, anthropometrics (optional), training preferences, and user-editable daily nutrition targets
+    for a HouseholdMember. Coexists seamlessly with medical conditions on the same member.
+    """
+    __tablename__ = "member_fitness_profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    member_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("household_members.id", ondelete="CASCADE"),
+        unique=True,
+        nullable=False,
+        index=True,
+    )
+    age_years: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    height_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    current_weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    target_weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fitness_goal: Mapped[str] = mapped_column(
+        String(80), default="maintain_balanced_diet", nullable=False
+    )
+    training_frequency_days_per_week: Mapped[int] = mapped_column(
+        Integer, default=3, nullable=False
+    )
+    training_type: Mapped[str] = mapped_column(
+        String(80), default="mixed_fitness", nullable=False
+    )  # strength_training, running_endurance, yoga_mobility, sports, walking, mixed_fitness, none
+    typical_workout_duration_min: Mapped[int] = mapped_column(
+        Integer, default=45, nullable=False
+    )
+    preferred_training_time: Mapped[str] = mapped_column(
+        String(50), default="morning", nullable=False
+    )  # early_morning, morning, afternoon, evening
+    daily_activity_level: Mapped[str] = mapped_column(
+        String(50), default="moderately_active", nullable=False
+    )  # sedentary, lightly_active, moderately_active, active, very_active
+    daily_food_budget_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
+    optional_measurements: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict, nullable=False
+    )
+    target_calories_kcal: Mapped[float | None] = mapped_column(Float, nullable=True)
+    target_protein_g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    target_carbs_g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    target_fat_g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    target_fiber_g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    goal_start_date: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    timezone_str: Mapped[str] = mapped_column(
+        String(64), default="Asia/Kolkata", nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utc_now, onupdate=utc_now, nullable=False
+    )
+
+    member: Mapped["HouseholdMember"] = relationship(
+        "HouseholdMember", back_populates="fitness_profile"
+    )
+
+
+class TrainingScheduleEntry(Base):
+    """
+    Weekly training & rest day schedule (Monday through Sunday) for a HouseholdMember.
+    """
+    __tablename__ = "training_schedule_entries"
+    __table_args__ = (
+        UniqueConstraint("member_id", "day_of_week", name="uq_member_training_day"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    member_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("household_members.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    day_of_week: Mapped[str] = mapped_column(
+        String(20), nullable=False
+    )  # monday, tuesday, wednesday, thursday, friday, saturday, sunday
+    is_training_day: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    workout_type: Mapped[str] = mapped_column(
+        String(100), default="Rest & Recovery", nullable=False
+    )
+    workout_time: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    duration_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    notes: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    member: Mapped["HouseholdMember"] = relationship(
+        "HouseholdMember", back_populates="training_schedule"
+    )
+
+
+class FitnessGoal(Base):
+    """
+    User-defined personal fitness or nutrition goal with configurable targets and progress tracking.
+    """
+    __tablename__ = "fitness_goals"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    member_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("household_members.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    goal_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    goal_type: Mapped[str] = mapped_column(
+        String(60), nullable=False
+    )  # protein_intake, energy_intake, fiber_intake, water_habit, food_logging, training_consistency, weight_record, custom
+    start_date: Mapped[str] = mapped_column(String(20), nullable=False)
+    target_date: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    target_value: Mapped[float] = mapped_column(Float, nullable=False)
+    current_value: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    unit: Mapped[str] = mapped_column(String(40), nullable=False)
+    tracking_frequency: Mapped[str] = mapped_column(
+        String(40), default="daily", nullable=False
+    )  # daily, weekly, monthly
+    status: Mapped[str] = mapped_column(
+        String(40), default="active", nullable=False
+    )  # active, completed, paused
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utc_now, onupdate=utc_now, nullable=False
+    )
+
+    member: Mapped["HouseholdMember"] = relationship(
+        "HouseholdMember", back_populates="fitness_goals"
+    )
+
+
+class HabitDefinition(Base):
+    """
+    Gentle, non-shaming habit definition for daily/weekly wellness & nutrition routines.
+    """
+    __tablename__ = "habit_definitions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    member_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("household_members.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    category: Mapped[str] = mapped_column(
+        String(60), default="nutrition", nullable=False
+    )  # hydration, nutrition, training, home_cooking, health_routine
+    frequency: Mapped[str] = mapped_column(
+        String(40), default="daily", nullable=False
+    )  # daily, weekdays, training_days, weekly
+    reminder_time: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+
+    member: Mapped["HouseholdMember"] = relationship(
+        "HouseholdMember", back_populates="habits"
+    )
+    completions: Mapped[list["HabitCompletionLog"]] = relationship(
+        "HabitCompletionLog",
+        back_populates="habit",
+        cascade="all, delete-orphan",
+    )
+
+
+class HabitCompletionLog(Base):
+    """
+    Records daily completion of a HabitDefinition by date (YYYY-MM-DD).
+    """
+    __tablename__ = "habit_completion_logs"
+    __table_args__ = (
+        UniqueConstraint("habit_id", "logged_date", name="uq_habit_completion_date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    habit_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("habit_definitions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    member_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("household_members.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    logged_date: Mapped[str] = mapped_column(String(20), index=True, nullable=False)
+    completed: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    completed_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+
+    habit: Mapped["HabitDefinition"] = relationship(
+        "HabitDefinition", back_populates="completions"
+    )
+
+
+class BodyMeasurementLog(Base):
+    """
+    Optional historical body measurement and workout milestone log.
+    """
+    __tablename__ = "body_measurement_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    member_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("household_members.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    logged_date: Mapped[str] = mapped_column(String(20), index=True, nullable=False)
+    weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    waist_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    chest_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    arm_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    hip_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    workout_completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    milestone_note: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+
+    member: Mapped["HouseholdMember"] = relationship(
+        "HouseholdMember", back_populates="measurements"
+    )
+
+
+class DailyFoodLogEntry(Base):
+    """
+    Persistent Daily Food Diary entry with immutable nutrient snapshot at the time of recording.
+    Preserves NULL for unmeasured nutrients (never converts unknown nutrients to 0).
+    """
+    __tablename__ = "daily_food_log_entries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    household_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("households.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    member_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("household_members.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    logged_date: Mapped[str] = mapped_column(String(20), index=True, nullable=False)  # YYYY-MM-DD
+    meal_category: Mapped[str] = mapped_column(
+        String(40), index=True, nullable=False
+    )  # early_morning, breakfast, mid_morning_snack, lunch, evening_snack, pre_workout, post_workout, dinner, other
+    logged_time: Mapped[str | None] = mapped_column(String(20), nullable=True)  # HH:MM if provided
+
+    food_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("food_items.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    recipe_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("recipes.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    food_slug: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    food_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    entry_source_type: Mapped[str] = mapped_column(
+        String(50), default="food_database", nullable=False
+    )  # food_database, barcode_scan, ocr_scan, recipe_calculator, mess_analyzer, family_meal, manual_entry
+    quantity: Mapped[float] = mapped_column(Float, nullable=False)
+    unit_name: Mapped[str] = mapped_column(String(60), nullable=False)
+    grams_equivalent: Mapped[float] = mapped_column(Float, nullable=False)
+
+    # Historical Nutrient Snapshot (NULL = unmeasured/unknown, NEVER 0)
+    energy_kcal: Mapped[float | None] = mapped_column(Float, nullable=True)
+    protein_g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    carbs_g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sugars_total_g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sugars_added_g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fat_total_g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fat_saturated_g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fibre_g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sodium_mg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    calcium_mg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    iron_mg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    potassium_mg: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    nutrient_snapshot_json: Mapped[dict[str, float | None]] = mapped_column(
+        JSON, default=dict, nullable=False
+    )
+    missing_nutrient_codes: Mapped[list[str]] = mapped_column(
+        JSON, default=list, nullable=False
+    )
+    completeness_pct: Mapped[float] = mapped_column(Float, default=100.0, nullable=False)
+    source_citation: Mapped[str] = mapped_column(
+        String(255), default="ICMR-NIN IFCT 2017", nullable=False
+    )
+    notes: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+
+    member: Mapped["HouseholdMember"] = relationship(
+        "HouseholdMember", back_populates="food_logs"
+    )
+
+
+class SavedMealTemplate(Base):
+    """
+    Reusable meal template saved from the Daily Food Diary so frequently consumed meals can be logged in 1 click.
+    """
+    __tablename__ = "saved_meal_templates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    household_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("households.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    member_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("household_members.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    meal_category: Mapped[str] = mapped_column(String(40), default="breakfast", nullable=False)
+    items_json: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+
+
+class WaterIntakeLog(Base):
+    """
+    Persistent water and hydration intake record with container type, ml amount, date, and timestamp.
+    """
+    __tablename__ = "water_intake_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    household_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("households.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    member_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("household_members.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    logged_date: Mapped[str] = mapped_column(String(20), index=True, nullable=False)
+    logged_time: Mapped[str] = mapped_column(String(20), nullable=False)  # HH:MM
+    amount_ml: Mapped[int] = mapped_column(Integer, nullable=False)
+    container_type: Mapped[str] = mapped_column(
+        String(50), default="glass", nullable=False
+    )  # small_glass, large_glass, water_bottle, custom_container
+    notes: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+
+    member: Mapped["HouseholdMember"] = relationship(
+        "HouseholdMember", back_populates="water_logs"
+    )
+
+
+class HydrationSetting(Base):
+    """
+    Member-specific configurable hydration target and non-intrusive reminder settings.
+    """
+    __tablename__ = "hydration_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    member_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("household_members.id", ondelete="CASCADE"),
+        unique=True,
+        nullable=False,
+        index=True,
+    )
+    daily_goal_ml: Mapped[int] = mapped_column(Integer, default=2250, nullable=False)
+    preferred_container: Mapped[str] = mapped_column(
+        String(50), default="large_glass", nullable=False
+    )
+    reminders_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    reminder_interval_minutes: Mapped[int] = mapped_column(Integer, default=90, nullable=False)
+    reminder_start_time: Mapped[str] = mapped_column(String(10), default="08:00", nullable=False)
+    reminder_end_time: Mapped[str] = mapped_column(String(10), default="21:00", nullable=False)
+    quiet_hours_start: Mapped[str] = mapped_column(String(10), default="22:00", nullable=False)
+    quiet_hours_end: Mapped[str] = mapped_column(String(10), default="07:00", nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utc_now, onupdate=utc_now, nullable=False
+    )
+
+    member: Mapped["HouseholdMember"] = relationship(
+        "HouseholdMember", back_populates="hydration_setting"
+    )
+
+
+class PantryItem(Base):
+    """
+    Household pantry inventory item with optional quantity, expiry date, and availability flag.
+    """
+    __tablename__ = "pantry_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    household_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("households.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    food_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("food_items.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    food_slug: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    ingredient_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    category_name: Mapped[str] = mapped_column(String(100), default="Pantry Staple", nullable=False)
+    available_quantity: Mapped[float] = mapped_column(Float, default=500.0, nullable=False)
+    unit_name: Mapped[str] = mapped_column(String(40), default="g", nullable=False)
+    grams_available: Mapped[float] = mapped_column(Float, default=500.0, nullable=False)
+    in_stock: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    expiry_date: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    estimated_price_inr_per_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utc_now, onupdate=utc_now, nullable=False
+    )
+
+
+class ShoppingList(Base):
+    """
+    Consolidated household smart grocery shopping list with optional delivery PIN code for retailer search.
+    """
+    __tablename__ = "shopping_lists"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    household_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("households.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    title: Mapped[str] = mapped_column(
+        String(160), default="Household Smart Grocery List", nullable=False
+    )
+    delivery_pincode: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    location_consent_given: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utc_now, onupdate=utc_now, nullable=False
+    )
+
+    items: Mapped[list["ShoppingListItem"]] = relationship(
+        "ShoppingListItem",
+        back_populates="shopping_list",
+        cascade="all, delete-orphan",
+    )
+
+
+class ShoppingListItem(Base):
+    """
+    Individual consolidated ingredient on a ShoppingList.
+    Combines duplicate ingredients across multiple recipes and links to verified retailer search destinations.
+    """
+    __tablename__ = "shopping_list_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    shopping_list_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("shopping_lists.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    food_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("food_items.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    food_slug: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    ingredient_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    food_category: Mapped[str] = mapped_column(String(100), default="Groceries", nullable=False)
+    quantity: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
+    unit_name: Mapped[str] = mapped_column(String(50), default="g", nullable=False)
+    grams_needed: Mapped[float] = mapped_column(Float, default=100.0, nullable=False)
+    estimated_price_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
+    related_recipes: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    is_purchased: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utc_now, onupdate=utc_now, nullable=False
+    )
+
+    shopping_list: Mapped["ShoppingList"] = relationship(
+        "ShoppingList", back_populates="items"
+    )
+
+
+class LocalFoodPrice(Base):
+    """
+    User-entered local market prices (INR per 100g) for Indian Protein & Budget Intelligence.
+    Never fabricates local prices; stores explicit user-configured prices.
+    """
+    __tablename__ = "local_food_prices"
+    __table_args__ = (
+        UniqueConstraint("household_id", "food_slug", name="uq_household_food_price"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    household_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("households.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    food_slug: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    price_inr_per_100g: Mapped[float] = mapped_column(Float, nullable=False)
+    package_label: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utc_now, onupdate=utc_now, nullable=False
+    )
+
+
+class MessMenuRecord(Base):
+    """
+    Saved College Mess, Hostel, or Canteen menu with matched GharPlate food items for 1-click meal analysis and logging.
+    """
+    __tablename__ = "mess_menu_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    household_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("households.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    institution_or_canteen: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    day_or_meal_label: Mapped[str] = mapped_column(String(80), default="Daily Menu", nullable=False)
+    raw_menu_text: Mapped[str] = mapped_column(Text, nullable=False)
+    matched_dishes_json: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, default=list, nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)

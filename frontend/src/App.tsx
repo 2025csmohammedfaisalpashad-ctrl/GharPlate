@@ -12,6 +12,13 @@ import {
   ConditionExplorerPage,
 } from './pages/ConditionPages';
 import {
+  DailyTrackerPage,
+  FitnessDashboardPage,
+  GoalsHabitsPage,
+  ProgressAnalyticsPage,
+  WaterTrackerPage,
+} from './pages/FitnessTrackerPages';
+import {
   FoodDetailPage,
   FoodExplorerPage,
   HomePage,
@@ -20,6 +27,12 @@ import {
   HouseholdDashboardPage,
   MemberProfilePage,
 } from './pages/HouseholdPages';
+import {
+  MessAndFamilyEcosystemPage,
+  ProteinIntelligencePage,
+  RecipeDiscoveryPage,
+  SmartGroceryPantryPage,
+} from './pages/KitchenEcosystemPages';
 import {
   RecipeCalculatorPage,
   SavedRecipesPage,
@@ -83,6 +96,15 @@ export const AppRoutes: React.FC = () => (
             <Route path="/household/member" element={<MemberProfilePage />} />
             <Route path="/recipes/calculator" element={<RecipeCalculatorPage />} />
             <Route path="/recipes/saved" element={<SavedRecipesPage />} />
+            <Route path="/recipes/discover" element={<RecipeDiscoveryPage />} />
+            <Route path="/fitness/dashboard" element={<FitnessDashboardPage />} />
+            <Route path="/fitness/tracker" element={<DailyTrackerPage />} />
+            <Route path="/fitness/hydration" element={<WaterTrackerPage />} />
+            <Route path="/fitness/goals" element={<GoalsHabitsPage />} />
+            <Route path="/fitness/analytics" element={<ProgressAnalyticsPage />} />
+            <Route path="/fitness/protein" element={<ProteinIntelligencePage />} />
+            <Route path="/kitchen/grocery" element={<SmartGroceryPantryPage />} />
+            <Route path="/tools/mess-analyzer" element={<MessAndFamilyEcosystemPage />} />
             <Route path="/scanner" element={<FoodScannerPage />} />
             <Route path="/barcode" element={<BarcodeLookupPage />} />
             <Route path="/recognition" element={<FoodRecognitionPage />} />

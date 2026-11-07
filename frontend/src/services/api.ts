@@ -467,4 +467,295 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+
+  // ==========================================
+  // GHARPLATE 3.0 ECOSYSTEM APIs (MODULES A–N)
+  // ==========================================
+  getFitnessProfile: (memberId?: number | null) =>
+    request<Record<string, any>>(
+      `/fitness/profile${memberId ? `?member_id=${memberId}` : ''}`
+    ),
+
+  updateFitnessProfile: (payload: Record<string, any>, memberId?: number | null) =>
+    request<Record<string, any>>(
+      `/fitness/profile${memberId ? `?member_id=${memberId}` : ''}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      }
+    ),
+
+  getDailyTracker: (memberId?: number | null, date?: string) => {
+    const q = new URLSearchParams();
+    if (memberId) q.set('member_id', String(memberId));
+    if (date) q.set('date', date);
+    const qs = q.toString();
+    return request<Record<string, any>>(`/tracker/daily${qs ? `?${qs}` : ''}`);
+  },
+
+  addDailyFoodLog: (payload: Record<string, any>) =>
+    request<Record<string, any>>('/tracker/food-logs', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  updateDailyFoodLog: (entryId: number, payload: Record<string, any>) =>
+    request<Record<string, any>>(`/tracker/food-logs/${entryId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
+  deleteDailyFoodLog: (entryId: number) =>
+    request<Record<string, any>>(`/tracker/food-logs/${entryId}`, {
+      method: 'DELETE',
+    }),
+
+  copyDayMeals: (payload: {
+    member_id?: number | null;
+    source_date: string;
+    target_date: string;
+    meal_category?: string;
+  }) =>
+    request<Record<string, any>>('/tracker/copy-day', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  createMealTemplate: (payload: Record<string, any>) =>
+    request<Record<string, any>>('/tracker/meal-templates', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  applyMealTemplate: (templateId: number, payload: Record<string, any>) =>
+    request<Record<string, any>>(`/tracker/meal-templates/${templateId}/apply`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  getDailyHydration: (memberId?: number | null, date?: string) => {
+    const q = new URLSearchParams();
+    if (memberId) q.set('member_id', String(memberId));
+    if (date) q.set('date', date);
+    const qs = q.toString();
+    return request<Record<string, any>>(`/hydration/daily${qs ? `?${qs}` : ''}`);
+  },
+
+  addWaterLog: (payload: Record<string, any>) =>
+    request<Record<string, any>>('/hydration/logs', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  updateWaterLog: (logId: number, payload: Record<string, any>) =>
+    request<Record<string, any>>(`/hydration/logs/${logId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
+  deleteWaterLog: (logId: number) =>
+    request<Record<string, any>>(`/hydration/logs/${logId}`, {
+      method: 'DELETE',
+    }),
+
+  updateHydrationSettings: (payload: Record<string, any>) =>
+    request<Record<string, any>>('/hydration/settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
+  getFitnessGoals: (memberId?: number | null) =>
+    request<Record<string, any>[]>(
+      `/fitness/goals${memberId ? `?member_id=${memberId}` : ''}`
+    ),
+
+  createFitnessGoal: (payload: Record<string, any>) =>
+    request<Record<string, any>[]>('/fitness/goals', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  updateFitnessGoal: (goalId: number, payload: Record<string, any>) =>
+    request<Record<string, any>[]>(`/fitness/goals/${goalId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
+  deleteFitnessGoal: (goalId: number) =>
+    request<Record<string, any>[]>(`/fitness/goals/${goalId}`, {
+      method: 'DELETE',
+    }),
+
+  getHabits: (memberId?: number | null, date?: string) => {
+    const q = new URLSearchParams();
+    if (memberId) q.set('member_id', String(memberId));
+    if (date) q.set('date', date);
+    const qs = q.toString();
+    return request<Record<string, any>[]>(`/fitness/habits${qs ? `?${qs}` : ''}`);
+  },
+
+  createHabit: (payload: Record<string, any>) =>
+    request<Record<string, any>[]>('/fitness/habits', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  toggleHabitCompletion: (habitId: number, date?: string) =>
+    request<Record<string, any>[]>(`/fitness/habits/${habitId}/toggle`, {
+      method: 'POST',
+      body: JSON.stringify({ date }),
+    }),
+
+  deleteHabit: (habitId: number) =>
+    request<Record<string, any>[]>(`/fitness/habits/${habitId}`, {
+      method: 'DELETE',
+    }),
+
+  getMeasurements: (memberId?: number | null) =>
+    request<Record<string, any>[]>(
+      `/fitness/measurements${memberId ? `?member_id=${memberId}` : ''}`
+    ),
+
+  addMeasurement: (payload: Record<string, any>) =>
+    request<Record<string, any>[]>('/fitness/measurements', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  getAnalyticsOverview: (memberId?: number | null, days = 30, endDate?: string) => {
+    const q = new URLSearchParams();
+    if (memberId) q.set('member_id', String(memberId));
+    q.set('days', String(days));
+    if (endDate) q.set('end_date', endDate);
+    return request<Record<string, any>>(`/analytics/overview?${q.toString()}`);
+  },
+
+  discoverRecipes: (params: Record<string, any> = {}) => {
+    const q = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== '') q.set(k, String(v));
+    });
+    const qs = q.toString();
+    return request<Record<string, any>>(`/recipes/discover${qs ? `?${qs}` : ''}`);
+  },
+
+  generatePersonalRecipe: (payload: Record<string, any>) =>
+    request<Record<string, any>>('/recipes/generate', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  getPantryItems: () => request<Record<string, any>[]>('/pantry'),
+
+  addPantryItem: (payload: Record<string, any>) =>
+    request<Record<string, any>[]>('/pantry', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  deletePantryItem: (itemId: number) =>
+    request<Record<string, any>[]>(`/pantry/${itemId}`, {
+      method: 'DELETE',
+    }),
+
+  getShoppingList: () => request<Record<string, any>>('/shopping-lists'),
+
+  updateShoppingListSettings: (payload: Record<string, any>) =>
+    request<Record<string, any>>('/shopping-lists/settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
+  addRecipeToShoppingList: (payload: {
+    recipe_id?: number;
+    recipe_ids?: number[];
+    serving_multiplier?: number;
+    subtract_pantry?: boolean;
+  }) =>
+    request<Record<string, any>>('/shopping-lists/from-recipe', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  addShoppingListItem: (payload: Record<string, any>) =>
+    request<Record<string, any>>('/shopping-lists/items', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  updateShoppingListItem: (itemId: number, payload: Record<string, any>) =>
+    request<Record<string, any>>(`/shopping-lists/items/${itemId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
+  deleteShoppingListItem: (itemId: number) =>
+    request<Record<string, any>>(`/shopping-lists/items/${itemId}`, {
+      method: 'DELETE',
+    }),
+
+  getProteinIntelligence: (dietaryFilter?: string, maxCost?: number) => {
+    const q = new URLSearchParams();
+    if (dietaryFilter) q.set('dietary_filter', dietaryFilter);
+    if (maxCost) q.set('max_cost_per_10g_protein', String(maxCost));
+    const qs = q.toString();
+    return request<Record<string, any>>(`/protein-intelligence${qs ? `?${qs}` : ''}`);
+  },
+
+  saveLocalFoodPrice: (payload: {
+    food_slug: string;
+    price_inr_per_100g: number;
+    package_label?: string;
+  }) =>
+    request<Record<string, any>>('/protein-intelligence/prices', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  analyzeMessMenu: (payload: {
+    raw_menu_text: string;
+    save_title?: string;
+    institution_or_canteen?: string;
+  }) =>
+    request<Record<string, any>>('/mess-analyzer/analyze', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  getSavedMessMenus: () => request<Record<string, any>[]>('/mess-analyzer/menus'),
+
+  logMessPlateToTracker: (payload: {
+    member_id?: number | null;
+    food_slugs: string[];
+    meal_category?: string;
+    logged_date?: string;
+  }) =>
+    request<Record<string, any>>('/mess-analyzer/log-plate', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  buildFamilyMealPlan: (payload: {
+    recipe_id: number;
+    member_servings?: Record<string, number>;
+  }) =>
+    request<Record<string, any>>('/family-meals/plan', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  logFamilyMealForMember: (payload: {
+    member_id: number;
+    recipe_id: number;
+    servings: number;
+    meal_category?: string;
+    logged_date?: string;
+  }) =>
+    request<Record<string, any>>('/family-meals/log', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  getSupplementIntelligence: () =>
+    request<Record<string, any>>('/supplements/intelligence'),
 };

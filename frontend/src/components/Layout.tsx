@@ -7,7 +7,7 @@ import { AssistantDrawer } from './AssistantDrawer';
 import { MedicalSafetyBanner } from './UIWidgets';
 
 interface NavGroup {
-  id: 'explore' | 'household' | 'tools' | 'trust';
+  id: 'explore' | 'health' | 'fitness' | 'kitchen' | 'tools' | 'trust';
   label: string;
   icon: string;
   items: { label: string; to: string; desc: string; icon: string }[];
@@ -19,43 +19,67 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Explore',
     icon: '🥗',
     items: [
-      { label: 'Home', to: '/', desc: 'Visual food & nutrition hub', icon: '🏠' },
+      { label: 'Home', to: '/', desc: 'Personalised food & fitness hub', icon: '🏠' },
       { label: 'Food Explorer', to: '/foods', desc: '75+ Indian foods with photos', icon: '🌾' },
-      { label: 'Condition Explorer', to: '/conditions', desc: 'Personalised health guidance', icon: '❤️' },
+      { label: 'Condition Explorer', to: '/conditions', desc: '24 clinical health guides', icon: '❤️' },
+      { label: 'Recipe Discovery', to: '/recipes/discover', desc: 'Profile & online recipe discovery', icon: '🍲' },
       { label: 'Meal Suggestions', to: '/meals', desc: 'Breakfast, lunch, dinner & snacks', icon: '🍛' },
     ],
   },
   {
-    id: 'household',
-    label: 'Household',
+    id: 'health',
+    label: 'My Health',
     icon: '👨‍👩‍👧‍👦',
     items: [
-      { label: 'Family Dashboard', to: '/household', desc: 'Switch & manage family members', icon: '🏡' },
-      { label: 'Member Profiles', to: '/household/member', desc: 'Conditions, allergies & diet', icon: '👤' },
-      { label: 'Saved Recipes', to: '/recipes/saved', desc: 'Your household recipe book', icon: '📖' },
+      { label: 'Household', to: '/household', desc: 'Switch & manage family members', icon: '🏡' },
+      { label: 'Health Profiles', to: '/household/member', desc: 'Goals, conditions & allergies', icon: '👤' },
+      { label: 'Health Guidance', to: '/conditions', desc: 'Condition-aware food rules', icon: '🩺' },
+    ],
+  },
+  {
+    id: 'fitness',
+    label: 'My Fitness',
+    icon: '💪',
+    items: [
+      { label: 'Fitness Dashboard', to: '/fitness/dashboard', desc: 'Goals & weekly training schedule', icon: '🏋️' },
+      { label: 'Daily Tracker', to: '/fitness/tracker', desc: 'Log meals & daily macros', icon: '📒' },
+      { label: 'Water Tracker', to: '/fitness/hydration', desc: 'Hydration & fluid goals', icon: '💧' },
+      { label: 'Goals & Habits', to: '/fitness/goals', desc: 'Gentle habits & progress', icon: '🎯' },
+      { label: 'Progress Analytics', to: '/fitness/analytics', desc: 'Daily, weekly & monthly charts', icon: '📈' },
+      { label: 'Protein Intelligence', to: '/fitness/protein', desc: 'Indian protein & budget cost', icon: '🥚' },
+    ],
+  },
+  {
+    id: 'kitchen',
+    label: 'My Kitchen',
+    icon: '🍲',
+    items: [
+      { label: 'Recipe Calculator', to: '/recipes/calculator', desc: 'Visual cooking & macro calculator', icon: '🧮' },
+      { label: 'My Recipes', to: '/recipes/saved', desc: 'Saved household recipe book', icon: '📖' },
+      { label: 'Pantry & Shopping List', to: '/kitchen/grocery', desc: 'Pantry & Blinkit/Zepto/BigBasket links', icon: '🛒' },
     ],
   },
   {
     id: 'tools',
-    label: 'Smart Tools',
+    label: 'Tools',
     icon: '🔍',
     items: [
-      { label: 'Recipe Calculator', to: '/recipes/calculator', desc: 'Visual cooking & macro calculator', icon: '🍲' },
-      { label: 'Food Label Scanner', to: '/scanner', desc: 'Instant OCR nutrition label reader', icon: '📸' },
-      { label: 'Barcode Lookup', to: '/barcode', desc: 'Scan or enter packaged barcodes', icon: '🏷️' },
+      { label: 'Barcode Scanner', to: '/barcode', desc: 'Scan or enter packaged barcodes', icon: '🏷️' },
+      { label: 'Label Scanner', to: '/scanner', desc: 'Instant OCR nutrition label reader', icon: '📸' },
       { label: 'Product Comparison', to: '/compare', desc: 'Compare 2–4 products side by side', icon: '⚖️' },
+      { label: 'Mess Analyzer', to: '/tools/mess-analyzer', desc: 'Mess menu & family portion planner', icon: '🍱' },
       { label: 'Dish Recognition', to: '/recognition', desc: 'Identify Indian dishes from photos', icon: '✨' },
     ],
   },
   {
     id: 'trust',
-    label: 'Sources & Safety',
+    label: 'Sources',
     icon: '🛡️',
     items: [
       { label: 'Data Sources', to: '/sources', desc: 'ICMR-NIN, WHO, KDIGO & FSSAI', icon: '📚' },
       { label: 'Privacy & Safety', to: '/privacy-safety', desc: 'Medical & RAM-only image policy', icon: '🔒' },
       { label: 'About GharPlate', to: '/about', desc: 'How GharPlate works', icon: '🌿' },
-      { label: 'Settings', to: '/settings', desc: 'Local household token controls', icon: '⚙️' },
+      { label: 'Settings', to: '/settings', desc: 'Account & household controls', icon: '⚙️' },
     ],
   },
 ];
@@ -79,9 +103,9 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
 
   return (
     <div className="min-h-screen flex flex-col bg-[#FAF8F5] text-stone-900 pb-16 lg:pb-0">
-      {/* Clean Top Navigation Header (No Horizontal Overflow!) */}
+      {/* Clean Top Navigation Header (Grouped Hubs — Zero Horizontal Crowding) */}
       <header className="sticky top-0 z-40 border-b border-stone-200/80 bg-white/95 backdrop-blur-md">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
           {/* Brand Logo */}
           <div className="flex items-center gap-3">
             <button
@@ -99,16 +123,16 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                   GharPlate
                 </span>
                 <span className="block text-[10px] font-semibold uppercase tracking-widest text-emerald-800">
-                  Indian Food Intelligence
+                  Food, Health &amp; Fitness
                 </span>
               </div>
             </Link>
           </div>
 
-          {/* Desktop Grouped Hub Tabs (4 Clean Hubs — Zero Overflow) */}
+          {/* Desktop Grouped Hub Tabs */}
           <nav
             aria-label="Primary Categories"
-            className="hidden lg:flex items-center gap-1.5 rounded-2xl bg-stone-100/90 p-1.5"
+            className="hidden lg:flex items-center gap-1 rounded-2xl bg-stone-100/90 p-1.5"
           >
             {NAV_GROUPS.map((group) => {
               const isCurrentGroup = activeGroup.id === group.id;
@@ -116,8 +140,9 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                 <button
                   key={group.id}
                   type="button"
+                  data-testid={`nav-hub-${group.id}`}
                   onClick={() => navigate(group.items[0].to)}
-                  className={`flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-extrabold transition ${
+                  className={`flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-extrabold transition ${
                     isCurrentGroup
                       ? 'bg-white text-emerald-900 shadow-sm'
                       : 'text-stone-600 hover:text-stone-900 hover:bg-white/50'
@@ -130,22 +155,23 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
             })}
           </nav>
 
-          {/* Right: Active Member Pill Switcher, Scan Shortcut & Account Control */}
-          <div className="flex items-center gap-2.5">
+          {/* Right: Daily Tracker Quick Launch, Active Member Pill Switcher & Account Control */}
+          <div className="flex items-center gap-2">
             <Link
-              to="/barcode"
-              className="hidden sm:inline-flex items-center gap-1.5 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-xs font-bold text-stone-800 hover:bg-stone-100 transition"
+              to="/fitness/tracker"
+              data-testid="header-daily-tracker-shortcut"
+              className="hidden sm:inline-flex items-center gap-1.5 rounded-xl bg-amber-400 px-3 py-2 text-xs font-extrabold text-stone-950 shadow-2xs hover:bg-amber-300 transition"
             >
-              <span>🏷️</span>
-              <span>Barcode</span>
+              <span>📒</span>
+              <span>Daily Tracker</span>
             </Link>
 
             <Link
-              to="/scanner"
-              className="hidden sm:inline-flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2 text-xs font-bold text-emerald-900 hover:bg-emerald-100 transition"
+              to="/barcode"
+              className="hidden xl:inline-flex items-center gap-1.5 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-xs font-bold text-stone-800 hover:bg-stone-100 transition"
             >
-              <span>📸</span>
-              <span>Scan Label</span>
+              <span>🏷️</span>
+              <span>Barcode</span>
             </Link>
 
             {household && household.members.length > 0 ? (
@@ -200,17 +226,17 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
         {/* Desktop Contextual Sub-Navigation Bar for the Active Hub */}
         <div className="hidden lg:block border-t border-stone-100 bg-stone-50/80">
           <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-2 sm:px-6 lg:px-8">
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-stone-400 mr-2">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-stone-400 mr-1.5">
                 {activeGroup.label}:
               </span>
               {activeGroup.items.map((item) => (
                 <NavLink
-                  key={item.to}
+                  key={`${activeGroup.id}-${item.to}-${item.label}`}
                   to={item.to}
                   end={item.to === '/' || item.to === '/household'}
                   className={({ isActive }) =>
-                    `flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 text-xs font-bold transition ${
+                    `flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold transition ${
                       isActive
                         ? 'bg-emerald-800 text-white shadow-sm'
                         : 'text-stone-700 hover:bg-stone-200/70 hover:text-stone-950'
@@ -223,12 +249,20 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               ))}
             </div>
 
-            {/* Quick Cross-Hub Links */}
-            <div className="flex items-center gap-4 text-xs font-semibold text-stone-500">
-              <Link to="/foods" className="hover:text-emerald-800">Foods</Link>
-              <Link to="/conditions" className="hover:text-emerald-800">Conditions</Link>
-              <Link to="/barcode" className="hover:text-emerald-800">Barcode Scanner</Link>
-              <Link to="/compare" className="hover:text-emerald-800">Compare Products</Link>
+            {/* Quick Cross-Hub Shortcuts */}
+            <div className="flex items-center gap-3.5 text-xs font-semibold text-stone-500 shrink-0">
+              <Link to="/fitness/tracker" className="hover:text-emerald-800">
+                Log Food
+              </Link>
+              <Link to="/fitness/hydration" className="hover:text-emerald-800">
+                Add Water
+              </Link>
+              <Link to="/recipes/discover" className="hover:text-emerald-800">
+                Discover Recipes
+              </Link>
+              <Link to="/kitchen/grocery" className="hover:text-emerald-800">
+                Shopping List
+              </Link>
             </div>
           </div>
         </div>
@@ -247,7 +281,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                 <div className="grid grid-cols-2 gap-1.5">
                   {group.items.map((item) => (
                     <NavLink
-                      key={item.to}
+                      key={`${group.id}-${item.to}-${item.label}`}
                       to={item.to}
                       end={item.to === '/' || item.to === '/household'}
                       onClick={() => setMobileDrawerOpen(false)}
@@ -288,10 +322,10 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
       >
         {[
           { label: 'Home', to: '/', icon: '🏠' },
-          { label: 'Foods', to: '/foods', icon: '🌾' },
-          { label: 'Conditions', to: '/conditions', icon: '❤️' },
-          { label: 'Barcode', to: '/barcode', icon: '🏷️' },
-          { label: 'Household', to: '/household', icon: '🏡' },
+          { label: 'Tracker', to: '/fitness/tracker', icon: '📒' },
+          { label: 'Water', to: '/fitness/hydration', icon: '💧' },
+          { label: 'Recipes', to: '/recipes/discover', icon: '🍲' },
+          { label: 'Grocery', to: '/kitchen/grocery', icon: '🛒' },
         ].map((item) => (
           <NavLink
             key={item.to}
@@ -314,10 +348,10 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div>
             <p className="font-extrabold text-stone-900">
-              GharPlate — Indian Household Food Intelligence
+              GharPlate — Indian Household Food, Health &amp; Fitness Intelligence
             </p>
             <p className="mt-0.5 text-stone-500">
-              Powered by ICMR-NIN IFCT 2017, Dietary Guidelines for Indians 2024, Open Food Facts, USDA FDC, WHO, KDIGO &amp; FSSAI data.
+              Powered by ICMR-NIN IFCT 2017, Dietary Guidelines for Indians 2024, Open Food Facts, USDA FDC, Edamam, WHO, KDIGO &amp; FSSAI data.
             </p>
           </div>
           <div className="flex flex-wrap gap-4 font-bold text-emerald-800">

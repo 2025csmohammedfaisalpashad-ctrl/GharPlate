@@ -460,6 +460,27 @@ export const RecipeCalculatorPage: React.FC = () => {
                       </div>
                     ))}
                   </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-stone-100 text-xs">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void api.addRecipeToShoppingList({
+                          recipe_id: calculatedRecipe.id,
+                          subtract_pantry: true,
+                        })
+                      }
+                      className="rounded-xl bg-amber-400 px-4 py-2 font-extrabold text-stone-950 hover:bg-amber-300"
+                    >
+                      🛒 Get Ingredients (Add to Smart Shopping List)
+                    </button>
+                    <Link
+                      to="/kitchen/grocery"
+                      className="font-extrabold text-emerald-800 hover:underline"
+                    >
+                      Open Shopping List →
+                    </Link>
+                  </div>
                 </div>
               </div>
 
@@ -636,13 +657,27 @@ export const SavedRecipesPage: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="px-5 pb-5 pt-3 border-t border-stone-100 flex items-center justify-between text-xs">
-                  <Link
-                    to={`/recipes/calculator?edit=${rec.id}`}
-                    className="font-extrabold text-emerald-800 hover:underline"
-                  >
-                    Open in Calculator →
-                  </Link>
+                <div className="px-5 pb-5 pt-3 border-t border-stone-100 flex items-center justify-between gap-2 text-xs">
+                  <div className="flex items-center gap-3">
+                    <Link
+                      to={`/recipes/calculator?edit=${rec.id}`}
+                      className="font-extrabold text-emerald-800 hover:underline"
+                    >
+                      Open in Calculator →
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void api.addRecipeToShoppingList({
+                          recipe_id: rec.id,
+                          subtract_pantry: true,
+                        })
+                      }
+                      className="rounded-lg bg-amber-100 px-2.5 py-1 font-extrabold text-amber-950 hover:bg-amber-200"
+                    >
+                      🛒 Get Ingredients
+                    </button>
+                  </div>
                   {rec.household_token !== 'system_template' && (
                     <button
                       type="button"

@@ -210,6 +210,7 @@ export const MemberProfilePage: React.FC = () => {
   const [displayName, setDisplayName] = useState('');
   const [ageGroup, setAgeGroup] = useState('adult');
   const [dietaryPreference, setDietaryPreference] = useState('vegetarian');
+  const [primaryGoal, setPrimaryGoal] = useState('maintain_balanced_diet');
   const [selectedConditions, setSelectedConditions] = useState<string[]>([]);
   const [allergiesText, setAllergiesText] = useState('');
   const [intolerancesText, setIntolerancesText] = useState('');
@@ -227,6 +228,7 @@ export const MemberProfilePage: React.FC = () => {
     setDisplayName(m.display_name);
     setAgeGroup(m.age_group);
     setDietaryPreference(m.dietary_preference);
+    setPrimaryGoal(m.primary_goal || 'maintain_balanced_diet');
     setSelectedConditions(m.selected_conditions);
     setAllergiesText(m.allergies.join(', '));
     setIntolerancesText(m.intolerances.join(', '));
@@ -240,6 +242,7 @@ export const MemberProfilePage: React.FC = () => {
     setDisplayName('');
     setAgeGroup('adult');
     setDietaryPreference('vegetarian');
+    setPrimaryGoal('maintain_balanced_diet');
     setSelectedConditions([]);
     setAllergiesText('');
     setIntolerancesText('');
@@ -267,6 +270,7 @@ export const MemberProfilePage: React.FC = () => {
       display_name: displayName.trim(),
       age_group: ageGroup,
       dietary_preference: dietaryPreference,
+      primary_goal: primaryGoal,
       selected_conditions: selectedConditions,
       allergies: allergiesText
         .split(',')
@@ -427,6 +431,32 @@ export const MemberProfilePage: React.FC = () => {
                 <option value="jain">Jain Vegetarian</option>
               </select>
             </div>
+          </div>
+
+          {/* Primary Health or Fitness Goal (Section 3.1) */}
+          <div>
+            <label className="block text-xs font-bold text-stone-700">
+              What is your primary health or fitness goal?
+            </label>
+            <select
+              aria-label="Primary Health or Fitness Goal"
+              data-testid="member-primary-goal-select"
+              value={primaryGoal}
+              onChange={(e) => setPrimaryGoal(e.target.value)}
+              className="mt-1.5 w-full rounded-2xl border border-stone-300 bg-white px-3.5 py-2.5 text-sm font-semibold"
+            >
+              <option value="maintain_balanced_diet">Maintain a balanced diet</option>
+              <option value="manage_health_condition">Manage a health condition</option>
+              <option value="build_muscle">Build muscle</option>
+              <option value="gain_weight">Gain weight</option>
+              <option value="lose_body_fat">Lose body fat</option>
+              <option value="improve_strength">Improve strength</option>
+              <option value="improve_endurance">Improve endurance</option>
+              <option value="improve_general_fitness">Improve general fitness</option>
+              <option value="maintain_current_fitness">Maintain current fitness</option>
+              <option value="improve_everyday_nutrition">Improve everyday nutrition</option>
+              <option value="improve_hydration_habits">Improve hydration habits</option>
+            </select>
           </div>
 
           {/* Health Condition Pills */}

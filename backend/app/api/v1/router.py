@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.v1.auth_router import AUTHENTICATED_PRIVACY_NOTICE, auth_router
+from app.api.v1.ecosystem_router import ecosystem_router
 from app.core.config import settings
 from app.core.security import (
     ensure_user_owned_household,
@@ -106,6 +107,7 @@ from app.services.recipe_service import create_or_update_recipe, serialize_recip
 
 api_router = APIRouter()
 api_router.include_router(auth_router)
+api_router.include_router(ecosystem_router)
 
 DbSession = Annotated[Session, Depends(get_db)]
 CurrentUser = Annotated[UserAccount, Depends(get_current_user)]
@@ -446,6 +448,7 @@ def add_household_member(
         display_name=req.display_name,
         age_group=req.age_group,
         dietary_preference=req.dietary_preference,
+        primary_goal=req.primary_goal or "maintain_balanced_diet",
         selected_conditions=req.selected_conditions,
         allergies=req.allergies,
         intolerances=req.intolerances,
@@ -488,6 +491,7 @@ def update_household_member(
     member.display_name = req.display_name
     member.age_group = req.age_group
     member.dietary_preference = req.dietary_preference
+    member.primary_goal = req.primary_goal or member.primary_goal or "maintain_balanced_diet"
     member.selected_conditions = req.selected_conditions
     member.allergies = req.allergies
     member.intolerances = req.intolerances

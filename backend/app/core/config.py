@@ -59,6 +59,14 @@ class Settings(BaseSettings):
     TAVILY_API_KEY: str = ""
     WEB_SEARCH_TIMEOUT_SECONDS: float = 8.0
 
+    # Online Recipe Discovery Providers (Edamam Recipe API v2 + TheMealDB Open API)
+    ENABLE_ONLINE_RECIPE_SEARCH: bool = True
+    EDAMAM_APP_ID: str = ""
+    EDAMAM_APP_KEY: str = ""
+    EDAMAM_RECIPE_API_URL: str = "https://api.edamam.com/api/recipes/v2"
+    THEMEALDB_API_URL: str = "https://www.themealdb.com/api/json/v1/1"
+    RECIPE_PROVIDER_TIMEOUT_SECONDS: float = 6.0
+
     # Data Caching & Rate Limiting
     ENABLE_PRODUCT_CACHE: bool = True
     PRODUCT_CACHE_HOURS: int = 168
