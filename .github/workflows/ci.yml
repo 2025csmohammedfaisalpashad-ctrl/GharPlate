@@ -55,17 +55,23 @@ jobs:
 
       - name: Validate isolated database schema creation & data seed integrity
         env:
+          APP_ENV: "development"
+          SESSION_COOKIE_SECURE: "false"
           DATABASE_URL: "sqlite:////tmp/gharplate_ci_seed.db"
         run: |
           python scripts/seed_data.py
           rm -f /tmp/gharplate_ci_seed.db
 
-      - name: Run Backend Pytest Suite (44 tests) with JUnit XML report
+      - name: Run Backend Pytest Suite with JUnit XML report
         working-directory: backend
         env:
           PYTHONPATH: "."
+          APP_ENV: "development"
+          DEBUG: "false"
+          SESSION_COOKIE_SECURE: "false"
           DATABASE_URL: "sqlite:////tmp/gharplate_ci_pytest.db"
           ENABLE_EXTERNAL_BARCODE_LOOKUP: "true"
+          ENABLE_FOODDATA_CENTRAL: "true"
           ENABLE_USDA_FDC_LOOKUP: "true"
           ENABLE_LOCAL_AI_ASSISTANT: "true"
         run: |
@@ -160,6 +166,20 @@ jobs:
     name: "Stage 4: Docker Compose Smoke Test"
     runs-on: ubuntu-latest
     needs: [docker-build-validation]
+    env:
+      APP_ENV: "development"
+      DEBUG: "false"
+      SESSION_COOKIE_SECURE: "false"
+      SESSION_COOKIE_SAMESITE: "lax"
+      ENABLE_OCR: "true"
+      ENABLE_EXPERIMENTAL_DISH_RECOGNITION: "true"
+      ENABLE_EXTERNAL_BARCODE_LOOKUP: "true"
+      ENABLE_FOODDATA_CENTRAL: "true"
+      ENABLE_USDA_FDC_LOOKUP: "true"
+      ENABLE_ONLINE_RECIPE_SEARCH: "true"
+      ENABLE_EXTERNAL_WEB_SEARCH: "false"
+      ENABLE_PRODUCT_CACHE: "true"
+      ENABLE_LOCAL_AI_ASSISTANT: "true"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -168,9 +188,15 @@ jobs:
         run: cp .env.example .env
 
       - name: Start isolated Docker Compose stack
+        env:
+          APP_ENV: "development"
+          DEBUG: "false"
+          SESSION_COOKIE_SECURE: "false"
         run: docker compose -p gharplate_ci up --build -d
 
       - name: Wait for Backend & Frontend readiness and run API smoke tests
+        env:
+          SESSION_COOKIE_SECURE: "false"
         run: |
           echo "Waiting for GharPlate Backend API at http://localhost:8000/api/v1/health ..."
           for i in $(seq 1 30); do
@@ -195,9 +221,7 @@ jobs:
           assert data["counts"]["conditions"] >= 18, f"Expected >=18 conditions, got {data}"
           '
 
-          # The food catalog APIs are protected after real authentication was added.
-          # In this unauthenticated smoke-test step, verify that private endpoints
-          # reject anonymous requests instead of expecting HTTP 200.
+          # 1. Verify unauthenticated requests are rejected with HTTP 401
           assert_unauthenticated_401() {
             local path="$1"
             local label="$2"
@@ -221,6 +245,7 @@ jobs:
           echo "Verifying protected /api/v1/foods search endpoint..."
           assert_unauthenticated_401 "/api/v1/foods?q=Ragi" "Food search endpoint" "/tmp/foods.json"
 
+          # 2. Verify Frontend Nginx Server at http://localhost:8080/
           echo "Waiting for GharPlate Frontend Nginx Server at http://localhost:8080/ ..."
           for i in $(seq 1 20); do
             if curl -fsS http://localhost:8080/ > /tmp/index.html; then
@@ -234,6 +259,41 @@ jobs:
             fi
             sleep 2
           done
+
+          # 3. Verify Frontend-to-Backend CORS & Authenticated Session Cookie Flow over HTTP
+          echo "Verifying Frontend-to-Backend CORS headers (Origin: http://localhost:8080)..."
+          curl -fsS -D /tmp/cors_headers.txt -H "Origin: http://localhost:8080" http://localhost:8000/api/v1/health > /dev/null
+          grep -qi "access-control-allow-origin: http://localhost:8080" /tmp/cors_headers.txt
+          grep -qi "access-control-allow-credentials: true" /tmp/cors_headers.txt
+
+          echo "Verifying HTTP registration, non-Secure session cookie persistence & authenticated API queries..."
+          REG_STATUS=$(curl -sS -c /tmp/smoke_cookies.txt -D /tmp/reg_headers.txt -o /tmp/reg.json -w "%{http_code}" \
+            -X POST "http://localhost:8000/api/v1/auth/register" \
+            -H "Origin: http://localhost:8080" \
+            -H "Content-Type: application/json" \
+            -d '{"name":"CI Smoke User","email":"ci_smoke@gharplate.local","password":"SmokePassword123!","password_confirmation":"SmokePassword123!","remember_me":false}')
+          if [ "$REG_STATUS" != "201" ]; then
+            echo "FAIL: Registration over HTTP returned ${REG_STATUS}"
+            cat /tmp/reg.json
+            exit 1
+          fi
+
+          AUTH_CAT_STATUS=$(curl -sS -b /tmp/smoke_cookies.txt -H "Origin: http://localhost:8080" -o /tmp/auth_categories.json -w "%{http_code}" \
+            "http://localhost:8000/api/v1/foods/categories")
+          if [ "$AUTH_CAT_STATUS" != "200" ]; then
+            echo "FAIL: Authenticated /api/v1/foods/categories returned ${AUTH_CAT_STATUS}"
+            cat /tmp/auth_categories.json
+            exit 1
+          fi
+
+          AUTH_FOODS_STATUS=$(curl -sS -b /tmp/smoke_cookies.txt -H "Origin: http://localhost:8080" -o /tmp/auth_foods.json -w "%{http_code}" \
+            "http://localhost:8000/api/v1/foods?q=Ragi")
+          if [ "$AUTH_FOODS_STATUS" != "200" ]; then
+            echo "FAIL: Authenticated /api/v1/foods?q=Ragi returned ${AUTH_FOODS_STATUS}"
+            cat /tmp/auth_foods.json
+            exit 1
+          fi
+          echo "PASS: Frontend-to-Backend CORS, HTTP session cookie, and authenticated API communication verified!"
 
       - name: Print container diagnostics on failure
         if: failure()

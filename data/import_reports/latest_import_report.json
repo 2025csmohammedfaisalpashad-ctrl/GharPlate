@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-11-07T15:01:28.124833+00:00",
-  "total_data_sources": 10,
+  "generated_at": "2026-11-07T15:28:42.376616+00:00",
+  "total_data_sources": 11,
   "total_food_categories": 9,
   "total_food_items": 76,
-  "newly_imported_foods": 75,
+  "newly_imported_foods": 0,
   "total_aliases": 529,
   "total_structured_food_tags": 43,
   "total_health_conditions": 24,
