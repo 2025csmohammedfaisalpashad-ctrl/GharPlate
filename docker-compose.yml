@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
-    image: gharplate-backend:local
+    image: mrfaisu0243/gharplate-backend:latest
     container_name: gharplate-backend
     restart: unless-stopped
     env_file:
@@ -59,7 +59,7 @@ services:
       dockerfile: frontend/Dockerfile
       args:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000/api/v1}
-    image: gharplate-frontend:local
+    image: mrfaisu0243/gharplate-frontend:latest
     container_name: gharplate-frontend
     restart: unless-stopped
     ports:
