@@ -6,6 +6,8 @@ import type {
   AssistantConversationSummary,
   AssistantPageContext,
   AssistantStatusResponse,
+  AssistantVoiceStatusResponse,
+  AssistantVoiceTranscribeResponse,
   AuthSessionResponse,
   BarcodeLookupResponse,
   ConditionFoodRecommendationResponse,
@@ -303,7 +305,55 @@ export const api = {
       `/recipes${household_token ? `?household_token=${encodeURIComponent(household_token)}` : ''}`
     ),
 
-  getRecipe: (id: number) => request<RecipeDetail>(`/recipes/${id}`),
+  getRecipe: (idOrSlug: number | string, servings?: number) => {
+    const sp = new URLSearchParams();
+    if (servings !== undefined && servings > 0) sp.set('servings', String(servings));
+    const qs = sp.toString();
+    return request<RecipeDetail>(
+      `/recipes/${encodeURIComponent(String(idOrSlug))}${qs ? `?${qs}` : ''}`
+    );
+  },
+
+  enrichRecipeSteps: (
+    idOrSlug: number | string,
+    payload?: { steps?: Record<string, any>[] }
+  ) =>
+    request<RecipeDetail>(`/recipes/${encodeURIComponent(String(idOrSlug))}/enrich`, {
+      method: 'POST',
+      body: JSON.stringify(payload || {}),
+    }),
+
+  rateOrFavouriteRecipe: (
+    idOrSlug: number | string,
+    payload: {
+      is_favourite?: boolean;
+      user_rating?: number;
+      rating_notes?: string;
+    }
+  ) =>
+    request<RecipeDetail>(`/recipes/${encodeURIComponent(String(idOrSlug))}/rate`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  logRecipeToDiary: (
+    idOrSlug: number | string,
+    payload: {
+      member_id?: number | null;
+      user_confirmed: boolean;
+      servings_consumed: number;
+      meal_category?: string;
+      logged_date?: string;
+      notes?: string;
+    }
+  ) =>
+    request<Record<string, any>>(
+      `/recipes/${encodeURIComponent(String(idOrSlug))}/log-diary`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }
+    ),
 
   deleteRecipe: (id: number) =>
     request<{ deleted: boolean }>(`/recipes/${id}`, { method: 'DELETE' }),
@@ -425,6 +475,22 @@ export const api = {
       configured_model?: string | null;
       error_message?: string | null;
     }>('/assistant/models'),
+
+  evaluateAssistantModels: () =>
+    request<Record<string, any>>('/assistant/models/evaluate'),
+
+  getAssistantVoiceStatus: () =>
+    request<AssistantVoiceStatusResponse>('/assistant/voice/status'),
+
+  transcribeAssistantVoice: (payload: {
+    transcript_hint?: string | null;
+    language_code?: string;
+    audio_base64?: string | null;
+  }) =>
+    request<AssistantVoiceTranscribeResponse>('/assistant/voice/transcribe', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
 
   listAssistantConversations: (q?: string) =>
     request<AssistantConversationSummary[]>(
@@ -600,6 +666,12 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  updateHabit: (habitId: number, payload: Record<string, any>) =>
+    request<Record<string, any>[]>(`/fitness/habits/${habitId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
   toggleHabitCompletion: (habitId: number, date?: string) =>
     request<Record<string, any>[]>(`/fitness/habits/${habitId}/toggle`, {
       method: 'POST',
@@ -758,4 +830,245 @@ export const api = {
 
   getSupplementIntelligence: () =>
     request<Record<string, any>>('/supplements/intelligence'),
+
+  // ==========================================
+  // HEALTH MEASUREMENT & AI HABIT INTELLIGENCE APIs
+  // ==========================================
+  getBloodPressure: (params?: {
+    member_id?: number | null;
+    days?: number;
+    limit?: number;
+  }) => {
+    const q = new URLSearchParams();
+    if (params?.member_id) q.set('member_id', String(params.member_id));
+    if (params?.days) q.set('days', String(params.days));
+    if (params?.limit) q.set('limit', String(params.limit));
+    const qs = q.toString();
+    return request<Record<string, any>>(`/health/blood-pressure${qs ? `?${qs}` : ''}`);
+  },
+
+  addBloodPressure: (payload: Record<string, any>) =>
+    request<Record<string, any>>('/health/blood-pressure', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  updateBloodPressure: (readingId: number, payload: Record<string, any>) =>
+    request<Record<string, any>>(`/health/blood-pressure/${readingId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
+  deleteBloodPressure: (readingId: number) =>
+    request<Record<string, any>>(`/health/blood-pressure/${readingId}`, {
+      method: 'DELETE',
+    }),
+
+  getBloodGlucose: (params?: {
+    member_id?: number | null;
+    days?: number;
+    limit?: number;
+    measurement_context?: string;
+    context_filter?: string;
+  }) => {
+    const q = new URLSearchParams();
+    if (params?.member_id) q.set('member_id', String(params.member_id));
+    if (params?.days) q.set('days', String(params.days));
+    if (params?.limit) q.set('limit', String(params.limit));
+    const ctx = params?.context_filter || params?.measurement_context;
+    if (ctx) {
+      q.set('context_filter', ctx);
+      q.set('measurement_context', ctx);
+    }
+    const qs = q.toString();
+    return request<Record<string, any>>(`/health/blood-glucose${qs ? `?${qs}` : ''}`);
+  },
+
+  addBloodGlucose: (payload: Record<string, any>) =>
+    request<Record<string, any>>('/health/blood-glucose', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  updateBloodGlucose: (readingId: number, payload: Record<string, any>) =>
+    request<Record<string, any>>(`/health/blood-glucose/${readingId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
+  deleteBloodGlucose: (readingId: number) =>
+    request<Record<string, any>>(`/health/blood-glucose/${readingId}`, {
+      method: 'DELETE',
+    }),
+
+  saveHealthMeasurementTarget: (payload: Record<string, any>) =>
+    request<Record<string, any>>('/health/measurements/targets', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
+  getHealthMeasurementsSummary: (memberId?: number | null, days = 30) => {
+    const q = new URLSearchParams();
+    if (memberId) q.set('member_id', String(memberId));
+    q.set('days', String(days));
+    return request<Record<string, any>>(`/health/measurements/summary?${q.toString()}`);
+  },
+
+  getHealthMeasurementsHistory: (params?: {
+    member_id?: number | null;
+    category?: string;
+    days?: number;
+    limit?: number;
+  }) => {
+    const q = new URLSearchParams();
+    if (params?.member_id) q.set('member_id', String(params.member_id));
+    if (params?.category) q.set('category', params.category);
+    if (params?.days) q.set('days', String(params.days));
+    if (params?.limit) q.set('limit', String(params.limit));
+    const qs = q.toString();
+    return request<Record<string, any>>(`/health/measurements/history${qs ? `?${qs}` : ''}`);
+  },
+
+  getDailyActivityTimeline: (memberId?: number | null, date?: string, category?: string) => {
+    const q = new URLSearchParams();
+    if (memberId) q.set('member_id', String(memberId));
+    if (date) q.set('date', date);
+    if (category && category !== 'all') q.set('category', category);
+    const qs = q.toString();
+    return request<Record<string, any>>(`/health/timeline${qs ? `?${qs}` : ''}`);
+  },
+
+  proposeAiHabitPlan: (payload: {
+    member_id?: number | null;
+    user_goal_prompt?: string;
+    prompt?: string;
+    goal_description?: string;
+    target_count?: number;
+  }) =>
+    request<Record<string, any>>('/fitness/habits/ai-plan', {
+      method: 'POST',
+      body: JSON.stringify({
+        ...payload,
+        prompt: payload.prompt || payload.user_goal_prompt || payload.goal_description || '',
+        goal_description:
+          payload.goal_description || payload.user_goal_prompt || payload.prompt || '',
+      }),
+    }),
+
+  confirmAiHabitPlan: (payload: {
+    plan_id?: string;
+    ai_plan_id?: string;
+    member_id?: number | null;
+    user_confirmed: boolean;
+    habits: Record<string, any>[];
+  }) =>
+    request<Record<string, any>>('/fitness/habits/ai-plan/confirm', {
+      method: 'POST',
+      body: JSON.stringify({
+        ...payload,
+        ai_plan_id: payload.ai_plan_id || payload.plan_id,
+      }),
+    }),
+
+  modifyAiHabitPlan: (payload: {
+    plan_id?: string;
+    ai_plan_id?: string;
+    member_id?: number | null;
+    modification_prompt?: string;
+    instruction?: string;
+    user_confirmed?: boolean;
+    current_habits?: Record<string, any>[];
+  }) =>
+    request<Record<string, any>>('/fitness/habits/ai-plan/modify', {
+      method: 'POST',
+      body: JSON.stringify({
+        ...payload,
+        instruction: payload.instruction || payload.modification_prompt || '',
+      }),
+    }),
+
+  parseNaturalLanguageFoodLog: (payload: {
+    member_id?: number | null;
+    message?: string;
+    text?: string;
+    raw_text?: string;
+    logged_date?: string;
+    default_meal_category?: string;
+  }) =>
+    request<Record<string, any>>('/tracker/food-logs/parse', {
+      method: 'POST',
+      body: JSON.stringify({
+        ...payload,
+        text: payload.text || payload.raw_text || payload.message || '',
+        raw_text: payload.raw_text || payload.text || payload.message || '',
+      }),
+    }),
+
+  confirmNaturalLanguageFoodLog: (payload: {
+    member_id?: number | null;
+    user_confirmed: boolean;
+    logged_date?: string;
+    logged_time?: string;
+    meal_category?: string;
+    raw_text?: string;
+    items: Record<string, any>[];
+  }) =>
+    request<Record<string, any>>('/tracker/food-logs/confirm-parsed', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  // ==========================================
+  // PERSISTENT ACHIEVEMENT & REWARD SYSTEM APIs
+  // ==========================================
+  getMemberAchievements: (memberId?: number | null) =>
+    request<Record<string, any>>(
+      `/fitness/achievements${memberId ? `?member_id=${memberId}` : ''}`
+    ),
+
+  migrateLocalAchievements: (payload: {
+    member_id?: number | null;
+    badge_codes: string[];
+  }) =>
+    request<Record<string, any>>('/fitness/achievements/migrate-local', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  markAchievementsSeen: (payload: {
+    member_id?: number | null;
+    achievement_codes?: string[];
+  }) =>
+    request<Record<string, any>>('/fitness/achievements/seen', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  updateAchievementPreferences: (payload: {
+    member_id?: number | null;
+    rewards_enabled: boolean;
+  }) =>
+    request<Record<string, any>>('/fitness/achievements/preferences', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
+  // ==========================================
+  // INTERACTIVE 3D HUMAN BODY & NUTRITION EXPLORER APIs
+  // ==========================================
+  getBodyNutritionRegions: () =>
+    request<Record<string, any>>('/explore/body-nutrition'),
+
+  getBodyNutritionRegionDetail: (
+    regionCode: string,
+    params?: { member_id?: number | null; dietary_preference?: string | null }
+  ) => {
+    const q = new URLSearchParams();
+    if (params?.member_id) q.set('member_id', String(params.member_id));
+    if (params?.dietary_preference) q.set('dietary_preference', params.dietary_preference);
+    const qs = q.toString();
+    return request<Record<string, any>>(
+      `/explore/body-nutrition/${encodeURIComponent(regionCode)}${qs ? `?${qs}` : ''}`
+    );
+  },
 };

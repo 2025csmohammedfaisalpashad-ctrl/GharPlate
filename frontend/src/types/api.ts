@@ -378,6 +378,21 @@ export interface RecipeIngredientInput {
   food_slug: string;
   quantity: number;
   unit_name: string;
+  household_measure_note?: string | null;
+  alternative_ingredient?: string | null;
+  preparation_note?: string | null;
+}
+
+export interface RecipeStep {
+  id?: number | null;
+  step_number: number;
+  step_title: string;
+  instruction_text: string;
+  duration_minutes?: number | null;
+  temperature?: string | null;
+  tip?: string | null;
+  image_url?: string | null;
+  equipment?: string | null;
 }
 
 export interface RecipeNutrientBreakdown {
@@ -399,6 +414,9 @@ export interface RecipeIngredientContribution {
   quantity: number;
   unit_name: string;
   grams_equivalent: number;
+  household_measure_note?: string | null;
+  alternative_ingredient?: string | null;
+  preparation_note?: string | null;
   energy_kcal_contribution: number | null;
   protein_g_contribution: number | null;
   carbs_g_contribution: number | null;
@@ -408,17 +426,37 @@ export interface RecipeIngredientContribution {
 
 export interface RecipeDetail {
   id: number;
+  slug?: string | null;
   household_token?: string | null;
   title: string;
   description?: string | null;
   image_url?: string | null;
   servings: number;
   meal_type: string;
+  prep_time_minutes?: number | null;
+  cook_time_minutes?: number | null;
+  total_time_minutes?: number | null;
+  difficulty?: string;
+  estimated_cost_inr?: number | null;
+  cost_per_serving_inr?: number | null;
+  source_type?: string;
+  source_name?: string;
+  source_url?: string | null;
+  verification_status?: string;
+  verification_badge_label?: string;
+  instructions_reviewed?: boolean;
+  instructions_status?: string;
+  is_favourite?: boolean;
+  user_rating?: number | null;
+  rating_notes?: string | null;
+  dietary_tags?: string[];
+  suitable_goals?: string[];
   total_weight_grams: number;
   serving_weight_grams: number;
   completeness_pct: number;
   completeness_notice: string;
   instructions_notes?: string | null;
+  steps?: RecipeStep[];
   ingredients: RecipeIngredientContribution[];
   nutrients: RecipeNutrientBreakdown[];
   created_at: string;
@@ -534,23 +572,64 @@ export interface ProductProvenanceResponse {
   data_conflicts: ProductDataConflict[];
 }
 
+export interface DishDetectedComponent {
+  component_label: string;
+  confidence_score: number;
+  confidence_category: 'high_confidence' | 'moderate_confidence' | 'low_confidence' | string;
+  visual_description: string;
+  matched_in_database: boolean;
+  matched_food_id?: number | null;
+  matched_food_slug?: string | null;
+  matched_food_name?: string | null;
+  category_name?: string | null;
+  standard_serving_name?: string | null;
+  standard_serving_grams?: number | null;
+  key_nutrients_per_100?: Record<string, number | null>;
+}
+
 export interface DishCandidate {
+  food_id?: number | null;
   food_slug: string;
   food_name: string;
+  matched_in_database?: boolean;
   image_url?: string | null;
   regional_aliases: string[];
   visual_similarity_score: number;
+  confidence_category?: 'high_confidence' | 'moderate_confidence' | 'low_confidence' | string;
   uncertainty_label: string;
   visual_cue_explanation: string;
   category_name: string;
+  detected_component_label?: string | null;
+  default_basis?: string;
+  standard_serving_name?: string;
+  standard_serving_grams?: number;
+  is_vegetarian?: boolean;
+  is_vegan?: boolean;
+  completeness_pct?: number;
+  available_nutrient_count?: number;
+  missing_nutrient_codes?: string[];
+  source_name?: string | null;
+  source_url?: string | null;
+  publication_year?: number | null;
+  servings?: ServingConversion[];
+  nutrients?: NutrientValue[];
 }
 
 export interface DishRecognitionResponse {
   recognition_id: string;
+  analysis_status?: 'success' | 'low_confidence' | 'vision_unavailable' | 'vision_error' | string;
+  vision_provider?: string;
+  vision_model_used?: string | null;
+  vision_reachable?: boolean;
+  overall_description?: string | null;
   experimental_disclaimer: string;
   privacy_confirmation: string;
   requires_user_confirmation: boolean;
   image_quality_notes: string;
+  detected_components?: DishDetectedComponent[];
+  unrecognized_items?: string[];
+  ambiguity_notes?: string[];
+  remediation_instructions?: string[];
   candidates: DishCandidate[];
 }
 
@@ -611,6 +690,34 @@ export interface MealSuggestionResponse {
 // ==========================================
 // LOCAL OLLAMA AI ASSISTANT TYPES
 // ==========================================
+export interface AssistantSelectedEntity {
+  type:
+    | 'food'
+    | 'packaged_product'
+    | 'barcode_result'
+    | 'recipe'
+    | 'body_region'
+    | 'condition'
+    | 'member'
+    | 'goal'
+    | 'tracker'
+    | 'health_measurement'
+    | 'none'
+    | string;
+  id?: string | null;
+  name?: string | null;
+  category?: string | null;
+  anatomical_system?: string | null;
+  summary?: string | null;
+}
+
+export interface AssistantSelectedMember {
+  id?: number | string | null;
+  name?: string | null;
+  dietary_preference?: string | null;
+  age_group?: string | null;
+}
+
 export interface AssistantPageContext {
   current_path?: string | null;
   food_slug?: string | null;
@@ -618,6 +725,30 @@ export interface AssistantPageContext {
   condition_code?: string | null;
   household_token?: string | null;
   member_id?: number | null;
+  // Structured active-context contract
+  page_type?:
+    | 'food_detail'
+    | 'food_image_analysis'
+    | 'packaged_product'
+    | 'barcode_result'
+    | 'recipe_detail'
+    | 'body_region'
+    | 'condition_detail'
+    | 'household_member'
+    | 'fitness_goal'
+    | 'daily_tracker'
+    | 'health_measurement'
+    | 'general'
+    | string
+    | null;
+  route?: string | null;
+  selected_entity?: AssistantSelectedEntity | null;
+  selected_member?: AssistantSelectedMember | null;
+  selected_condition?: Record<string, any> | string | null;
+  selected_body_region?: Record<string, any> | string | null;
+  selected_recipe?: Record<string, any> | string | null;
+  selected_product?: Record<string, any> | string | null;
+  food_image_analysis?: Record<string, any> | null;
 }
 
 export interface AssistantChatMessage {
@@ -647,8 +778,14 @@ export interface AssistantChatResponse {
   reply: string;
   mode_used: string;
   model_used: string;
+  vision_model_used?: string | null;
   ollama_connected: boolean;
   used_fallback_synthesis: boolean;
+  resolved_entity?: AssistantSelectedEntity | null;
+  resolved_intent?: string | null;
+  requires_clarification?: boolean;
+  requires_user_confirmation?: boolean;
+  pending_confirmation_payload?: Record<string, any> | null;
   tool_traces: AssistantToolExecutionTrace[];
   sources: AssistantSourceReference[];
   suggested_followups: string[];
@@ -661,11 +798,32 @@ export interface AssistantStatusResponse {
   ollama_reachable: boolean;
   configured_model?: string | null;
   active_model?: string | null;
+  recommended_text_model?: string | null;
+  recommended_vision_model?: string | null;
   installed_models: string[];
   status_message: string;
   remediation_command?: string | null;
   available_modes: { id: string; label: string; description: string }[];
   allowlisted_tools: string[];
+}
+
+export interface AssistantVoiceStatusResponse {
+  local_whisper_cpp_available: boolean;
+  local_whisper_binary?: string | null;
+  browser_web_speech_supported_hint: boolean;
+  supported_languages: { code: string; label: string; native_label: string }[];
+  privacy_notice: string;
+  confirmation_policy: string;
+}
+
+export interface AssistantVoiceTranscribeResponse {
+  transcript: string;
+  language: string;
+  engine_used: string;
+  confidence_note: string;
+  requires_review_before_send: boolean;
+  detected_sensitive_action: boolean;
+  sensitive_action_warning?: string | null;
 }
 
 export interface AssistantMessageRecord {

@@ -431,6 +431,32 @@ class RecipeIngredientInput(BaseModel):
     food_slug: str
     quantity: float = Field(..., gt=0)
     unit_name: str = "100g"
+    household_measure_note: str | None = None
+    alternative_ingredient: str | None = None
+    preparation_note: str | None = None
+
+
+class RecipeStepInput(BaseModel):
+    step_number: int = Field(..., ge=1)
+    step_title: str = Field(..., min_length=1, max_length=160)
+    instruction_text: str = Field(..., min_length=1)
+    duration_minutes: int | None = None
+    temperature: str | None = None
+    tip: str | None = None
+    image_url: str | None = None
+    equipment: str | None = None
+
+
+class RecipeStepOut(BaseModel):
+    id: int | None = None
+    step_number: int
+    step_title: str
+    instruction_text: str
+    duration_minutes: int | None = None
+    temperature: str | None = None
+    tip: str | None = None
+    image_url: str | None = None
+    equipment: str | None = None
 
 
 class RecipeCreateRequest(BaseModel):
@@ -439,8 +465,12 @@ class RecipeCreateRequest(BaseModel):
     description: str | None = None
     servings: float = Field(default=2.0, gt=0)
     meal_type: str = "lunch"
+    prep_time_minutes: int | None = None
+    cook_time_minutes: int | None = None
+    difficulty: str | None = "Easy"
     instructions_notes: str | None = None
     ingredients: list[RecipeIngredientInput] = Field(..., min_length=1)
+    steps: list[RecipeStepInput] = Field(default_factory=list)
 
 
 class RecipeNutrientBreakdown(BaseModel):
@@ -462,6 +492,9 @@ class RecipeIngredientContributionOut(BaseModel):
     quantity: float
     unit_name: str
     grams_equivalent: float
+    household_measure_note: str | None = None
+    alternative_ingredient: str | None = None
+    preparation_note: str | None = None
     energy_kcal_contribution: float | None = None
     protein_g_contribution: float | None = None
     carbs_g_contribution: float | None = None
@@ -471,17 +504,37 @@ class RecipeIngredientContributionOut(BaseModel):
 
 class RecipeDetailOut(BaseModel):
     id: int
+    slug: str | None = None
     household_token: str | None = None
     title: str
     description: str | None = None
     image_url: str | None = None
     servings: float
     meal_type: str
+    prep_time_minutes: int | None = None
+    cook_time_minutes: int | None = None
+    total_time_minutes: int | None = None
+    difficulty: str = "Easy"
+    estimated_cost_inr: float | None = None
+    cost_per_serving_inr: float | None = None
+    source_type: str = "gharplate_verified"
+    source_name: str = "GharPlate IFCT 2017 / ICMR-NIN DGI 2024 Kitchen"
+    source_url: str | None = None
+    verification_status: str = "gharplate_verified"
+    verification_badge_label: str = "GharPlate-curated recipe"
+    instructions_reviewed: bool = True
+    instructions_status: str = "available"
+    is_favourite: bool = False
+    user_rating: int | None = None
+    rating_notes: str | None = None
+    dietary_tags: list[str] = Field(default_factory=list)
+    suitable_goals: list[str] = Field(default_factory=list)
     total_weight_grams: float
     serving_weight_grams: float
     completeness_pct: float
     completeness_notice: str
     instructions_notes: str | None = None
+    steps: list[RecipeStepOut] = Field(default_factory=list)
     ingredients: list[RecipeIngredientContributionOut]
     nutrients: list[RecipeNutrientBreakdown]
     created_at: datetime
@@ -609,24 +662,67 @@ class ProductProvenanceResponse(BaseModel):
     data_conflicts: list[ProductDataConflictOut]
 
 
+class DishDetectedComponentOut(BaseModel):
+    component_label: str = ""
+    component_name: str | None = None
+    confidence_score: float = 0.80
+    confidence_category: str = "moderate_confidence"
+    visual_description: str = ""
+    visual_evidence: str | None = None
+    matched_in_database: bool = False
+    matched_food_id: int | None = None
+    matched_food_slug: str | None = None
+    matched_food_name: str | None = None
+    category_name: str | None = None
+    standard_serving_name: str | None = None
+    standard_serving_grams: float | None = None
+    key_nutrients_per_100: dict[str, float | None] = Field(default_factory=dict)
+
+
 class DishCandidateOut(BaseModel):
+    food_id: int | None = None
     food_slug: str
     food_name: str
     image_url: str | None = None
-    regional_aliases: list[str]
-    visual_similarity_score: float
+    regional_aliases: list[str] = Field(default_factory=list)
+    visual_similarity_score: float = 0.75
+    confidence_category: str = "moderate_confidence"  # high_confidence, moderate_confidence, low_confidence
     uncertainty_label: str
     visual_cue_explanation: str
     category_name: str
+    detected_component_label: str | None = None
+    matched_in_database: bool = True
+    default_basis: str = "100g"
+    standard_serving_name: str | None = None
+    standard_serving_grams: float | None = None
+    is_vegetarian: bool | None = None
+    is_vegan: bool | None = None
+    completeness_pct: float | None = None
+    available_nutrient_count: int | None = None
+    missing_nutrient_codes: list[str] = Field(default_factory=list)
+    source_name: str | None = None
+    source_url: str | None = None
+    publication_year: int | None = None
+    servings: list[ServingConversionOut] = Field(default_factory=list)
+    nutrients: list[NutrientValueOut] = Field(default_factory=list)
 
 
 class DishRecognitionResponse(BaseModel):
     recognition_id: str
+    analysis_status: str = "vision_success"  # vision_success, vision_low_confidence, vision_unrecognized, vision_unavailable
+    vision_provider: str = "ollama_local_vision"
+    vision_model_used: str | None = None
+    vision_reachable: bool = True
+    overall_description: str | None = None
     experimental_disclaimer: str
     privacy_confirmation: str
-    requires_user_confirmation: bool
+    requires_user_confirmation: bool = True
     image_quality_notes: str
-    candidates: list[DishCandidateOut]
+    detected_components: list[DishDetectedComponentOut] = Field(default_factory=list)
+    unrecognized_items: list[str] = Field(default_factory=list)
+    ambiguity_notes: list[str] = Field(default_factory=list)
+    remediation_instructions: list[str] = Field(default_factory=list)
+    candidates: list[DishCandidateOut] = Field(default_factory=list)
 
 
 class ProductComparisonRequest(BaseModel):
@@ -703,6 +799,25 @@ class MealSuggestionResponse(BaseModel):
 # ==========================================
 # LOCAL OLLAMA AI ASSISTANT SCHEMAS
 # ==========================================
+class AssistantSelectedEntity(BaseModel):
+    type: str = Field(
+        default="none",
+        description="Entity type: food, food_image_analysis, packaged_product, barcode_result, recipe, body_region, condition, member, goal, tracker, health_measurement, none",
+    )
+    id: str | None = None
+    name: str | None = None
+    category: str | None = None
+    anatomical_system: str | None = None
+    summary: str | None = None
+
+
+class AssistantSelectedMember(BaseModel):
+    id: int | str | None = None
+    name: str | None = None
+    dietary_preference: str | None = None
+    age_group: str | None = None
+
+
 class AssistantPageContext(BaseModel):
     current_path: str | None = None
     food_slug: str | None = None
@@ -710,6 +825,19 @@ class AssistantPageContext(BaseModel):
     condition_code: str | None = None
     household_token: str | None = None
     member_id: int | None = None
+    # Structured active-context contract (Part B Section 7)
+    page_type: str | None = Field(
+        default=None,
+        description="food_detail, food_image_analysis, packaged_product, barcode_result, recipe_detail, body_region, condition_detail, household_member, fitness_goal, daily_tracker, health_measurement, general",
+    )
+    route: str | None = None
+    selected_entity: AssistantSelectedEntity | None = None
+    selected_member: AssistantSelectedMember | None = None
+    selected_condition: dict[str, Any] | str | None = None
+    selected_body_region: dict[str, Any] | str | None = None
+    selected_recipe: dict[str, Any] | str | None = None
+    selected_product: dict[str, Any] | str | None = None
+    food_image_analysis: dict[str, Any] | None = None
 
 
 class AssistantChatMessage(BaseModel):
@@ -725,6 +853,12 @@ class AssistantChatRequest(BaseModel):
         description="Search mode: 'database_only' (My GharPlate Database), 'automatic' (Automatic), or 'online_search' (Search Online)",
     )
     model: str | None = None
+    vision_model: str | None = None
+    language_preference: str = Field(
+        default="en-IN",
+        description="Preferred response language: en-IN (English), hi-IN (Hindi), kn-IN (Kannada)",
+    )
+    voice_input_used: bool = False
     history: list[AssistantChatMessage] = Field(default_factory=list)
     context: AssistantPageContext | None = None
 
@@ -751,8 +885,14 @@ class AssistantChatResponse(BaseModel):
     reply: str
     mode_used: str
     model_used: str
+    vision_model_used: str | None = None
     ollama_connected: bool
     used_fallback_synthesis: bool = False
+    resolved_entity: AssistantSelectedEntity | None = None
+    resolved_intent: str | None = None
+    requires_clarification: bool = False
+    requires_user_confirmation: bool = False
+    pending_confirmation_payload: dict[str, Any] | None = None
     tool_traces: list[AssistantToolExecutionTrace] = Field(default_factory=list)
     sources: list[AssistantSourceReference] = Field(default_factory=list)
     suggested_followups: list[str] = Field(default_factory=list)
@@ -765,11 +905,46 @@ class AssistantStatusResponse(BaseModel):
     ollama_reachable: bool
     configured_model: str | None = None
     active_model: str | None = None
+    recommended_text_model: str | None = None
+    recommended_vision_model: str | None = None
     installed_models: list[str] = Field(default_factory=list)
     status_message: str
     remediation_command: str | None = None
     available_modes: list[dict[str, str]] = Field(default_factory=list)
     allowlisted_tools: list[str] = Field(default_factory=list)
+
+
+class AssistantVoiceStatusResponse(BaseModel):
+    voice_enabled: bool = True
+    stt_modes: list[dict[str, Any]] = Field(default_factory=list)
+    tts_modes: list[dict[str, Any]] = Field(default_factory=list)
+    local_whisper_cpp_available: bool = False
+    local_whisper_binary: str | None = None
+    browser_web_speech_supported_hint: bool = True
+    supported_languages: list[dict[str, str]] = Field(default_factory=list)
+    privacy_notice: str
+    confirmation_policy: str
+
+
+class AssistantVoiceTranscribeRequest(BaseModel):
+    transcript_hint: str | None = None
+    language_code: str = "en-IN"
+    language: str = "en-IN"
+    audio_base64: str | None = None
+
+
+class AssistantVoiceTranscribeResponse(BaseModel):
+    transcript: str
+    language_code: str = "en-IN"
+    language: str = "en-IN"
+    engine_used: str
+    confidence: float = 0.95
+    confidence_note: str = "Normalized locally"
+    requires_review: bool = False
+    requires_review_before_send: bool = False
+    privacy_notice: str | None = None
+    detected_sensitive_action: bool = False
+    sensitive_action_warning: str | None = None
 
 
 class AssistantConversationCreateRequest(BaseModel):

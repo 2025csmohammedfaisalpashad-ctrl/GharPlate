@@ -9,12 +9,15 @@ PRIVACY & INTEGRITY GUARANTEES:
    USDA FoodData Central Branded Foods) when a local record is incomplete (such as Pineapple Cake 8906005618726).
 """
 
+import base64
 import gc
 import io
+import json
 import re
 import uuid
 from datetime import datetime, UTC
 from typing import Any
+import httpx
 from PIL import Image, ImageFilter, ImageOps, ImageStat
 from sqlalchemy.orm import Session, joinedload
 
@@ -46,6 +49,7 @@ from app.schemas.api_schemas import (
     AllergenConsistencyOut,
     BarcodeLookupResponse,
     DishCandidateOut,
+    DishDetectedComponentOut,
     DishRecognitionResponse,
     ManualProductCreateRequest,
     OCRFieldPrediction,
@@ -76,13 +80,70 @@ def validate_and_inspect_image_in_memory(
             img.verify()
         buf.seek(0)
         with Image.open(buf) as img2:
-            rgb = img2.convert("RGB")
+            rgb = ImageOps.exif_transpose(img2).convert("RGB")
             width, height = rgb.size
+            if width < 16 or height < 16:
+                raise ValueError(
+                    f"Image dimensions ({width}x{height}px) are too small for food analysis. Minimum supported size is 16x16px."
+                )
             stat = ImageStat.Stat(rgb)
             mean_rgb = (stat.mean[0], stat.mean[1], stat.mean[2])
             return width, height, mean_rgb
+    except ValueError:
+        raise
     except Exception as exc:
         raise ValueError(f"Invalid or corrupted image file: {exc}") from exc
+    finally:
+        buf.close()
+
+
+def evaluate_image_quality_in_memory(file_bytes: bytes) -> dict[str, Any]:
+    """
+    Evaluates image brightness and edge sharpness strictly in RAM without saving to disk.
+    Flags poorly lit or blurry photographs honestly so the user knows when visual certainty is reduced.
+    """
+    buf = io.BytesIO(file_bytes)
+    try:
+        with Image.open(buf) as raw_img:
+            rgb = ImageOps.exif_transpose(raw_img).convert("RGB")
+            width, height = rgb.size
+            gray = rgb.convert("L")
+            gray_stat = ImageStat.Stat(gray)
+            brightness = float(gray_stat.mean[0])
+            contrast_std = float(gray_stat.stddev[0])
+            edges = gray.filter(ImageFilter.FIND_EDGES)
+            edge_stat = ImageStat.Stat(edges)
+            sharpness = float(edge_stat.stddev[0])
+
+            is_poorly_lit = brightness < 42.0
+            is_overexposed = brightness > 246.0 and contrast_std < 12.0
+            is_blurry = sharpness < 6.5 and contrast_std < 15.0
+
+            notes: list[str] = [f"Analysed {width}x{height}px RGB photograph in memory."]
+            warnings: list[str] = []
+            if is_poorly_lit:
+                msg = "Low-light photograph detected — dim lighting may reduce visual food identification accuracy."
+                notes.append(msg)
+                warnings.append(msg)
+            if is_overexposed:
+                msg = "Very high brightness / low contrast detected — fine food textures may be washed out."
+                notes.append(msg)
+                warnings.append(msg)
+            if is_blurry:
+                msg = "Low edge sharpness / possible blur detected — please confirm the identified food carefully."
+                notes.append(msg)
+                warnings.append(msg)
+
+            return {
+                "width": width,
+                "height": height,
+                "brightness": round(brightness, 1),
+                "sharpness": round(sharpness, 1),
+                "is_poorly_lit": is_poorly_lit,
+                "is_blurry": is_blurry,
+                "quality_summary": " ".join(notes),
+                "quality_warnings": warnings,
+            }
     finally:
         buf.close()
 
@@ -1217,6 +1278,484 @@ def create_user_confirmed_product(
     return serialize_food_detail(db, food)
 
 
+def _prepare_image_base64_for_vision(file_bytes: bytes) -> str:
+    """
+    Normalizes orientation, resizes large images to max 1024px in RAM for fast local multimodal
+    inference, and returns base64-encoded JPEG bytes without writing anything to disk.
+    """
+    buf = io.BytesIO(file_bytes)
+    out_buf = io.BytesIO()
+    try:
+        with Image.open(buf) as raw_img:
+            rgb = ImageOps.exif_transpose(raw_img).convert("RGB")
+            rgb.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
+            rgb.save(out_buf, format="JPEG", quality=86)
+        return base64.b64encode(out_buf.getvalue()).decode("ascii")
+    finally:
+        buf.close()
+        out_buf.close()
+
+
+def discover_ollama_vision_model() -> tuple[bool, str | None, str, str | None]:
+    """
+    Discovers a locally running multimodal vision model in Ollama across configured
+    OLLAMA_VISION_BASE_URL, OLLAMA_BASE_URL, and Docker host fallback (`http://host.docker.internal:11434`).
+    Returns (reachable, vision_model_name, base_url_used, remediation_or_error).
+    """
+    candidate_urls: list[str] = []
+    for u in (
+        settings.OLLAMA_VISION_BASE_URL,
+        settings.OLLAMA_BASE_URL,
+        "http://127.0.0.1:11434",
+        "http://host.docker.internal:11434",
+    ):
+        clean_u = (u or "").strip().rstrip("/")
+        if clean_u and clean_u not in candidate_urls:
+            candidate_urls.append(clean_u)
+
+    preferred = (settings.OLLAMA_VISION_MODEL or "qwen2.5vl:7b").strip()
+    last_err: str | None = None
+
+    for base_url in candidate_urls:
+        try:
+            with httpx.Client(timeout=3.5) as client:
+                resp = client.get(f"{base_url}/api/tags")
+                if resp.status_code != 200:
+                    last_err = f"Ollama returned HTTP {resp.status_code} at {base_url}."
+                    continue
+                data = resp.json()
+                models_raw = data.get("models") or []
+                installed = [
+                    str(m.get("name") or m.get("model"))
+                    for m in models_raw
+                    if isinstance(m, dict) and (m.get("name") or m.get("model"))
+                ]
+                if not installed:
+                    return (
+                        True,
+                        None,
+                        base_url,
+                        f"Ollama is running at {base_url}, but no vision model is installed. Run `ollama pull {preferred}` to enable local AI photo recognition.",
+                    )
+
+                # 1. Exact or prefix match on configured OLLAMA_VISION_MODEL
+                for m in installed:
+                    if m == preferred or m.startswith(f"{preferred}:"):
+                        return True, m, base_url, None
+
+                # 2. Any installed multimodal vision model (vl, vision, llava, minicpm-v, bakllava, gemma3, pixtral)
+                vision_keywords = ("vl", "vision", "llava", "minicpm", "bakllava", "pixtral", "moondream")
+                for m in installed:
+                    m_low = m.lower()
+                    if any(vk in m_low for vk in vision_keywords):
+                        return True, m, base_url, None
+
+                # 3. Inspect /api/show capabilities for multimodal support
+                for m in installed[:5]:
+                    try:
+                        show_resp = client.post(f"{base_url}/api/show", json={"model": m})
+                        if show_resp.status_code == 200:
+                            show_data = show_resp.json()
+                            caps = [str(c).lower() for c in (show_data.get("capabilities") or [])]
+                            families = [
+                                str(f).lower()
+                                for f in ((show_data.get("details") or {}).get("families") or [])
+                            ]
+                            if "vision" in caps or "clip" in families or "mllama" in families or any("vl" in f for f in families):
+                                return True, m, base_url, None
+                    except Exception:
+                        continue
+
+                return (
+                    True,
+                    None,
+                    base_url,
+                    f"Ollama is running at {base_url} (models: {', '.join(installed)}), but none of the installed models support multimodal image vision. Run `ollama pull {preferred}` to install a local vision model.",
+                )
+        except Exception as exc:
+            last_err = f"Could not connect to local Ollama server at {base_url} ({exc.__class__.__name__})."
+
+    return (
+        False,
+        None,
+        candidate_urls[0] if candidate_urls else "http://127.0.0.1:11434",
+        f"{last_err or 'Local Ollama server is not reachable.'} Start Ollama with `ollama serve` and ensure `{preferred}` is installed (`ollama pull {preferred}`).",
+    )
+
+
+def _extract_json_object_from_text(raw_text: str) -> dict[str, Any] | None:
+    """
+    Safely parses JSON output from the local vision model, stripping markdown code fences if present.
+    """
+    cleaned = (raw_text or "").strip()
+    if not cleaned:
+        return None
+    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s*```$", "", cleaned)
+    try:
+        parsed = json.loads(cleaned)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+    m = re.search(r"\{[\s\S]*\}", cleaned)
+    if m:
+        try:
+            parsed = json.loads(m.group(0))
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+    return None
+
+
+def analyze_image_with_ollama_vision(
+    file_bytes: bytes,
+    user_hint: str | None = None,
+    catalog_food_names: list[str] | None = None,
+) -> dict[str, Any]:
+    """
+    Executes genuine multimodal food image analysis using the local Ollama vision model
+    (`POST /api/generate` with `images: [base64_str]` and `format: 'json'`).
+    Never uses filename tokens as a fake recognition shortcut and never fabricates results.
+    """
+    reachable, vision_model, base_url, err_msg = discover_ollama_vision_model()
+    if not reachable or not vision_model:
+        return {
+            "status": "vision_unavailable",
+            "vision_reachable": reachable,
+            "vision_model_used": vision_model,
+            "error_message": err_msg,
+        }
+
+    b64_image = _prepare_image_base64_for_vision(file_bytes)
+    catalog_sample = ", ".join((catalog_food_names or [])[:75])
+    hint_clause = (
+        f"Optional user-supplied note: '{user_hint.strip()}'. Use this only as supplementary context; rely primarily on what is visually present in the photograph.\n"
+        if (user_hint and user_hint.strip())
+        else ""
+    )
+
+    prompt = (
+        "You are an expert Indian food and nutrition visual analyst for GharPlate.\n"
+        "Inspect the uploaded photograph carefully and identify all visible food items, dishes, fruits, vegetables, staples, curries, accompaniments, or packaged foods.\n"
+        f"{hint_clause}"
+        f"Known GharPlate database foods include: {catalog_sample}.\n\n"
+        "Return ONLY a valid JSON object with this exact structure:\n"
+        "{\n"
+        '  "is_food_image": true,\n'
+        '  "overall_description": "Concise 1-2 sentence description of what is visible in the photograph",\n'
+        '  "primary_candidates": [\n'
+        "    {\n"
+        '      "name": "Specific food or dish name (e.g. Idli (Steamed Rice-Lentil Cake), Masala Dosa, Banana (Ripe), Plain Steamed Rice, Dal Tadka, Palak Paneer)",\n'
+        '      "canonical_search_terms": ["idli", "steamed rice cake"],\n'
+        '      "confidence_score": 0.92,\n'
+        '      "confidence_category": "high_confidence | moderate_confidence | low_confidence",\n'
+        '      "visual_evidence": "Specific visual features observed (shape, texture, colour, accompaniments, plate arrangement)"\n'
+        "    }\n"
+        "  ],\n"
+        '  "detected_components": [\n'
+        "    {\n"
+        '      "label": "Component name on the plate (e.g. Idli, Sambar, Coconut Chutney, Rice, Dal, Roti)",\n'
+        '      "confidence_score": 0.88,\n'
+        '      "confidence_category": "high_confidence | moderate_confidence | low_confidence",\n'
+        '      "visual_description": "Brief visual note for this component"\n'
+        "    }\n"
+        "  ],\n"
+        '  "ambiguity_notes": ["Note any visual ambiguity, e.g. plain dosa vs masala dosa filling not visible, or lighting/blur limitations"]\n'
+        "}\n"
+        "Rules:\n"
+        "1. If the photograph shows a single food (e.g. a banana, apple, idli, or roti), list it as the top primary_candidate and in detected_components.\n"
+        "2. If the photograph shows a multi-item Indian meal or thali (e.g. rice + dal + vegetable curry + curd, or idli + sambar + chutney), list each distinct visible item in detected_components and in primary_candidates.\n"
+        "3. If the photograph does NOT show food or is completely unrecognizable, set is_food_image to false or confidence_category to low_confidence and explain honestly."
+    )
+
+    try:
+        with httpx.Client(timeout=float(max(settings.OLLAMA_TIMEOUT_SECONDS, 45))) as client:
+            resp = client.post(
+                f"{base_url}/api/generate",
+                json={
+                    "model": vision_model,
+                    "prompt": prompt,
+                    "images": [b64_image],
+                    "format": "json",
+                    "stream": False,
+                    "options": {"temperature": 0.1},
+                },
+            )
+            if resp.status_code != 200:
+                return {
+                    "status": "vision_error",
+                    "vision_reachable": True,
+                    "vision_model_used": vision_model,
+                    "error_message": f"Ollama vision model '{vision_model}' returned HTTP {resp.status_code}.",
+                }
+            payload = resp.json()
+            raw_response = str(payload.get("response") or "").strip()
+            parsed = _extract_json_object_from_text(raw_response)
+            if not parsed:
+                return {
+                    "status": "vision_error",
+                    "vision_reachable": True,
+                    "vision_model_used": vision_model,
+                    "error_message": "Local vision model returned an unreadable response format. Please retry or search the food manually.",
+                }
+            return {
+                "status": "success",
+                "vision_reachable": True,
+                "vision_model_used": vision_model,
+                "analysis": parsed,
+            }
+    except Exception as exc:
+        return {
+            "status": "vision_error",
+            "vision_reachable": False,
+            "vision_model_used": vision_model,
+            "error_message": f"Local vision inference failed ({exc.__class__.__name__}: {exc}). Ensure Ollama is running (`ollama serve`).",
+        }
+
+
+_FOOD_SYNONYM_MAP: dict[str, list[str]] = {
+    "idli": ["idli-steamed-rice-lentil", "idli"],
+    "idly": ["idli-steamed-rice-lentil", "idli"],
+    "steamed white cakes": ["idli-steamed-rice-lentil"],
+    "steamed rice cake": ["idli-steamed-rice-lentil"],
+    "masala dosa": ["masala-dosa", "dosa-plain"],
+    "plain dosa": ["dosa-plain", "masala-dosa"],
+    "dosa": ["dosa-plain", "masala-dosa"],
+    "sambar": ["sambar-vegetable-lentil-stew"],
+    "rasam": ["rasam-tomato-pepper"],
+    "poha": ["poha-avalakki-cooked"],
+    "avalakki": ["poha-avalakki-cooked"],
+    "upma": ["upma-rava-semolina"],
+    "khichdi": ["khichdi-moong-dal-rice"],
+    "pongal": ["pongal-khara-ven-pongal"],
+    "bisi bele bath": ["bisi-bele-bath"],
+    "curd rice": ["curd-rice-mosaranna"],
+    "mosaranna": ["curd-rice-mosaranna"],
+    "palak paneer": ["palak-paneer-curry"],
+    "paneer": ["paneer-cottage-cheese", "palak-paneer-curry"],
+    "chicken biryani": ["chicken-biryani"],
+    "biryani": ["chicken-biryani"],
+    "ragi mudde": ["ragi-mudde-finger-millet-ball", "ragi-finger-millet"],
+    "chapati": ["chapati-roti-whole-wheat"],
+    "roti": ["chapati-roti-whole-wheat"],
+    "phulka": ["chapati-roti-whole-wheat"],
+    "paratha": ["chapati-roti-whole-wheat"],
+    "rice": ["rice-raw-milled", "rice-parboiled-home", "curd-rice-mosaranna"],
+    "steamed rice": ["rice-raw-milled", "rice-parboiled-home"],
+    "white rice": ["rice-raw-milled"],
+    "brown rice": ["rice-brown-whole"],
+    "dal": ["toor-dal-arhar", "moong-dal-split-yellow", "masoor-dal-red-lentil", "chana-dal-split-bengal-gram"],
+    "toor dal": ["toor-dal-arhar", "sambar-vegetable-lentil-stew"],
+    "moong dal": ["moong-dal-split-yellow", "khichdi-moong-dal-rice"],
+    "rajma": ["rajma-red-kidney-bean"],
+    "chole": ["chickpea-kabuli-chana"],
+    "chana": ["chickpea-kabuli-chana", "bengal-gram-whole-kala-chana"],
+    "banana": ["banana-ripe-robusta"],
+    "apple": ["apple-fresh"],
+    "guava": ["guava-pink-white"],
+    "papaya": ["papaya-ripe"],
+    "mango": ["mango-ripe-banganapalli"],
+    "orange": ["orange-mandarin"],
+    "pomegranate": ["pomegranate-fresh"],
+    "carrot": ["carrot-orange"],
+    "spinach": ["spinach-palak-leaf"],
+    "tomato": ["tomato-ripe-red"],
+    "potato": ["potato-brown-skin"],
+    "onion": ["onion-big-red"],
+    "okra": ["okra-bhindi"],
+    "bhindi": ["okra-bhindi"],
+    "curd": ["curd-dahi-whole-milk"],
+    "dahi": ["curd-dahi-whole-milk"],
+    "yogurt": ["curd-dahi-whole-milk"],
+    "milk": ["milk-cow-whole", "milk-buffalo-whole"],
+    "egg": ["egg-hen-whole-raw"],
+    "boiled egg": ["egg-hen-whole-raw"],
+    "omelette": ["egg-hen-whole-raw"],
+    "chicken": ["chicken-breast-skinless", "chicken-biryani"],
+    "fish": ["rohu-fish-fresh", "mackerel-bangda"],
+    "almonds": ["almond-badam-dry"],
+    "peanuts": ["groundnut-peanut-raw"],
+}
+
+
+def _match_food_query_to_catalog(
+    db: Session,
+    query_terms: list[str],
+    all_foods: list[FoodItem] | None = None,
+) -> FoodItem | None:
+    """
+    Matches a vision model's proposed food name or search terms against the ENTIRE GharPlate
+    food database (cooked Indian dishes, fruits, vegetables, staples, pulses, dairy, eggs, nuts,
+    and packaged products), including English, Kannada, and Hindi aliases.
+    """
+    if all_foods is None:
+        all_foods = (
+            db.query(FoodItem)
+            .options(
+                joinedload(FoodItem.category),
+                joinedload(FoodItem.source),
+                joinedload(FoodItem.aliases),
+                joinedload(FoodItem.nutrient_values).joinedload(FoodNutrientValue.source),
+                joinedload(FoodItem.servings),
+            )
+            .all()
+        )
+
+    by_slug = {f.slug: f for f in all_foods}
+    cleaned_terms = [normalize_query(t) for t in query_terms if t and normalize_query(t)]
+    if not cleaned_terms:
+        return None
+
+    # 1. Check direct synonym table first
+    for term in cleaned_terms:
+        if term in _FOOD_SYNONYM_MAP:
+            for cand_slug in _FOOD_SYNONYM_MAP[term]:
+                if cand_slug in by_slug:
+                    return by_slug[cand_slug]
+        for syn_key, cand_slugs in _FOOD_SYNONYM_MAP.items():
+            if re.search(rf"\b{re.escape(syn_key)}\b", term):
+                for cand_slug in cand_slugs:
+                    if cand_slug in by_slug:
+                        return by_slug[cand_slug]
+
+    # 2. Score all database items across name_en, slug, and multilingual aliases
+    best_food: FoodItem | None = None
+    best_score = 0.0
+
+    for food in all_foods:
+        name_norm = normalize_query(food.name_en)
+        base_name_norm = normalize_query(re.sub(r"\s*\(.*?\)", "", food.name_en))
+        slug_norm = food.slug.replace("-", " ").lower()
+        alias_norms = [normalize_query(a.alias_text) for a in (food.aliases or [])]
+
+        score = 0.0
+        for term in cleaned_terms:
+            if not term:
+                continue
+            if term == name_norm or term == base_name_norm or term == slug_norm or term in alias_norms:
+                score = max(score, 100.0)
+                break
+            if len(term) >= 3 and (term in base_name_norm or base_name_norm in term):
+                score = max(score, 82.0)
+            elif len(term) >= 3 and any(term in an or an in term for an in alias_norms if len(an) >= 3):
+                score = max(score, 78.0)
+            else:
+                term_tokens = [tok for tok in term.split() if len(tok) >= 3 and tok not in ("indian", "cooked", "fresh", "raw", "dish", "curry", "plate", "bowl")]
+                if term_tokens:
+                    searchable_blob = " ".join([name_norm, slug_norm] + alias_norms)
+                    matched_toks = sum(1 for tok in term_tokens if re.search(rf"\b{re.escape(tok)}", searchable_blob))
+                    if matched_toks > 0:
+                        score = max(score, 45.0 * (matched_toks / len(term_tokens)) + (10.0 if food.category.slug == "indian-dishes" else 0.0))
+
+        if score > best_score:
+            best_score = score
+            best_food = food
+
+    return best_food if best_score >= 42.0 else None
+
+
+def _confidence_category_from_score(score: float, explicit_cat: str | None = None) -> tuple[str, str]:
+    cat = (explicit_cat or "").strip().lower()
+    if cat not in ("high_confidence", "moderate_confidence", "low_confidence"):
+        if score >= 0.78:
+            cat = "high_confidence"
+        elif score >= 0.48:
+            cat = "moderate_confidence"
+        else:
+            cat = "low_confidence"
+
+    label_map = {
+        "high_confidence": "High visual confidence (confirm portion below)",
+        "moderate_confidence": "Moderate visual confidence — please confirm or select an alternative",
+        "low_confidence": "Low visual confidence — uncertain appearance, please verify manually",
+    }
+    return cat, label_map[cat]
+
+
+def _build_dish_candidate_from_food(
+    db: Session,
+    food: FoodItem,
+    score: float,
+    visual_explanation: str,
+    explicit_confidence_cat: str | None = None,
+    detected_component_label: str | None = None,
+) -> DishCandidateOut:
+    detail = serialize_food_detail(db, food)
+    clamped_score = max(0.05, min(round(float(score), 2), 0.99))
+    conf_cat, uncertainty_label = _confidence_category_from_score(clamped_score, explicit_confidence_cat)
+    aliases_list = list({a.alias_text for a in (food.aliases or []) if a.alias_text != food.name_en})[:5]
+    return DishCandidateOut(
+        food_id=food.id,
+        food_slug=food.slug,
+        food_name=food.name_en,
+        matched_in_database=True,
+        image_url=food.image_url,
+        regional_aliases=aliases_list,
+        visual_similarity_score=clamped_score,
+        confidence_category=conf_cat,
+        uncertainty_label=uncertainty_label,
+        visual_cue_explanation=visual_explanation or f"Identified by local vision model and matched to verified GharPlate record '{food.name_en}'.",
+        category_name=food.category.name if food.category else "Indian Foods",
+        detected_component_label=detected_component_label,
+        default_basis=detail.default_basis,
+        standard_serving_name=detail.standard_serving_name,
+        standard_serving_grams=detail.standard_serving_grams,
+        is_vegetarian=detail.is_vegetarian,
+        is_vegan=detail.is_vegan,
+        completeness_pct=detail.completeness_pct,
+        available_nutrient_count=detail.available_nutrient_count,
+        missing_nutrient_codes=detail.missing_nutrient_codes,
+        source_name=detail.source.name,
+        source_url=detail.source.url,
+        publication_year=detail.source.publication_year,
+        servings=detail.servings,
+        nutrients=detail.nutrients,
+    )
+
+
+def _build_unmatched_dish_candidate(
+    proposed_name: str,
+    score: float,
+    visual_explanation: str,
+    explicit_confidence_cat: str | None = None,
+) -> DishCandidateOut:
+    clamped_score = max(0.05, min(round(float(score), 2), 0.95))
+    conf_cat, _ = _confidence_category_from_score(clamped_score, explicit_confidence_cat)
+    slug_placeholder = "unmatched-" + re.sub(r"[^a-z0-9]+", "-", proposed_name.lower()).strip("-")[:48]
+    return DishCandidateOut(
+        food_id=None,
+        food_slug=slug_placeholder,
+        food_name=proposed_name,
+        matched_in_database=False,
+        image_url=None,
+        regional_aliases=[],
+        visual_similarity_score=clamped_score,
+        confidence_category=conf_cat,
+        uncertainty_label="Identified visually, but no verified nutrition record exists in the GharPlate database",
+        visual_cue_explanation=(
+            f"{visual_explanation} — Note: '{proposed_name}' does not yet have a verified composition record in GharPlate. "
+            "GharPlate never invents nutrient numbers; search for the closest verified ingredient below."
+        ),
+        category_name="Unmatched Visual Detection",
+        detected_component_label=proposed_name,
+        default_basis="100g",
+        standard_serving_name="100 g",
+        standard_serving_grams=100.0,
+        is_vegetarian=True,
+        is_vegan=False,
+        completeness_pct=0.0,
+        available_nutrient_count=0,
+        missing_nutrient_codes=[],
+        source_name=None,
+        source_url=None,
+        publication_year=None,
+        servings=[],
+        nutrients=[],
+    )
+
+
 def recognize_indian_dish_from_image(
     db: Session,
     file_bytes: bytes,
@@ -1225,97 +1764,292 @@ def recognize_indian_dish_from_image(
     user_hint: str | None = None,
 ) -> DishRecognitionResponse:
     """
-    Experimental Indian Dish Image Recognition (Module 8).
-    Processes image strictly in memory, computes colour/brightness cues + filename/hint context,
-    and returns candidate dishes with explicit uncertainty.
+    Real Multimodal AI Food Photo Analyzer (Module 8 Upgrade).
+    1. Validates image format, size (<= 5 MB), and dimensions (>= 16x16) strictly in RAM.
+    2. Evaluates lighting and sharpness (`evaluate_image_quality_in_memory`) without saving to disk.
+    3. Queries the local Ollama multimodal vision model (`qwen2.5vl:7b` or installed vision model)
+       using the official `/api/generate` multimodal `images` payload.
+    4. Matches identified single foods or multi-item plate components against the entire GharPlate
+       database (`FoodItem` + `FoodAlias` across English, Kannada, and Hindi) and attaches real
+       verified nutrient profiles, household serving conversions, and provenance.
+    5. Never reports filename/RGB heuristics as AI vision recognition.
     """
-    width, height, (r_mean, g_mean, b_mean) = validate_and_inspect_image_in_memory(
+    width, height, _mean_rgb = validate_and_inspect_image_in_memory(
         file_bytes, content_type
     )
+    quality_info = evaluate_image_quality_in_memory(file_bytes)
+
+    all_foods = (
+        db.query(FoodItem)
+        .options(
+            joinedload(FoodItem.category),
+            joinedload(FoodItem.source),
+            joinedload(FoodItem.aliases),
+            joinedload(FoodItem.nutrient_values).joinedload(FoodNutrientValue.source),
+            joinedload(FoodItem.servings),
+        )
+        .all()
+    )
+    catalog_names = [f.name_en for f in all_foods]
+
+    vision_res = analyze_image_with_ollama_vision(
+        file_bytes=file_bytes,
+        user_hint=user_hint,
+        catalog_food_names=catalog_names,
+    )
+
+    # Explicitly purge raw image bytes from RAM immediately after vision inference
     del file_bytes
     gc.collect()
 
-    dishes = (
-        db.query(FoodItem)
-        .options(joinedload(FoodItem.category), joinedload(FoodItem.aliases))
-        .join(FoodCategory)
-        .filter(FoodCategory.slug == "indian-dishes")
-        .all()
+    rec_id = f"rec_{uuid.uuid4().hex[:10]}"
+    privacy_msg = (
+        f"Image ({width}x{height}px) was analysed strictly in RAM and purged immediately. "
+        "No photograph was saved to disk or database."
+    )
+    disclaimer_msg = (
+        "EXPERIMENTAL FEATURE — AI FOOD PHOTO ANALYSIS: Visual identification is generated by your local multimodal vision model "
+        "and matched against GharPlate's verified food composition database (IFCT 2017 / ICMR-NIN 2024). "
+        "Please confirm the identified food and select your consumed portion size below."
     )
 
-    hint_blob = f"{filename or ''} {user_hint or ''}".lower()
-    candidates: list[DishCandidateOut] = []
-
-    for dish in dishes:
-        score = 0.28
-        cue_reason = "Matched based on general Indian meal visual profile."
-        dish_text = " ".join(
-            [dish.name_en.lower(), dish.slug.replace("-", " ")]
-            + [a.alias_text.lower() for a in dish.aliases]
+    # If local vision model is unavailable or errored, report honestly (never fake heuristic recognition)
+    if vision_res.get("status") != "success":
+        err_detail = str(
+            vision_res.get("error_message")
+            or "Local Ollama vision model is unavailable."
         )
-
-        for tok in re.findall(r"[a-z]{3,}", hint_blob):
-            if tok in dish_text and tok not in ("img", "jpg", "png", "jpeg", "photo", "food", "meal"):
-                score += 0.42
-                cue_reason = f"Visual profile + strong keyword match on '{tok}'."
+        fallback_candidates: list[DishCandidateOut] = []
+        if user_hint and user_hint.strip():
+            hint_match = _match_food_query_to_catalog(db, [user_hint.strip()], all_foods=all_foods)
+            if hint_match:
+                fallback_candidates.append(
+                    _build_dish_candidate_from_food(
+                        db,
+                        hint_match,
+                        score=0.65,
+                        visual_explanation=f"Matched from your text description '{user_hint.strip()}' while local vision model was unavailable.",
+                        explicit_confidence_cat="moderate_confidence",
+                    )
+                )
+        for dish_item in all_foods:
+            if len(fallback_candidates) >= 3:
                 break
-
-        brightness = (r_mean + g_mean + b_mean) / 3.0
-        if brightness > 185 and dish.slug in ("idli-steamed-rice-lentil", "curd-rice-mosaranna", "rice-raw-milled"):
-            score += 0.26
-            cue_reason = "High luminance / light-ivory colour histogram typical of steamed idli or curd rice."
-        elif r_mean > g_mean + 20 and dish.slug in ("sambar-vegetable-lentil-stew", "rasam-tomato-pepper", "bisi-bele-bath", "chicken-biryani"):
-            score += 0.25
-            cue_reason = "Warm red-amber chrominance typical of tamarind/tomato/spice-rich dishes (Sambar, Bisi Bele Bath, Biryani)."
-        elif g_mean > r_mean and dish.slug in ("palak-paneer-curry",):
-            score += 0.30
-            cue_reason = "Green-dominant colour profile consistent with leafy spinach gravy (Palak Paneer)."
-        elif r_mean > 130 and g_mean > 115 and b_mean < 100 and dish.slug in (
-            "poha-avalakki-cooked",
-            "masala-dosa",
-            "dosa-plain",
-            "khichdi-moong-dal-rice",
-            "pongal-khara-ven-pongal",
-        ):
-            score += 0.24
-            cue_reason = "Golden-yellow/brown colour distribution consistent with turmeric-tempered or griddled dishes (Dosa, Poha, Khichdi, Pongal)."
-        elif brightness < 120 and dish.slug in ("ragi-mudde-finger-millet-ball", "chapati-roti-whole-wheat"):
-            score += 0.22
-            cue_reason = "Earthy low-saturation tone consistent with whole-grain millet (Ragi Mudde) or roasted flatbread."
-
-        score = min(round(score, 2), 0.78)
-        uncertainty = (
-            "Moderate visual similarity (requires user confirmation)"
-            if score >= 0.50
-            else "Low-to-moderate visual possibility (ambiguous appearance)"
+            if dish_item.category and dish_item.category.slug == "indian-dishes":
+                if all(c.food_slug != dish_item.slug for c in fallback_candidates):
+                    fallback_candidates.append(
+                        _build_dish_candidate_from_food(
+                            db,
+                            dish_item,
+                            score=0.35,
+                            visual_explanation="Manual catalog candidate while local Ollama vision server is offline.",
+                            explicit_confidence_cat="low_confidence",
+                        )
+                    )
+        return DishRecognitionResponse(
+            recognition_id=rec_id,
+            analysis_status=str(vision_res.get("status") or "vision_unavailable"),
+            vision_provider=settings.VISION_PROVIDER,
+            vision_model_used=vision_res.get("vision_model_used"),
+            vision_reachable=bool(vision_res.get("vision_reachable", False)),
+            overall_description=err_detail,
+            experimental_disclaimer=disclaimer_msg,
+            privacy_confirmation=privacy_msg,
+            requires_user_confirmation=True,
+            image_quality_notes=str(quality_info.get("quality_summary") or ""),
+            ambiguity_notes=list(quality_info.get("quality_warnings") or []),
+            remediation_instructions=[
+                "Ensure Ollama is running on your Mac (`ollama serve`)",
+                f"Ensure a multimodal vision model is installed (`ollama pull {settings.OLLAMA_VISION_MODEL}`)",
+                "You can still search and select any Indian food manually using the search box below",
+            ],
+            detected_components=[],
+            unrecognized_items=[],
+            candidates=fallback_candidates,
         )
-        aliases_list = list({a.alias_text for a in dish.aliases if a.alias_text != dish.name_en})[:4]
-        candidates.append(
-            DishCandidateOut(
-                food_slug=dish.slug,
-                food_name=dish.name_en,
-                image_url=dish.image_url,
-                regional_aliases=aliases_list,
-                visual_similarity_score=score,
-                uncertainty_label=uncertainty,
-                visual_cue_explanation=cue_reason,
-                category_name=dish.category.name,
+
+    analysis = vision_res.get("analysis") or {}
+    vision_model_used = str(vision_res.get("vision_model_used") or settings.OLLAMA_VISION_MODEL)
+    is_food_image = bool(analysis.get("is_food_image", True))
+    overall_desc = str(
+        analysis.get("overall_description")
+        or "Analysed food photograph using local multimodal vision model."
+    ).strip()
+    raw_primary = analysis.get("primary_candidates") or []
+    raw_components = analysis.get("detected_components") or []
+    ambiguity_notes: list[str] = [
+        str(n).strip() for n in (analysis.get("ambiguity_notes") or []) if str(n).strip()
+    ]
+    for qw in quality_info.get("quality_warnings") or []:
+        if qw not in ambiguity_notes:
+            ambiguity_notes.append(qw)
+
+    candidates: list[DishCandidateOut] = []
+    seen_food_slugs: set[str] = set()
+    unrecognized_items: list[str] = []
+
+    for item in raw_primary:
+        if not isinstance(item, dict):
+            continue
+        raw_name = str(item.get("name") or "").strip()
+        if not raw_name:
+            continue
+        search_terms = [raw_name] + [
+            str(t).strip() for t in (item.get("canonical_search_terms") or []) if str(t).strip()
+        ]
+        try:
+            raw_score = float(item.get("confidence_score", 0.78))
+        except (TypeError, ValueError):
+            raw_score = 0.78
+        if quality_info.get("is_blurry") or quality_info.get("is_poorly_lit"):
+            raw_score = min(raw_score, 0.74)
+        conf_cat_raw = str(item.get("confidence_category") or "").strip() or None
+        if (quality_info.get("is_blurry") or quality_info.get("is_poorly_lit")) and conf_cat_raw == "high_confidence":
+            conf_cat_raw = "moderate_confidence"
+        vis_ev = str(
+            item.get("visual_evidence")
+            or item.get("visual_description")
+            or f"Visually identified as {raw_name} by {vision_model_used}."
+        ).strip()
+
+        matched_food = _match_food_query_to_catalog(db, search_terms, all_foods=all_foods)
+        if matched_food:
+            if matched_food.slug not in seen_food_slugs:
+                seen_food_slugs.add(matched_food.slug)
+                candidates.append(
+                    _build_dish_candidate_from_food(
+                        db,
+                        matched_food,
+                        score=raw_score,
+                        visual_explanation=vis_ev,
+                        explicit_confidence_cat=conf_cat_raw,
+                        detected_component_label=raw_name,
+                    )
+                )
+        else:
+            unrecognized_items.append(raw_name)
+            candidates.append(
+                _build_unmatched_dish_candidate(
+                    proposed_name=raw_name,
+                    score=min(raw_score, 0.65),
+                    visual_explanation=vis_ev,
+                    explicit_confidence_cat="low_confidence"
+                    if raw_score < 0.5
+                    else "moderate_confidence",
+                )
             )
-        )
 
-    candidates.sort(key=lambda c: (-c.visual_similarity_score, c.food_name))
+    detected_components_out: list[DishDetectedComponentOut] = []
+    for comp in raw_components:
+        if not isinstance(comp, dict):
+            continue
+        comp_label = str(comp.get("label") or comp.get("name") or "").strip()
+        if not comp_label:
+            continue
+        try:
+            comp_score = float(comp.get("confidence_score", 0.80))
+        except (TypeError, ValueError):
+            comp_score = 0.80
+        comp_cat, _ = _confidence_category_from_score(
+            comp_score, str(comp.get("confidence_category") or "").strip() or None
+        )
+        comp_desc = str(comp.get("visual_description") or f"Detected {comp_label} on plate.").strip()
+        matched_comp_food = _match_food_query_to_catalog(db, [comp_label], all_foods=all_foods)
+
+        if matched_comp_food:
+            comp_detail = serialize_food_detail(db, matched_comp_food)
+            detected_components_out.append(
+                DishDetectedComponentOut(
+                    component_label=comp_label,
+                    confidence_score=round(comp_score, 2),
+                    confidence_category=comp_cat,
+                    visual_description=comp_desc,
+                    matched_in_database=True,
+                    matched_food_id=matched_comp_food.id,
+                    matched_food_slug=matched_comp_food.slug,
+                    matched_food_name=matched_comp_food.name_en,
+                    category_name=matched_comp_food.category.name if matched_comp_food.category else None,
+                    standard_serving_name=comp_detail.standard_serving_name,
+                    standard_serving_grams=comp_detail.standard_serving_grams,
+                    key_nutrients_per_100={
+                        n.nutrient_code: n.value_per_100
+                        for n in comp_detail.nutrients
+                        if n.nutrient_code in ("energy_kcal", "protein_g", "carbs_g", "fat_total_g", "fibre_g")
+                    },
+                )
+            )
+            if matched_comp_food.slug not in seen_food_slugs:
+                seen_food_slugs.add(matched_comp_food.slug)
+                candidates.append(
+                    _build_dish_candidate_from_food(
+                        db,
+                        matched_comp_food,
+                        score=comp_score,
+                        visual_explanation=comp_desc,
+                        explicit_confidence_cat=comp_cat,
+                        detected_component_label=comp_label,
+                    )
+                )
+        else:
+            if comp_label not in unrecognized_items:
+                unrecognized_items.append(comp_label)
+            detected_components_out.append(
+                DishDetectedComponentOut(
+                    component_label=comp_label,
+                    confidence_score=round(comp_score, 2),
+                    confidence_category=comp_cat,
+                    visual_description=comp_desc,
+                    matched_in_database=False,
+                )
+            )
+
+    # If user provided an explicit text hint that wasn't already included, check if it matches a catalog item
+    if user_hint and user_hint.strip():
+        hint_food = _match_food_query_to_catalog(db, [user_hint.strip()], all_foods=all_foods)
+        if hint_food and hint_food.slug not in seen_food_slugs:
+            seen_food_slugs.add(hint_food.slug)
+            candidates.append(
+                _build_dish_candidate_from_food(
+                    db,
+                    hint_food,
+                    score=0.72,
+                    visual_explanation=f"Matched from your optional description ('{user_hint.strip()}').",
+                    explicit_confidence_cat="moderate_confidence",
+                    detected_component_label=user_hint.strip(),
+                )
+            )
+
+    # Sort matched database candidates ahead of unmatched items, then by confidence score descending
+    candidates.sort(
+        key=lambda c: (1 if c.matched_in_database else 0, c.visual_similarity_score),
+        reverse=True,
+    )
+
+    if not is_food_image or not candidates:
+        status_code = "low_confidence"
+        if not ambiguity_notes:
+            ambiguity_notes.append(
+                "No clear food item could be confidently matched. Please try a clearer photograph or search the GharPlate database manually below."
+            )
+    elif any(c.matched_in_database and c.confidence_category == "high_confidence" for c in candidates):
+        status_code = "success"
+    else:
+        status_code = "low_confidence" if all(c.confidence_category == "low_confidence" for c in candidates) else "success"
 
     return DishRecognitionResponse(
-        recognition_id=f"rec_{uuid.uuid4().hex[:10]}",
-        experimental_disclaimer=(
-            "EXPERIMENTAL FEATURE: Visual dish recognition provides candidate suggestions only and is NEVER a confirmed identification. "
-            "GharPlate does not estimate exact gram weights or calories from photographs, and visual similarity never implies nutritional-data confidence. "
-            "Please select or manually search the actual dish below."
-        ),
-        privacy_confirmation=(
-            f"Image ({width}x{height}px) was analysed strictly in RAM and purged immediately. No photograph was saved to disk or database."
-        ),
+        recognition_id=rec_id,
+        analysis_status=status_code,
+        vision_provider=settings.VISION_PROVIDER,
+        vision_model_used=vision_model_used,
+        vision_reachable=True,
+        overall_description=overall_desc,
+        experimental_disclaimer=disclaimer_msg,
+        privacy_confirmation=privacy_msg,
         requires_user_confirmation=True,
-        image_quality_notes=f"Analysed {width}x{height}px RGB frame (mean RGB: {r_mean:.0f}, {g_mean:.0f}, {b_mean:.0f}).",
-        candidates=candidates[:5],
+        image_quality_notes=str(quality_info.get("quality_summary") or ""),
+        detected_components=detected_components_out,
+        unrecognized_items=unrecognized_items,
+        ambiguity_notes=ambiguity_notes,
+        remediation_instructions=[],
+        candidates=candidates[:8],
     )

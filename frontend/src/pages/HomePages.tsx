@@ -8,6 +8,10 @@ import {
   MacroDistributionBarChart,
   ObservationCard,
 } from '../components/UIWidgets';
+import {
+  clearAssistantEntityContext,
+  publishAssistantContext,
+} from '../hooks/useAssistantContext';
 import { useHousehold } from '../hooks/useHousehold';
 import { api } from '../services/api';
 import type {
@@ -39,6 +43,8 @@ export const HomePage: React.FC = () => {
   );
   const [categories, setCategories] = useState<FoodCategory[]>([]);
   const [featuredFoods, setFeaturedFoods] = useState<FoodSummary[]>([]);
+  const [dailySnapshot, setDailySnapshot] = useState<Record<string, any> | null>(null);
+  const [homeQuickAddOpen, setHomeQuickAddOpen] = useState(false);
 
   useEffect(() => {
     void api.getHealth().then((res) => setStats(res.counts)).catch(() => null);
@@ -48,6 +54,13 @@ export const HomePage: React.FC = () => {
       .then((res) => setFeaturedFoods(res.items))
       .catch(() => null);
   }, []);
+
+  useEffect(() => {
+    void api
+      .getDailyTracker(activeMember?.id)
+      .then((res) => setDailySnapshot(res))
+      .catch(() => null);
+  }, [activeMember?.id]);
 
   const handleQuickSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -59,26 +72,34 @@ export const HomePage: React.FC = () => {
     }
   };
 
+  const snapTotals = dailySnapshot?.daily_nutrition?.totals || {};
+  const snapTargets = dailySnapshot?.targets || {};
+  const snapHydration = dailySnapshot?.hydration || {};
+
   return (
-    <div className="space-y-10">
-      {/* A. HERO SECTION — Visual, Concise & Action-Oriented */}
-      <section className="overflow-hidden rounded-[2rem] bg-gradient-to-br from-emerald-950 via-emerald-900 to-stone-900 text-white shadow-xl">
-        <div className="grid items-center gap-8 p-6 sm:p-10 lg:grid-cols-12">
-          <div className="lg:col-span-7 space-y-5">
-            <div className="inline-flex items-center gap-2 rounded-full bg-emerald-800/70 px-3.5 py-1 text-xs font-bold text-emerald-100 border border-emerald-600/40">
+    <div className="space-y-8">
+      {/* A. QUIET, PREMIUM WELCOME & PRIMARY FOOD SEARCH HERO */}
+      <section className="overflow-hidden rounded-3xl border border-stone-200/90 bg-white shadow-sm">
+        <div className="grid items-center gap-8 p-6 sm:p-8 lg:grid-cols-12">
+          <div className="lg:col-span-7 space-y-4">
+            <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800 border border-emerald-200/80">
               <span>🌿</span>
-              <span>Transparent, Evidence-Based Nutrition Intelligence</span>
+              <span>Evidence-Based Indian Food &amp; Health Intelligence</span>
             </div>
 
-            <h1 className="text-3xl sm:text-5xl font-black tracking-tight leading-tight">
+            <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight text-stone-900 leading-tight">
               Know What’s on Your Plate.
             </h1>
 
-            <p className="text-sm sm:text-base text-emerald-100/90 max-w-xl">
-              Explore Indian whole foods, home-cooked dishes, and packaged labels tailored to your family’s health considerations in English, Hindi, and Kannada.
+            <p className="text-xs sm:text-sm text-stone-600 max-w-xl leading-relaxed">
+              Search Indian whole foods, home-cooked dishes, and packaged products tailored to{' '}
+              <strong className="text-stone-900">
+                {activeMember ? activeMember.display_name : 'your household'}
+              </strong>{' '}
+              in English, Hindi, and Kannada.
             </p>
 
-            {/* Prominent Search Bar */}
+            {/* Primary Food Search Action */}
             <form
               onSubmit={handleQuickSearch}
               className="flex flex-col sm:flex-row gap-2.5 pt-1"
@@ -89,42 +110,93 @@ export const HomePage: React.FC = () => {
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search Ragi, Aloo, Avalakki, Pineapple Cake, Paneer..."
                 aria-label="Search Indian Foods"
-                className="flex-1 rounded-2xl border-0 bg-white px-5 py-3.5 text-sm font-medium text-stone-900 placeholder-stone-400 shadow-inner focus:outline-none focus:ring-2 focus:ring-amber-400"
+                className="flex-1 rounded-2xl border border-stone-300 bg-[#FAF8F5] px-4 py-3 text-sm font-medium text-stone-900 placeholder-stone-400 focus:border-emerald-700 focus:bg-white focus:outline-none"
               />
               <button
                 type="submit"
-                className="rounded-2xl bg-amber-400 px-6 py-3.5 text-sm font-extrabold text-stone-950 shadow-md hover:bg-amber-300 transition"
+                className="rounded-2xl bg-emerald-800 px-6 py-3 text-xs sm:text-sm font-bold text-white shadow-2xs hover:bg-emerald-700 transition"
               >
                 Search Food
               </button>
             </form>
 
-            {/* Primary & Secondary CTAs + Quick Chips */}
-            <div className="flex flex-wrap items-center gap-3 pt-1">
+            {/* Restrained Primary Actions + Recent Searches */}
+            <div className="flex flex-wrap items-center gap-2.5 pt-1">
+              <div className="relative">
+                <button
+                  type="button"
+                  data-testid="home-quick-add-trigger"
+                  onClick={() => setHomeQuickAddOpen((v) => !v)}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-stone-900 px-4 py-2 text-xs font-bold text-white hover:bg-stone-800 transition"
+                >
+                  <span>+ Quick Add</span>
+                  <span className="text-[10px] opacity-80">▾</span>
+                </button>
+                {homeQuickAddOpen && (
+                  <div
+                    data-testid="home-quick-add-menu"
+                    className="absolute left-0 mt-2 w-52 rounded-2xl border border-stone-200 bg-white p-1.5 shadow-lg z-30 text-xs"
+                  >
+                    <Link
+                      to="/fitness/tracker"
+                      data-testid="home-shortcut-log-food"
+                      className="flex items-center gap-2 rounded-xl px-3 py-2 font-semibold text-stone-800 hover:bg-stone-50"
+                    >
+                      <span>📒</span>
+                      <span>Log Food</span>
+                    </Link>
+                    <Link
+                      to="/fitness/hydration"
+                      data-testid="home-shortcut-add-water"
+                      className="flex items-center gap-2 rounded-xl px-3 py-2 font-semibold text-stone-800 hover:bg-stone-50"
+                    >
+                      <span>💧</span>
+                      <span>Add Water</span>
+                    </Link>
+                    <Link
+                      to="/health/blood-pressure"
+                      className="flex items-center gap-2 rounded-xl px-3 py-2 font-semibold text-stone-800 hover:bg-stone-50"
+                    >
+                      <span>🫀</span>
+                      <span>Record BP</span>
+                    </Link>
+                    <Link
+                      to="/health/blood-glucose"
+                      className="flex items-center gap-2 rounded-xl px-3 py-2 font-semibold text-stone-800 hover:bg-stone-50"
+                    >
+                      <span>🩸</span>
+                      <span>Record Glucose</span>
+                    </Link>
+                    <Link
+                      to="/barcode"
+                      className="flex items-center gap-2 rounded-xl px-3 py-2 font-semibold text-stone-800 hover:bg-stone-50"
+                    >
+                      <span>🏷️</span>
+                      <span>Scan Food</span>
+                    </Link>
+                  </div>
+                )}
+              </div>
+
               <Link
                 to="/foods"
-                className="rounded-2xl bg-white px-5 py-2.5 text-xs font-extrabold text-emerald-950 shadow hover:bg-emerald-50 transition"
+                className="rounded-xl border border-stone-200 bg-stone-50 px-3.5 py-2 text-xs font-semibold text-stone-800 hover:bg-stone-100 transition"
               >
-                Explore Food Catalog →
+                Explore Catalog →
               </Link>
               <Link
-                to="/barcode"
-                className="rounded-2xl border border-emerald-500/60 bg-emerald-800/50 px-5 py-2.5 text-xs font-bold text-white hover:bg-emerald-800 transition"
+                to="/fitness/goals"
+                className="rounded-xl border border-stone-200 bg-stone-50 px-3.5 py-2 text-xs font-semibold text-stone-800 hover:bg-stone-100 transition"
               >
-                🏷️ Scan Barcode
+                🎯 Goals &amp; Habits
               </Link>
-              <Link
-                to="/scanner"
-                className="rounded-2xl border border-emerald-500/60 bg-emerald-800/50 px-5 py-2.5 text-xs font-bold text-white hover:bg-emerald-800 transition"
-              >
-                📸 Scan Food Label
-              </Link>
-              {searchHistory.slice(0, 4).map((term) => (
+
+              {searchHistory.slice(0, 3).map((term) => (
                 <button
                   key={term}
                   type="button"
                   onClick={() => navigate(`/foods?q=${encodeURIComponent(term)}`)}
-                  className="rounded-full bg-emerald-900/80 px-3 py-1 text-xs font-medium text-emerald-100 hover:bg-emerald-800 border border-emerald-700/60"
+                  className="rounded-full bg-stone-100 px-3 py-1 text-xs font-medium text-stone-600 hover:bg-emerald-50 hover:text-emerald-800"
                 >
                   {term}
                 </button>
@@ -132,15 +204,15 @@ export const HomePage: React.FC = () => {
             </div>
 
             {stats && (
-              <div className="flex items-center gap-6 pt-2 text-xs text-emerald-200/90">
+              <div className="flex items-center gap-6 pt-1 text-xs text-stone-500">
                 <div>
-                  <strong className="text-base font-black text-amber-300">{stats.foods}</strong> Indian Foods
+                  <strong className="text-sm font-extrabold text-emerald-800">{stats.foods}</strong> Indian Foods
                 </div>
                 <div>
-                  <strong className="text-base font-black text-amber-300">{stats.conditions}</strong> Health Guides
+                  <strong className="text-sm font-extrabold text-emerald-800">{stats.conditions}</strong> Health Guides
                 </div>
                 <div>
-                  <strong className="text-base font-black text-amber-300">{stats.sources}</strong> Clinical Sources
+                  <strong className="text-sm font-extrabold text-emerald-800">{stats.sources}</strong> Clinical Sources
                 </div>
               </div>
             )}
@@ -181,7 +253,7 @@ export const HomePage: React.FC = () => {
               <Link
                 key={card.slug}
                 to={`/foods/${card.slug}`}
-                className="group relative overflow-hidden rounded-2xl border border-white/15 bg-stone-900 shadow-lg"
+                className="group relative overflow-hidden rounded-2xl border border-stone-200/80 bg-stone-900 shadow-xs"
               >
                 <FoodImage
                   src={card.img}
@@ -189,10 +261,10 @@ export const HomePage: React.FC = () => {
                   categorySlug={card.cat}
                   aspectClass="aspect-[4/3]"
                 />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/15 to-transparent" />
                 <div className="absolute bottom-2.5 left-3 right-3">
-                  <div className="text-xs font-extrabold text-white">{card.title}</div>
-                  <div className="text-[10px] font-medium text-amber-300">{card.sub}</div>
+                  <div className="text-xs font-bold text-white">{card.title}</div>
+                  <div className="text-[10px] font-medium text-emerald-200">{card.sub}</div>
                 </div>
               </Link>
             ))}
@@ -200,161 +272,108 @@ export const HomePage: React.FC = () => {
         </div>
       </section>
 
-      {/* D. HOUSEHOLD MEMBER CONTEXT BAR — Simple One-Click Profile Switcher */}
-      <section className="rounded-3xl border border-stone-200/90 bg-white p-5 shadow-sm flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-3.5">
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-100 text-xl font-black text-emerald-900">
+      {/* B. COMPACT HOUSEHOLD & TODAY'S PROGRESS BAR (Replaces the 6 large shortcut cards) */}
+      <section
+        data-testid="home-daily-progress-summary"
+        className="rounded-2xl border border-stone-200/80 bg-white p-5 shadow-2xs flex flex-col lg:flex-row lg:items-center justify-between gap-4"
+      >
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50 border border-emerald-200 text-sm font-bold text-emerald-900">
             {activeMember ? activeMember.display_name.slice(0, 1).toUpperCase() : '🏡'}
           </div>
           <div>
-            <div className="text-xs font-bold uppercase tracking-wider text-stone-400">
-              Active Household Profile
-            </div>
-            {activeMember ? (
-              <div className="text-sm sm:text-base font-extrabold text-stone-900">
-                Personalising for <span className="text-emerald-800">{activeMember.display_name}</span>{' '}
-                <span className="text-xs font-semibold text-stone-500">
-                  ({activeMember.dietary_preference.replace('_', ' ')} • {activeMember.selected_conditions.length} condition{activeMember.selected_conditions.length === 1 ? '' : 's'})
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-bold text-stone-900">
+                {activeMember ? activeMember.display_name : 'Household Overview'}
+              </span>
+              {activeMember && (
+                <span className="rounded-full bg-stone-100 px-2.5 py-0.5 text-[11px] font-medium text-stone-600 capitalize">
+                  {activeMember.dietary_preference.replace('_', ' ')} •{' '}
+                  {activeMember.selected_conditions.length} condition
+                  {activeMember.selected_conditions.length === 1 ? '' : 's'}
                 </span>
-              </div>
-            ) : (
-              <div className="text-sm font-bold text-stone-800">
-                Personalise food guidance for your family members (no login required)
-              </div>
-            )}
+              )}
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5 mt-1">
+              {household?.members.map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => void setActiveMemberId(m.id)}
+                  className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold transition ${
+                    activeMember?.id === m.id
+                      ? 'bg-emerald-800 text-white'
+                      : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                  }`}
+                >
+                  {m.display_name}
+                </button>
+              ))}
+              <Link
+                to="/household/member"
+                className="text-[11px] font-semibold text-emerald-800 hover:underline ml-1"
+              >
+                Manage Profiles →
+              </Link>
+            </div>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          {household?.members.map((m) => (
-            <button
-              key={m.id}
-              type="button"
-              onClick={() => void setActiveMemberId(m.id)}
-              className={`rounded-xl px-3.5 py-2 text-xs font-bold transition ${
-                activeMember?.id === m.id
-                  ? 'bg-emerald-800 text-white shadow-sm'
-                  : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
-              }`}
-            >
-              {m.display_name}
-            </button>
-          ))}
-          <Link
-            to="/household/member"
-            className="rounded-xl border border-emerald-700 px-3.5 py-2 text-xs font-bold text-emerald-800 hover:bg-emerald-50"
-          >
-            + Add / Edit Member
-          </Link>
-        </div>
-      </section>
-
-      {/* C. QUICK ACTIONS & PERSONAL ECOSYSTEM SHORTCUTS (ADAPTIVE TO ACTIVE MEMBER) */}
-      <section className="space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h2 className="text-xl font-black text-stone-900">What Would You Like to Do?</h2>
-            <p className="text-xs text-stone-500">
-              {activeMember
-                ? `Personalised shortcuts for ${activeMember.display_name} (${(activeMember.primary_goal || 'maintain_balanced_diet').replace(/_/g, ' ')})`
-                : 'Quick shortcuts for daily tracking, recipes, health conditions, and grocery buying'}
-            </p>
+        {/* Concise Daily Progress Readout + Limited Relevant Shortcuts */}
+        <div className="flex flex-wrap items-center gap-4 border-t lg:border-t-0 pt-3 lg:pt-0 border-stone-100">
+          <div className="flex items-center gap-4 text-xs">
+            <div>
+              <span className="text-stone-400 block text-[10px] uppercase font-semibold">
+                Today’s Energy
+              </span>
+              <span className="font-bold text-stone-900">
+                {snapTotals.energy_kcal ?? 0}{' '}
+                <span className="text-stone-400 font-normal">
+                  / {snapTargets.calories_kcal || 2000} kcal
+                </span>
+              </span>
+            </div>
+            <div className="h-6 w-px bg-stone-200" />
+            <div>
+              <span className="text-stone-400 block text-[10px] uppercase font-semibold">
+                Protein
+              </span>
+              <span className="font-bold text-stone-900">
+                {snapTotals.protein_g ?? 0}{' '}
+                <span className="text-stone-400 font-normal">
+                  / {snapTargets.protein_g || 65} g
+                </span>
+              </span>
+            </div>
+            <div className="h-6 w-px bg-stone-200" />
+            <div>
+              <span className="text-stone-400 block text-[10px] uppercase font-semibold">
+                Hydration
+              </span>
+              <span className="font-bold text-stone-900">
+                {snapHydration.total_ml ?? 0}{' '}
+                <span className="text-stone-400 font-normal">
+                  / {snapHydration.goal_ml || 2250} ml
+                </span>
+              </span>
+            </div>
           </div>
-          <div className="flex flex-wrap gap-2 text-xs">
+
+          <div className="flex items-center gap-2 text-xs">
             <Link
               to="/fitness/tracker"
-              data-testid="home-shortcut-log-food"
-              className="rounded-xl bg-emerald-800 px-3.5 py-2 font-extrabold text-white shadow-2xs hover:bg-emerald-700"
+              className="rounded-xl bg-emerald-50 border border-emerald-200 px-3 py-1.5 font-semibold text-emerald-900 hover:bg-emerald-100 transition"
             >
-              📒 Log Food
-            </Link>
-            <Link
-              to="/fitness/hydration"
-              data-testid="home-shortcut-add-water"
-              className="rounded-xl bg-sky-700 px-3.5 py-2 font-extrabold text-white shadow-2xs hover:bg-sky-600"
-            >
-              💧 Add Water
-            </Link>
-            <Link
-              to="/fitness/dashboard"
-              data-testid="home-shortcut-log-workout"
-              className="rounded-xl bg-stone-900 px-3.5 py-2 font-extrabold text-white shadow-2xs hover:bg-stone-800"
-            >
-              🏋️ Log Workout
+              Open Daily Tracker →
             </Link>
             <Link
               to="/fitness/analytics"
               data-testid="home-shortcut-view-progress"
-              className="rounded-xl border border-emerald-700 bg-emerald-50 px-3.5 py-2 font-extrabold text-emerald-900 hover:bg-emerald-100"
+              className="rounded-xl bg-stone-100 px-3 py-1.5 font-semibold text-stone-700 hover:bg-stone-200 transition"
             >
-              📈 View Today’s Progress
-            </Link>
-            <Link
-              to="/recipes/discover"
-              data-testid="home-shortcut-discover-recipes"
-              className="rounded-xl bg-amber-400 px-3.5 py-2 font-extrabold text-stone-950 hover:bg-amber-300"
-            >
-              🍲 Discover Recipes
+              Progress Graphs
             </Link>
           </div>
-        </div>
-        <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-6">
-          {[
-            {
-              title: 'Explore Food',
-              sub: 'Photos & macros',
-              icon: '🥗',
-              to: '/foods',
-              color: 'bg-emerald-50 border-emerald-200 text-emerald-950',
-            },
-            {
-              title: 'Check a Condition',
-              sub: 'Blood sugar, BP, kidney',
-              icon: '❤️',
-              to: '/conditions',
-              color: 'bg-rose-50 border-rose-200 text-rose-950',
-            },
-            {
-              title: 'My Daily Tracker',
-              sub: 'Food diary & water',
-              icon: '📒',
-              to: '/fitness/tracker',
-              color: 'bg-amber-50 border-amber-200 text-amber-950',
-            },
-            {
-              title: 'Protein Intelligence',
-              sub: 'Cost per 10g protein',
-              icon: '🥚',
-              to: '/fitness/protein',
-              color: 'bg-sky-50 border-sky-200 text-sky-950',
-            },
-            {
-              title: 'Smart Grocery List',
-              sub: 'Blinkit, Zepto, BigBasket',
-              icon: '🛒',
-              to: '/kitchen/grocery',
-              color: 'bg-purple-50 border-purple-200 text-purple-950',
-            },
-            {
-              title: 'Mess & Family Meals',
-              sub: 'Canteen & multi-goal portions',
-              icon: '🍱',
-              to: '/tools/mess-analyzer',
-              color: 'bg-teal-50 border-teal-200 text-teal-950',
-            },
-          ].map((act) => (
-            <Link
-              key={act.to}
-              to={act.to}
-              className={`group flex flex-col justify-between rounded-2xl border p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${act.color}`}
-            >
-              <span className="text-2xl">{act.icon}</span>
-              <div className="mt-3">
-                <div className="text-sm font-extrabold">{act.title}</div>
-                <div className="text-[11px] opacity-80">{act.sub}</div>
-              </div>
-            </Link>
-          ))}
         </div>
       </section>
 
@@ -829,6 +848,27 @@ export const FoodDetailPage: React.FC = () => {
         setFood(res);
         setServingUnit('standard_serving');
         setServingQty(1);
+        publishAssistantContext({
+          page_type: res.is_packaged ? 'packaged_product' : 'food_detail',
+          route: `/foods/${res.slug}`,
+          food_slug: res.slug,
+          barcode: res.barcode || null,
+          selected_entity: {
+            type: res.is_packaged ? 'packaged_product' : 'food',
+            id: res.slug,
+            name: res.name_en,
+            category: res.category?.name || null,
+            summary: res.description || null,
+          },
+          selected_product: res.is_packaged
+            ? {
+                slug: res.slug,
+                name: res.name_en,
+                brand: res.brand,
+                barcode: res.barcode,
+              }
+            : null,
+        });
         void api
           .searchFoods({ category: res.category.slug, page_size: 4 })
           .then((rel) => setRelatedFoods(rel.items.filter((i) => i.slug !== res.slug).slice(0, 3)))
@@ -836,6 +876,10 @@ export const FoodDetailPage: React.FC = () => {
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load food'))
       .finally(() => setLoading(false));
+
+    return () => {
+      clearAssistantEntityContext(`/foods/${slug}`);
+    };
   }, [slug]);
 
   useEffect(() => {

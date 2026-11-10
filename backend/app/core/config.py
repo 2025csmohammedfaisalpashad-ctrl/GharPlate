@@ -128,7 +128,9 @@ class Settings(BaseSettings):
     PRODUCT_CACHE_HOURS: int = 168
     EXTERNAL_PROVIDER_MIN_INTERVAL_SECONDS: float = 0.5
 
-    VISION_PROVIDER: str = "heuristic_local"
+    VISION_PROVIDER: str = "ollama_local_vision"
+    OLLAMA_VISION_MODEL: str = "qwen2.5vl:7b"
+    OLLAMA_VISION_BASE_URL: str = ""
     GEMINI_API_KEY: str = ""
 
     model_config = SettingsConfigDict(

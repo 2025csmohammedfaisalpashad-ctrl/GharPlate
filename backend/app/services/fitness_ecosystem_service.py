@@ -1481,6 +1481,7 @@ def discover_and_recommend_recipes(
         curated_out.append(
             {
                 "id": rec.id,
+                "slug": getattr(rec, "slug", None),
                 "title": rec.title,
                 "description": rec.description,
                 "image_url": rec.image_url or detail.image_url,
@@ -1488,10 +1489,19 @@ def discover_and_recommend_recipes(
                 "servings": rec.servings,
                 "prep_time_minutes": rec.prep_time_minutes or 15,
                 "cook_time_minutes": rec.cook_time_minutes or 20,
+                "total_time_minutes": detail.total_time_minutes,
+                "difficulty": detail.difficulty,
                 "estimated_cost_inr": rec.estimated_cost_inr,
                 "source_type": rec.source_type or "gharplate_verified",
                 "source_name": rec.source_name or "GharPlate IFCT 2017 / ICMR-NIN DGI 2024 Kitchen",
                 "source_url": rec.source_url or "https://www.nin.res.in/",
+                "verification_status": detail.verification_status,
+                "verification_badge_label": detail.verification_badge_label,
+                "instructions_status": detail.instructions_status,
+                "step_count": len(detail.steps or []),
+                "steps": [s.model_dump(mode="json") for s in (detail.steps or [])],
+                "is_favourite": detail.is_favourite,
+                "user_rating": detail.user_rating,
                 "completeness_pct": detail.completeness_pct,
                 "is_vegetarian": is_veg,
                 "is_vegan": is_vegan,
@@ -1629,16 +1639,66 @@ def generate_personal_recipe_from_db_ingredients(
         f"{int(servings)} balanced portions."
     )
 
+    from app.schemas.api_schemas import RecipeStepInput
+
+    step_inputs = [
+        RecipeStepInput(
+            step_number=1,
+            step_title="Wash, Measure & Prep Ingredients",
+            instruction_text=f"Measure and wash {', '.join(f.name_en for f in selected_foods)}. Rinse grains and pulses until clear and dice fresh vegetables evenly.",
+            duration_minutes=5,
+            temperature="Room temperature",
+            tip="Uniformly chopped vegetables cook evenly and retain their colour.",
+            equipment="Mixing Bowls & Chopping Board",
+        ),
+        RecipeStepInput(
+            step_number=2,
+            step_title="Cook Primary Grain & Protein Base",
+            instruction_text="Cook the primary grain, millet, or pulse component in measured water until tender, and prepare any paneer, soya, or egg protein component.",
+            duration_minutes=12,
+            temperature="Medium heat",
+            tip="Soaking pulses or brown rice for 20 minutes reduces cooking time and improves digestibility.",
+            equipment="Pressure Cooker or Saucepan",
+        ),
+        RecipeStepInput(
+            step_number=3,
+            step_title="Temper Spices & Simmer with Vegetables",
+            instruction_text="Warm 1 tsp oil or ghee in a pan, temper cumin/mustard seeds, ginger, and curry leaves, sauté the vegetables and aromatics, and fold in the cooked base.",
+            duration_minutes=6,
+            temperature="Medium-Low heat",
+            tip="Keep spices on moderate flame so they release aroma without scorching.",
+            equipment="Kadai / Skillet",
+        ),
+        RecipeStepInput(
+            step_number=4,
+            step_title="Rest, Garnish & Serve Balanced Portions",
+            instruction_text=f"Rest covered for 2 minutes off the heat, finish with fresh coriander and lemon juice, and divide into {int(servings)} balanced portions.",
+            duration_minutes=2,
+            temperature="Serve warm",
+            tip="Fresh lemon juice added off the heat boosts iron absorption.",
+            equipment="Serving Bowls",
+        ),
+    ]
+
     rec_req = RecipeCreateRequest(
         household_token=household.household_token if save_recipe else None,
         title=gen_title[:200],
         description=f"Generated from verified GharPlate ingredient records for goal '{eff_goal.replace('_', ' ')}' ({eff_diet}).",
         servings=servings,
         meal_type=meal_type,
+        prep_time_minutes=10,
+        cook_time_minutes=15,
+        difficulty="Easy",
         instructions_notes=instructions,
         ingredients=ing_inputs,
+        steps=step_inputs,
     )
-    calculated = create_or_update_recipe(db, rec_req)
+    calculated = create_or_update_recipe(
+        db,
+        rec_req,
+        household_id=household.id if save_recipe else None,
+        household_token=household.household_token if save_recipe else None,
+    )
     return {
         "generated_recipe": calculated.model_dump(mode="json"),
         "selected_goal": eff_goal,

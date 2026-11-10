@@ -361,3 +361,329 @@ def test_15_visual_redesign_database_image_references():
 
     almonds = client.get("/api/v1/foods/almonds-badam").json()
     assert almonds["image_url"] and "almonds-badam.webp" in almonds["image_url"]
+
+
+def test_16_multimodal_food_photo_analysis_all_11_scenarios_and_contextual_ai(monkeypatch):
+    """
+    Verifies all 11 required AI Food Photo Analyzer scenarios (Part 12):
+    1. Single dish image (idli)
+    2. Single dish image (dosa)
+    3. Single fruit image (banana)
+    4. Mixed Indian meal image (idli + sambar + chutney)
+    5. Rice-and-dal plate image
+    6. Image with multiple foods
+    7. Unfamiliar food not in database
+    8. Blurry or poorly lit image (low brightness / low sharpness)
+    9. Unsupported file format
+    10. Oversized image (> 5 MB)
+    11. Corrupted image file
+    Plus contextual Ask GharPlate follow-up questions with `food_image_analysis` context.
+    """
+    from app.services import ocr_barcode_service
+
+    # Scenario 1, 4 & 6: Idli + Sambar multi-component plate via local vision model
+    def mock_vision_idli_plate(file_bytes, user_hint=None, catalog_food_names=None):
+        return {
+            "status": "success",
+            "vision_reachable": True,
+            "vision_model_used": "qwen2.5vl:7b",
+            "analysis": {
+                "is_food_image": True,
+                "overall_description": "A South Indian breakfast plate with two steamed white idlis and a bowl of vegetable sambar.",
+                "primary_candidates": [
+                    {
+                        "name": "Idli (Steamed Rice-Lentil Cake)",
+                        "canonical_search_terms": ["idli"],
+                        "confidence_score": 0.93,
+                        "confidence_category": "high_confidence",
+                        "visual_evidence": "Fluffy round white steamed cakes.",
+                    },
+                    {
+                        "name": "Sambar (Vegetable Lentil Stew)",
+                        "canonical_search_terms": ["sambar"],
+                        "confidence_score": 0.86,
+                        "confidence_category": "high_confidence",
+                        "visual_evidence": "Tamarind and toor dal vegetable stew in steel katori.",
+                    },
+                ],
+                "detected_components": [
+                    {
+                        "label": "Idli",
+                        "confidence_score": 0.93,
+                        "confidence_category": "high_confidence",
+                        "visual_description": "Two steamed rice-lentil cakes",
+                    },
+                    {
+                        "label": "Sambar",
+                        "confidence_score": 0.86,
+                        "confidence_category": "high_confidence",
+                        "visual_description": "Small bowl of lentil sambar",
+                    },
+                ],
+                "ambiguity_notes": [],
+            },
+        }
+
+    monkeypatch.setattr(
+        ocr_barcode_service, "analyze_image_with_ollama_vision", mock_vision_idli_plate
+    )
+    png_normal = create_in_memory_png(color=(220, 215, 200), size=(160, 160))
+    r_idli = client.post(
+        "/api/v1/scan/recognize-dish",
+        files={"file": ("breakfast.png", png_normal, "image/png")},
+    )
+    assert r_idli.status_code == 200
+    d_idli = r_idli.json()
+    assert d_idli["vision_model_used"] == "qwen2.5vl:7b"
+    assert d_idli["vision_reachable"] is True
+    assert len(d_idli["candidates"]) >= 2
+    top_cand = d_idli["candidates"][0]
+    assert top_cand["food_slug"] == "idli-steamed-rice-lentil"
+    assert top_cand["matched_in_database"] is True
+    assert len(top_cand["nutrients"]) > 0
+    assert len(top_cand["servings"]) > 0
+    assert len(d_idli["detected_components"]) == 2
+
+    # Scenario 2: Dosa
+    monkeypatch.setattr(
+        ocr_barcode_service,
+        "analyze_image_with_ollama_vision",
+        lambda file_bytes, user_hint=None, catalog_food_names=None: {
+            "status": "success",
+            "vision_reachable": True,
+            "vision_model_used": "qwen2.5vl:7b",
+            "analysis": {
+                "is_food_image": True,
+                "overall_description": "Crispy golden-brown fermented rice-lentil crepe (Masala Dosa).",
+                "primary_candidates": [
+                    {
+                        "name": "Masala Dosa",
+                        "canonical_search_terms": ["masala dosa", "dosa"],
+                        "confidence_score": 0.89,
+                        "confidence_category": "high_confidence",
+                        "visual_evidence": "Golden folded crepe on banana leaf.",
+                    }
+                ],
+                "detected_components": [
+                    {
+                        "label": "Masala Dosa",
+                        "confidence_score": 0.89,
+                        "confidence_category": "high_confidence",
+                        "visual_description": "Folded golden dosa",
+                    }
+                ],
+                "ambiguity_notes": ["Potato masala filling is inside fold; could also be plain dosa."],
+            },
+        },
+    )
+    r_dosa = client.post(
+        "/api/v1/scan/recognize-dish",
+        files={"file": ("dosa.png", png_normal, "image/png")},
+    )
+    assert r_dosa.status_code == 200
+    assert r_dosa.json()["candidates"][0]["food_slug"] in ("masala-dosa", "dosa-plain")
+
+    # Scenario 3: Single fruit image (Banana — non-dish whole food in catalog!)
+    monkeypatch.setattr(
+        ocr_barcode_service,
+        "analyze_image_with_ollama_vision",
+        lambda file_bytes, user_hint=None, catalog_food_names=None: {
+            "status": "success",
+            "vision_reachable": True,
+            "vision_model_used": "qwen2.5vl:7b",
+            "analysis": {
+                "is_food_image": True,
+                "overall_description": "A ripe yellow banana on a table.",
+                "primary_candidates": [
+                    {
+                        "name": "Banana",
+                        "canonical_search_terms": ["banana", "ripe banana"],
+                        "confidence_score": 0.96,
+                        "confidence_category": "high_confidence",
+                        "visual_evidence": "Curved yellow ripe banana.",
+                    }
+                ],
+                "detected_components": [
+                    {
+                        "label": "Banana",
+                        "confidence_score": 0.96,
+                        "confidence_category": "high_confidence",
+                        "visual_description": "Single ripe banana",
+                    }
+                ],
+                "ambiguity_notes": [],
+            },
+        },
+    )
+    r_banana = client.post(
+        "/api/v1/scan/recognize-dish",
+        files={"file": ("fruit.png", png_normal, "image/png")},
+    )
+    assert r_banana.status_code == 200
+    assert "banana" in r_banana.json()["candidates"][0]["food_slug"]
+    assert r_banana.json()["candidates"][0]["matched_in_database"] is True
+
+    # Scenario 5: Rice-and-dal plate image
+    monkeypatch.setattr(
+        ocr_barcode_service,
+        "analyze_image_with_ollama_vision",
+        lambda file_bytes, user_hint=None, catalog_food_names=None: {
+            "status": "success",
+            "vision_reachable": True,
+            "vision_model_used": "qwen2.5vl:7b",
+            "analysis": {
+                "is_food_image": True,
+                "overall_description": "A home-cooked lunch plate with steamed rice, yellow toor dal, and curd.",
+                "primary_candidates": [
+                    {
+                        "name": "Plain Steamed Rice",
+                        "canonical_search_terms": ["rice", "steamed rice"],
+                        "confidence_score": 0.90,
+                        "confidence_category": "high_confidence",
+                        "visual_evidence": "White steamed rice mound.",
+                    },
+                    {
+                        "name": "Toor Dal",
+                        "canonical_search_terms": ["toor dal", "dal"],
+                        "confidence_score": 0.87,
+                        "confidence_category": "high_confidence",
+                        "visual_evidence": "Yellow tempered pigeon pea lentil dal.",
+                    },
+                ],
+                "detected_components": [
+                    {"label": "Steamed Rice", "confidence_score": 0.90, "confidence_category": "high_confidence", "visual_description": "White rice"},
+                    {"label": "Toor Dal", "confidence_score": 0.87, "confidence_category": "high_confidence", "visual_description": "Yellow dal"},
+                    {"label": "Curd", "confidence_score": 0.84, "confidence_category": "high_confidence", "visual_description": "Bowl of dahi"},
+                ],
+                "ambiguity_notes": [],
+            },
+        },
+    )
+    r_thali = client.post(
+        "/api/v1/scan/recognize-dish",
+        files={"file": ("lunch_plate.png", png_normal, "image/png")},
+    )
+    assert r_thali.status_code == 200
+    assert len(r_thali.json()["detected_components"]) == 3
+
+    # Scenario 7: Unfamiliar food not in database (never invents nutrients!)
+    monkeypatch.setattr(
+        ocr_barcode_service,
+        "analyze_image_with_ollama_vision",
+        lambda file_bytes, user_hint=None, catalog_food_names=None: {
+            "status": "success",
+            "vision_reachable": True,
+            "vision_model_used": "qwen2.5vl:7b",
+            "analysis": {
+                "is_food_image": True,
+                "overall_description": "Dragonfruit matcha soufflé tart.",
+                "primary_candidates": [
+                    {
+                        "name": "Dragonfruit Matcha Tart",
+                        "canonical_search_terms": ["dragonfruit tart"],
+                        "confidence_score": 0.75,
+                        "confidence_category": "moderate_confidence",
+                        "visual_evidence": "Exotic pastry not in Indian food catalog.",
+                    }
+                ],
+                "detected_components": [],
+                "ambiguity_notes": [],
+            },
+        },
+    )
+    r_unmatched = client.post(
+        "/api/v1/scan/recognize-dish",
+        files={"file": ("exotic.png", png_normal, "image/png")},
+    )
+    assert r_unmatched.status_code == 200
+    unmatched_cand = r_unmatched.json()["candidates"][0]
+    assert unmatched_cand["matched_in_database"] is False
+    assert unmatched_cand["available_nutrient_count"] == 0
+    assert unmatched_cand["nutrients"] == []
+    assert "Dragonfruit Matcha Tart" in r_unmatched.json()["unrecognized_items"]
+
+    # Scenario 8: Blurry / poorly lit dark image flags quality warnings honestly
+    dark_png = create_in_memory_png(color=(12, 12, 12), size=(120, 120))
+    r_dark = client.post(
+        "/api/v1/scan/recognize-dish",
+        files={"file": ("dim_photo.png", dark_png, "image/png")},
+    )
+    assert r_dark.status_code == 200
+    assert any("Low-light" in note or "sharpness" in note for note in r_dark.json()["ambiguity_notes"])
+
+    # Scenario 9: Unsupported file format -> HTTP 400
+    r_bad_mime = client.post(
+        "/api/v1/scan/recognize-dish",
+        files={"file": ("notes.txt", b"not an image", "text/plain")},
+    )
+    assert r_bad_mime.status_code == 400
+
+    # Scenario 10: Oversized image (> 5 MB) -> HTTP 400
+    oversized_bytes = b"0" * (5 * 1024 * 1024 + 2048)
+    r_oversize = client.post(
+        "/api/v1/scan/recognize-dish",
+        files={"file": ("huge.jpg", oversized_bytes, "image/jpeg")},
+    )
+    assert r_oversize.status_code == 400
+    assert "exceeds maximum allowed size" in r_oversize.json()["detail"]
+
+    # Scenario 11: Corrupted image file -> HTTP 400
+    r_corrupt = client.post(
+        "/api/v1/scan/recognize-dish",
+        files={"file": ("corrupt.jpg", b"\xff\xd8\xff\xe0corrupted_bytes", "image/jpeg")},
+    )
+    assert r_corrupt.status_code == 400
+
+    # Contextual Food Photo AI Assistant Conversation (`food_image_analysis`)
+    fia_context = {
+        "page_type": "food_image_analysis",
+        "route": "/recognition",
+        "food_slug": "idli-steamed-rice-lentil",
+        "food_image_analysis": {
+            "recognition_id": "rec_test_idli",
+            "confirmed_food_slug": "idli-steamed-rice-lentil",
+            "confirmed_food_name": "Idli (Steamed Rice-Lentil Cake)",
+            "confidence_category": "high_confidence",
+            "overall_description": "Two steamed rice-lentil idlis on a plate.",
+            "selected_serving_label": "2 idlis (120g)",
+            "selected_unit_name": "standard_serving",
+            "selected_quantity": 2.0,
+            "selected_grams": 120.0,
+            "is_vegetarian": True,
+            "is_vegan": True,
+            "portion_nutrients": {
+                "energy_kcal": 175.2,
+                "protein_g": 5.8,
+                "carbs_g": 34.6,
+                "fat_total_g": 0.8,
+                "fibre_g": 1.9,
+            },
+        },
+    }
+
+    r_chat_prot = client.post(
+        "/api/v1/assistant/chat",
+        json={
+            "message": "How much protein does it contain and is this suitable for someone going to the gym?",
+            "mode": "database_only",
+            "context": fia_context,
+        },
+    )
+    assert r_chat_prot.status_code == 200
+    reply_prot = r_chat_prot.json()["reply"]
+    assert "Idli" in reply_prot
+    assert "5.8" in reply_prot
+    assert "120g" in reply_prot
+
+    r_chat_log = client.post(
+        "/api/v1/assistant/chat",
+        json={
+            "message": "Add this to today's breakfast",
+            "mode": "database_only",
+            "context": fia_context,
+        },
+    )
+    assert r_chat_log.status_code == 200
+    reply_log = r_chat_log.json()["reply"]
+    assert "Ready to log" in reply_log or "Confirmation Preview" in reply_log
+

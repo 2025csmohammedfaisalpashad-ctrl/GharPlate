@@ -1,6 +1,7 @@
 """
-Recipe & Meal Nutrition Calculator Service (Module 5).
+Recipe & Meal Nutrition Calculator Service (Module 5 + Complete Recipe Intelligence).
 Calculates total and per-serving nutrition across ingredients, converts household units consistently,
+supports dynamic serving scaling, serializes structured preparation steps and provenance metadata,
 and NEVER replaces missing (NULL) ingredient nutrients with zero.
 """
 
@@ -13,12 +14,14 @@ from app.models.entities import (
     NutrientDefinition,
     Recipe,
     RecipeIngredient,
+    RecipeStep,
 )
 from app.schemas.api_schemas import (
     RecipeCreateRequest,
     RecipeDetailOut,
     RecipeIngredientContributionOut,
     RecipeNutrientBreakdown,
+    RecipeStepOut,
 )
 
 DEFAULT_UNIT_GRAMS: dict[str, float] = {
@@ -35,6 +38,15 @@ DEFAULT_UNIT_GRAMS: dict[str, float] = {
     "roti": 40.0,
 }
 
+VERIFICATION_BADGE_LABELS: dict[str, str] = {
+    "gharplate_verified": "GharPlate-curated recipe",
+    "user_saved": "User-created recipe",
+    "user_created": "User-created recipe",
+    "generated_from_db": "AI-assisted recipe",
+    "ai_assisted": "AI-assisted recipe",
+    "external_attributed": "External recipe with attribution",
+}
+
 
 def compute_ingredient_grams(food: FoodItem, unit_name: str, quantity: float) -> float:
     for srv in food.servings:
@@ -46,17 +58,38 @@ def compute_ingredient_grams(food: FoodItem, unit_name: str, quantity: float) ->
     return round(base * quantity, 2)
 
 
-def serialize_recipe_detail(db: Session, recipe: Recipe) -> RecipeDetailOut:
+def _format_household_measure_note(food: FoodItem, unit_name: str, quantity: float, grams: float) -> str:
+    u_low = unit_name.lower()
+    if u_low == "standard_serving":
+        return f"{round(quantity, 2)} × {food.standard_serving_name} ({round(grams, 1)} g)"
+    if u_low in ("100g", "100ml"):
+        return f"{round(grams, 1)} g (~{round(grams / 150.0, 1)} katori)"
+    if u_low in ("katori", "cup", "bowl", "tbsp", "tsp", "piece", "roti"):
+        return f"{round(quantity, 2)} {unit_name} ({round(grams, 1)} g)"
+    return f"{round(quantity, 2)} {unit_name} ({round(grams, 1)} g)"
+
+
+def serialize_recipe_detail(
+    db: Session,
+    recipe: Recipe,
+    target_servings: float | None = None,
+) -> RecipeDetailOut:
     nutrient_defs = (
         db.query(NutrientDefinition).order_by(NutrientDefinition.display_order.asc()).all()
     )
-    servings_count = max(recipe.servings, 0.1)
+    base_servings = max(float(recipe.servings or 2.0), 0.1)
+    effective_servings = (
+        max(float(target_servings), 0.25)
+        if target_servings is not None and target_servings > 0
+        else base_servings
+    )
+    scale_ratio = effective_servings / base_servings
 
-    total_weight = sum(ing.grams_equivalent for ing in recipe.ingredients)
-    serving_weight = round(total_weight / servings_count, 2)
+    total_weight = sum((ing.grams_equivalent * scale_ratio) for ing in recipe.ingredients)
+    serving_weight = round(total_weight / effective_servings, 2)
 
     contributions: list[RecipeIngredientContributionOut] = []
-    primary_img_url: str | None = None
+    primary_img_url: str | None = getattr(recipe, "image_url", None)
 
     for ing in recipe.ingredients:
         food = ing.food
@@ -64,21 +97,29 @@ def serialize_recipe_detail(db: Session, recipe: Recipe) -> RecipeDetailOut:
         if primary_img_url is None:
             primary_img_url = img
 
-        factor = ing.grams_equivalent / 100.0
+        scaled_qty = round(ing.quantity * scale_ratio, 2)
+        scaled_grams = round(ing.grams_equivalent * scale_ratio, 2)
+        factor = scaled_grams / 100.0
         nv_map: dict[str, float | None] = {
             nv.nutrient_code: nv.value for nv in food.nutrient_values
         }
         missing_codes = [
             nd.code for nd in nutrient_defs if nv_map.get(nd.code) is None
         ]
+        hh_note = getattr(ing, "household_measure_note", None) or _format_household_measure_note(
+            food, ing.unit_name, scaled_qty, scaled_grams
+        )
         contributions.append(
             RecipeIngredientContributionOut(
                 food_slug=food.slug,
                 food_name=food.name_en,
                 image_url=img,
-                quantity=ing.quantity,
+                quantity=scaled_qty,
                 unit_name=ing.unit_name,
-                grams_equivalent=ing.grams_equivalent,
+                grams_equivalent=scaled_grams,
+                household_measure_note=hh_note,
+                alternative_ingredient=getattr(ing, "alternative_ingredient", None),
+                preparation_note=getattr(ing, "preparation_note", None),
                 energy_kcal_contribution=(
                     round(nv_map["energy_kcal"] * factor, 2)
                     if nv_map.get("energy_kcal") is not None
@@ -114,7 +155,8 @@ def serialize_recipe_detail(db: Session, recipe: Recipe) -> RecipeDetailOut:
 
         for ing in recipe.ingredients:
             food = ing.food
-            factor = ing.grams_equivalent / 100.0
+            scaled_grams = ing.grams_equivalent * scale_ratio
+            factor = scaled_grams / 100.0
             nv_val = next(
                 (nv.value for nv in food.nutrient_values if nv.nutrient_code == nd.code),
                 None,
@@ -132,7 +174,7 @@ def serialize_recipe_detail(db: Session, recipe: Recipe) -> RecipeDetailOut:
 
         total_known_val = round(known_sum, 2) if with_data > 0 else None
         per_serving_val = (
-            round(known_sum / servings_count, 2) if with_data > 0 else None
+            round(known_sum / effective_servings, 2) if with_data > 0 else None
         )
 
         nutrient_breakdowns.append(
@@ -161,19 +203,82 @@ def serialize_recipe_detail(db: Session, recipe: Recipe) -> RecipeDetailOut:
     else:
         notice = "100% of tracked nutrients are available across all selected ingredients."
 
+    steps_rows = sorted(
+        list(getattr(recipe, "steps", None) or []),
+        key=lambda s: s.step_number,
+    )
+    steps_out: list[RecipeStepOut] = [
+        RecipeStepOut(
+            id=s.id,
+            step_number=s.step_number,
+            step_title=s.step_title,
+            instruction_text=s.instruction_text,
+            duration_minutes=s.duration_minutes,
+            temperature=s.temperature,
+            tip=s.tip,
+            image_url=s.image_url,
+            equipment=s.equipment,
+        )
+        for s in steps_rows
+    ]
+
+    # If no structured steps exist yet, check if instructions_notes has numbered lines or preserve transparent missing status
+    instructions_status = (
+        "available"
+        if steps_out
+        else ("notes_only" if (recipe.instructions_notes and recipe.instructions_notes.strip()) else "missing")
+    )
+
+    prep_m = getattr(recipe, "prep_time_minutes", None)
+    cook_m = getattr(recipe, "cook_time_minutes", None)
+    total_m = (
+        (prep_m or 0) + (cook_m or 0)
+        if (prep_m is not None or cook_m is not None)
+        else (sum(s.duration_minutes or 0 for s in steps_out) or None)
+    )
+
+    base_cost = getattr(recipe, "estimated_cost_inr", None)
+    scaled_cost = round(base_cost * scale_ratio, 2) if base_cost is not None else None
+    cost_per_srv = round(scaled_cost / effective_servings, 2) if scaled_cost is not None else None
+
+    src_type = getattr(recipe, "source_type", None) or "gharplate_verified"
+    ver_status = getattr(recipe, "verification_status", None) or src_type
+    badge_label = VERIFICATION_BADGE_LABELS.get(ver_status, "GharPlate-curated recipe")
+
     return RecipeDetailOut(
         id=recipe.id,
+        slug=getattr(recipe, "slug", None),
         household_token=recipe.household_token,
         title=recipe.title,
         description=recipe.description,
         image_url=primary_img_url,
-        servings=recipe.servings,
+        servings=round(effective_servings, 2),
         meal_type=recipe.meal_type,
+        prep_time_minutes=prep_m,
+        cook_time_minutes=cook_m,
+        total_time_minutes=total_m,
+        difficulty=getattr(recipe, "difficulty", None) or "Easy",
+        estimated_cost_inr=scaled_cost,
+        cost_per_serving_inr=cost_per_srv,
+        source_type=src_type,
+        source_name=getattr(recipe, "source_name", None)
+        or "GharPlate IFCT 2017 / ICMR-NIN DGI 2024 Kitchen",
+        source_url=getattr(recipe, "source_url", None),
+        verification_status=ver_status,
+        verification_badge_label=badge_label,
+        instructions_reviewed=bool(getattr(recipe, "instructions_reviewed", True)),
+        instructions_status=instructions_status,
+        is_favourite=bool(getattr(recipe, "is_favourite", False)),
+        user_rating=getattr(recipe, "user_rating", None),
+        rating_notes=getattr(recipe, "rating_notes", None),
+        dietary_tags=list(getattr(recipe, "dietary_tags", None) or []),
+        suitable_goals=list(getattr(recipe, "suitable_goals", None) or []),
         total_weight_grams=round(total_weight, 2),
         serving_weight_grams=serving_weight,
         completeness_pct=completeness_pct,
         completeness_notice=notice,
         instructions_notes=recipe.instructions_notes,
+        steps=steps_out,
         ingredients=contributions,
         nutrients=nutrient_breakdowns,
         created_at=recipe.created_at,
@@ -203,14 +308,22 @@ def create_or_update_recipe(
         recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
         if not recipe:
             raise ValueError(f"Recipe {recipe_id} not found")
-        if resolved_hh_id is not None and recipe.household_id != resolved_hh_id:
+        if resolved_hh_id is not None and recipe.household_id != resolved_hh_id and not recipe.is_system_template:
             raise PermissionError("You do not have permission to modify this recipe.")
         recipe.title = req.title
         recipe.description = req.description
         recipe.servings = req.servings
         recipe.meal_type = req.meal_type
+        if req.prep_time_minutes is not None:
+            recipe.prep_time_minutes = req.prep_time_minutes
+        if req.cook_time_minutes is not None:
+            recipe.cook_time_minutes = req.cook_time_minutes
+        if req.difficulty:
+            recipe.difficulty = req.difficulty
         recipe.instructions_notes = req.instructions_notes
         db.query(RecipeIngredient).filter(RecipeIngredient.recipe_id == recipe.id).delete()
+        if req.steps:
+            db.query(RecipeStep).filter(RecipeStep.recipe_id == recipe.id).delete()
     else:
         recipe = Recipe(
             household_id=resolved_hh_id,
@@ -219,6 +332,13 @@ def create_or_update_recipe(
             description=req.description,
             servings=req.servings,
             meal_type=req.meal_type,
+            prep_time_minutes=req.prep_time_minutes,
+            cook_time_minutes=req.cook_time_minutes,
+            difficulty=req.difficulty or "Easy",
+            source_type="user_saved",
+            source_name="Household Kitchen Recipe",
+            verification_status="user_created",
+            instructions_reviewed=bool(req.steps or req.instructions_notes),
             instructions_notes=req.instructions_notes,
             is_system_template=False,
         )
@@ -242,6 +362,24 @@ def create_or_update_recipe(
                 quantity=ing_in.quantity,
                 unit_name=ing_in.unit_name,
                 grams_equivalent=grams,
+                household_measure_note=ing_in.household_measure_note,
+                alternative_ingredient=ing_in.alternative_ingredient,
+                preparation_note=ing_in.preparation_note,
+            )
+        )
+
+    for idx, step_in in enumerate(req.steps or [], start=1):
+        db.add(
+            RecipeStep(
+                recipe_id=recipe.id,
+                step_number=step_in.step_number or idx,
+                step_title=step_in.step_title,
+                instruction_text=step_in.instruction_text,
+                duration_minutes=step_in.duration_minutes,
+                temperature=step_in.temperature,
+                tip=step_in.tip,
+                image_url=step_in.image_url,
+                equipment=step_in.equipment,
             )
         )
 

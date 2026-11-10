@@ -672,6 +672,21 @@ class HouseholdMember(Base):
         uselist=False,
         cascade="all, delete-orphan",
     )
+    blood_pressure_logs: Mapped[list["BloodPressureLog"]] = relationship(
+        "BloodPressureLog",
+        back_populates="member",
+        cascade="all, delete-orphan",
+    )
+    blood_glucose_logs: Mapped[list["BloodGlucoseLog"]] = relationship(
+        "BloodGlucoseLog",
+        back_populates="member",
+        cascade="all, delete-orphan",
+    )
+    health_measurement_targets: Mapped[list["HealthMeasurementTarget"]] = relationship(
+        "HealthMeasurementTarget",
+        back_populates="member",
+        cascade="all, delete-orphan",
+    )
 
 
 class Recipe(Base):
@@ -701,6 +716,15 @@ class Recipe(Base):
         String(200), default="GharPlate IFCT 2017 / ICMR-NIN DGI 2024 Kitchen", nullable=False
     )
     source_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    slug: Mapped[str | None] = mapped_column(String(120), index=True, nullable=True)
+    difficulty: Mapped[str | None] = mapped_column(String(40), default="Easy", nullable=True)
+    verification_status: Mapped[str | None] = mapped_column(
+        String(60), default="gharplate_verified", nullable=True
+    )  # gharplate_verified, user_created, ai_assisted, external_attributed
+    instructions_reviewed: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_favourite: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    user_rating: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rating_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     dietary_tags: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     suitable_goals: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
@@ -709,6 +733,12 @@ class Recipe(Base):
     household: Mapped[Optional["Household"]] = relationship("Household", back_populates="recipes")
     ingredients: Mapped[list["RecipeIngredient"]] = relationship(
         "RecipeIngredient", back_populates="recipe", cascade="all, delete-orphan"
+    )
+    steps: Mapped[list["RecipeStep"]] = relationship(
+        "RecipeStep",
+        back_populates="recipe",
+        cascade="all, delete-orphan",
+        order_by="RecipeStep.step_number.asc()",
     )
 
 
@@ -725,9 +755,38 @@ class RecipeIngredient(Base):
     quantity: Mapped[float] = mapped_column(Float, nullable=False)
     unit_name: Mapped[str] = mapped_column(String(60), nullable=False)
     grams_equivalent: Mapped[float] = mapped_column(Float, nullable=False)
+    household_measure_note: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    alternative_ingredient: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    preparation_note: Mapped[str | None] = mapped_column(String(160), nullable=True)
 
     recipe: Mapped["Recipe"] = relationship("Recipe", back_populates="ingredients")
     food: Mapped["FoodItem"] = relationship("FoodItem")
+
+
+class RecipeStep(Base):
+    """
+    Structured, ordered preparation and cooking step for a Recipe.
+    Supports Guided Cooking Mode with step timers, temperatures, tips, and equipment.
+    """
+    __tablename__ = "recipe_steps"
+    __table_args__ = (
+        UniqueConstraint("recipe_id", "step_number", name="uq_recipe_step_number"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    recipe_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("recipes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    step_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    step_title: Mapped[str] = mapped_column(String(160), nullable=False)
+    instruction_text: Mapped[str] = mapped_column(Text, nullable=False)
+    duration_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    temperature: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    tip: Mapped[str | None] = mapped_column(Text, nullable=True)
+    image_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    equipment: Mapped[str | None] = mapped_column(String(160), nullable=True)
+
+    recipe: Mapped["Recipe"] = relationship("Recipe", back_populates="steps")
 
 
 class MemberFitnessProfile(Base):
@@ -777,6 +836,7 @@ class MemberFitnessProfile(Base):
     target_fat_g: Mapped[float | None] = mapped_column(Float, nullable=True)
     target_fiber_g: Mapped[float | None] = mapped_column(Float, nullable=True)
     goal_start_date: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    rewards_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     timezone_str: Mapped[str] = mapped_column(
         String(64), default="Asia/Kolkata", nullable=False
     )
@@ -858,6 +918,7 @@ class FitnessGoal(Base):
 class HabitDefinition(Base):
     """
     Gentle, non-shaming habit definition for daily/weekly wellness & nutrition routines.
+    Supports both manual habits and user-confirmed AI-generated habit plans.
     """
     __tablename__ = "habit_definitions"
 
@@ -866,6 +927,7 @@ class HabitDefinition(Base):
         Integer, ForeignKey("household_members.id", ondelete="CASCADE"), nullable=False, index=True
     )
     title: Mapped[str] = mapped_column(String(160), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     category: Mapped[str] = mapped_column(
         String(60), default="nutrition", nullable=False
     )  # hydration, nutrition, training, home_cooking, health_routine
@@ -873,6 +935,15 @@ class HabitDefinition(Base):
         String(40), default="daily", nullable=False
     )  # daily, weekdays, training_days, weekly
     reminder_time: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    schedule_metadata_json: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict, nullable=False
+    )
+    tracking_method: Mapped[str] = mapped_column(
+        String(60), default="manual_check", nullable=False
+    )  # food_diary, nutrition_tracker, water_tracker, fitness_tracker, health_measurements, analytics, manual_check
+    completion_criteria: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    ai_plan_id: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    user_approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
 
@@ -1209,3 +1280,312 @@ class MessMenuRecord(Base):
         JSON, default=list, nullable=False
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+
+
+class BloodPressureLog(Base):
+    """
+    Dedicated persistent table for Blood Pressure (BP) and pulse measurements.
+    Supports multiple readings per session (first vs repeat) and morning/evening context.
+    Never stored in BodyMeasurementLog.
+    """
+    __tablename__ = "blood_pressure_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    household_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("households.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    member_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("household_members.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    systolic_mmhg: Mapped[int] = mapped_column(Integer, nullable=False)
+    diastolic_mmhg: Mapped[int] = mapped_column(Integer, nullable=False)
+    pulse_bpm: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    logged_date: Mapped[str] = mapped_column(String(20), index=True, nullable=False)  # YYYY-MM-DD
+    logged_time: Mapped[str] = mapped_column(String(20), nullable=False)  # HH:MM or 7:30 AM
+    time_of_day: Mapped[str] = mapped_column(
+        String(30), default="morning", index=True, nullable=False
+    )  # morning, afternoon, evening, night
+    measurement_arm: Mapped[str] = mapped_column(
+        String(20), default="left", nullable=False
+    )  # left, right
+    measurement_position: Mapped[str] = mapped_column(
+        String(30), default="seated", nullable=False
+    )  # seated, standing, supine
+    reading_sequence: Mapped[str] = mapped_column(
+        String(30), default="first", nullable=False
+    )  # first, repeat_2, repeat_3
+    device_type: Mapped[str] = mapped_column(
+        String(80), default="automated_upper_arm_cuff", nullable=False
+    )  # automated_upper_arm_cuff, wrist_cuff, clinic_sphygmomanometer, other
+    measurement_source: Mapped[str] = mapped_column(
+        String(60), default="manual_home_entry", nullable=False
+    )
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utc_now, onupdate=utc_now, nullable=False
+    )
+
+    member: Mapped["HouseholdMember"] = relationship(
+        "HouseholdMember", back_populates="blood_pressure_logs"
+    )
+
+
+class BloodGlucoseLog(Base):
+    """
+    Dedicated persistent table for Blood Glucose measurements.
+    Preserves both the exact user-entered value & unit ('mg/dL' or 'mmol/L') and normalized conversions,
+    along with strict measurement context (fasting, pre-meal, post-meal, bedtime, random).
+    """
+    __tablename__ = "blood_glucose_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    household_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("households.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    member_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("household_members.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    entered_value: Mapped[float] = mapped_column(Float, nullable=False)
+    entered_unit: Mapped[str] = mapped_column(
+        String(20), default="mg/dL", nullable=False
+    )  # mg/dL or mmol/L
+    value_mg_dl: Mapped[float] = mapped_column(Float, nullable=False)
+    value_mmol_l: Mapped[float] = mapped_column(Float, nullable=False)
+    logged_date: Mapped[str] = mapped_column(String(20), index=True, nullable=False)  # YYYY-MM-DD
+    logged_time: Mapped[str] = mapped_column(String(20), nullable=False)  # HH:MM
+    measurement_context: Mapped[str] = mapped_column(
+        String(40), index=True, nullable=False
+    )  # fasting, before_breakfast, after_breakfast, before_lunch, after_lunch, before_dinner, after_dinner, bedtime, random, other
+    minutes_after_meal: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    meal_reference: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    device_type: Mapped[str] = mapped_column(
+        String(80), default="home_glucometer", nullable=False
+    )
+    measurement_source: Mapped[str] = mapped_column(
+        String(60), default="manual_home_entry", nullable=False
+    )
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utc_now, onupdate=utc_now, nullable=False
+    )
+
+    member: Mapped["HouseholdMember"] = relationship(
+        "HouseholdMember", back_populates="blood_glucose_logs"
+    )
+
+
+class HealthMeasurementTarget(Base):
+    """
+    Member-specific clinician-provided target configuration for Blood Pressure or Blood Glucose.
+    Never automatically prescribes targets; stores only targets explicitly entered by the user from their clinician.
+    """
+    __tablename__ = "health_measurement_targets"
+    __table_args__ = (
+        UniqueConstraint(
+            "member_id", "measurement_type", name="uq_member_health_measurement_target"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    household_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("households.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    member_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("household_members.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    measurement_type: Mapped[str] = mapped_column(
+        String(40), index=True, nullable=False
+    )  # blood_pressure, blood_glucose
+    target_details_json: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict, nullable=False
+    )
+    target_source: Mapped[str] = mapped_column(
+        String(160), default="Clinician-provided personal target", nullable=False
+    )
+    clinician_confirmed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    effective_date: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utc_now, onupdate=utc_now, nullable=False
+    )
+
+    member: Mapped["HouseholdMember"] = relationship(
+        "HouseholdMember", back_populates="health_measurement_targets"
+    )
+
+
+class AchievementDefinition(Base):
+    """
+    Catalog of ethical, non-shaming achievements and milestones.
+    Evaluated strictly from verified database records.
+    """
+    __tablename__ = "achievement_definitions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    code: Mapped[str] = mapped_column(String(80), unique=True, index=True, nullable=False)
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    category: Mapped[str] = mapped_column(
+        String(60), index=True, nullable=False
+    )  # getting_started, consistency, personal_goals, exploration
+    icon_name: Mapped[str] = mapped_column(String(60), default="award", nullable=False)
+    criteria_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    target_value: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
+    unit_label: Mapped[str] = mapped_column(String(40), default="milestone", nullable=False)
+    is_repeatable: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    display_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+
+
+class MemberAchievement(Base):
+    """
+    Persistent record of an achievement earned by a specific HouseholdMember.
+    Unique constraint prevents duplicate awards for the same member, achievement, and period_key.
+    """
+    __tablename__ = "member_achievements"
+    __table_args__ = (
+        UniqueConstraint(
+            "member_id",
+            "achievement_id",
+            "period_key",
+            name="uq_member_achievement_period",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    household_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("households.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    member_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("household_members.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    achievement_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("achievement_definitions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    achievement_code: Mapped[str] = mapped_column(String(80), index=True, nullable=False)
+    period_key: Mapped[str] = mapped_column(
+        String(40), default="once", nullable=False
+    )  # 'once' for lifetime milestones, or 'YYYY-Www' / 'YYYY-MM' for repeatable ones
+    progress_value: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
+    target_value: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
+    awarded_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+    source_context: Mapped[str] = mapped_column(
+        String(120), default="backend_verified", nullable=False
+    )  # backend_verified, migrated_from_local_storage
+    seen_by_user: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    achievement: Mapped["AchievementDefinition"] = relationship("AchievementDefinition")
+
+
+class BodyRegion(Base):
+    """
+    Anatomical region or organ system in the Interactive 3D Human Body & Nutrition Explorer.
+    """
+    __tablename__ = "body_regions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    code: Mapped[str] = mapped_column(String(80), unique=True, index=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    anatomical_system: Mapped[str] = mapped_column(String(120), nullable=False)
+    category: Mapped[str] = mapped_column(String(80), index=True, nullable=False)
+    display_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    short_summary: Mapped[str] = mapped_column(String(255), nullable=False)
+    physiological_function: Mapped[str] = mapped_column(Text, nullable=False)
+    nutrition_connection: Mapped[str] = mapped_column(Text, nullable=False)
+    key_nutrients_summary: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    dietary_pattern_guidance: Mapped[str] = mapped_column(Text, nullable=False)
+    hydration_connection: Mapped[str | None] = mapped_column(Text, nullable=True)
+    evidence_limitation_note: Mapped[str] = mapped_column(Text, nullable=False)
+    camera_position_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    mesh_coordinates_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    source_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("data_sources.id", ondelete="RESTRICT"), nullable=False
+    )
+    source_section: Mapped[str] = mapped_column(String(200), nullable=False)
+    review_status: Mapped[str] = mapped_column(
+        String(50), default="clinically_reviewed_educational", nullable=False
+    )
+
+    source: Mapped["DataSource"] = relationship("DataSource")
+    nutrient_links: Mapped[list["BodyRegionNutrient"]] = relationship(
+        "BodyRegionNutrient",
+        back_populates="region",
+        cascade="all, delete-orphan",
+        order_by="BodyRegionNutrient.display_order.asc()",
+    )
+    food_links: Mapped[list["BodyRegionFoodLink"]] = relationship(
+        "BodyRegionFoodLink",
+        back_populates="region",
+        cascade="all, delete-orphan",
+        order_by="BodyRegionFoodLink.priority_rank.asc()",
+    )
+
+
+class BodyRegionNutrient(Base):
+    """
+    Reviewed physiological link between a BodyRegion and a specific nutrient.
+    """
+    __tablename__ = "body_region_nutrients"
+    __table_args__ = (
+        UniqueConstraint("region_id", "nutrient_code", name="uq_body_region_nutrient"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    region_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("body_regions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    nutrient_code: Mapped[str] = mapped_column(String(60), nullable=False, index=True)
+    nutrient_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    physiological_role: Mapped[str] = mapped_column(Text, nullable=False)
+    daily_reference_note: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    evidence_grade: Mapped[str] = mapped_column(
+        String(80), default="Established physiological function", nullable=False
+    )
+    source_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("data_sources.id", ondelete="RESTRICT"), nullable=False
+    )
+    source_section: Mapped[str] = mapped_column(String(200), nullable=False)
+    display_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    region: Mapped["BodyRegion"] = relationship("BodyRegion", back_populates="nutrient_links")
+    source: Mapped["DataSource"] = relationship("DataSource")
+
+
+class BodyRegionFoodLink(Base):
+    """
+    Explicit, reviewed link between a BodyRegion and a verified GharPlate FoodItem.
+    """
+    __tablename__ = "body_region_food_links"
+    __table_args__ = (
+        UniqueConstraint("region_id", "food_id", name="uq_body_region_food_link"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    region_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("body_regions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    food_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("food_items.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    primary_nutrient_code: Mapped[str] = mapped_column(String(60), nullable=False)
+    relevance_explanation: Mapped[str] = mapped_column(Text, nullable=False)
+    preparation_or_serving_tip: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    priority_rank: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    source_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("data_sources.id", ondelete="RESTRICT"), nullable=False
+    )
+    source_section: Mapped[str] = mapped_column(String(200), nullable=False)
+    review_status: Mapped[str] = mapped_column(String(50), default="reviewed", nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    region: Mapped["BodyRegion"] = relationship("BodyRegion", back_populates="food_links")
+    food: Mapped["FoodItem"] = relationship("FoodItem")
+    source: Mapped["DataSource"] = relationship("DataSource")
+

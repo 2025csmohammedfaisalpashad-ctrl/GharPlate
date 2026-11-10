@@ -48,6 +48,9 @@ from app.schemas.api_schemas import (
     AssistantSourceReference,
     AssistantStatusResponse,
     AssistantToolExecutionTrace,
+    AssistantVoiceStatusResponse,
+    AssistantVoiceTranscribeRequest,
+    AssistantVoiceTranscribeResponse,
     BarcodeLookupResponse,
     ConditionConflictOut,
     ConditionFoodRecommendationResponse,
@@ -101,7 +104,10 @@ from app.services.ocr_barcode_service import (
 from app.services.ollama_assistant_service import (
     chat_with_gharplate_assistant,
     discover_ollama_models,
+    evaluate_local_ollama_models,
     get_ollama_assistant_status,
+    get_voice_assistant_status,
+    transcribe_voice_input,
 )
 from app.services.recipe_service import create_or_update_recipe, serialize_recipe_detail
 
@@ -590,25 +596,113 @@ def list_recipes(
     hh = verify_household_ownership(db, current_user, requested_token=household_token)
     query = (
         db.query(Recipe)
-        .options(joinedload(Recipe.ingredients))
+        .options(joinedload(Recipe.ingredients), joinedload(Recipe.steps))
         .filter((Recipe.household_id == hh.id) | (Recipe.is_system_template.is_(True)))
     )
     recipes = query.order_by(Recipe.id.desc()).all()
     return [serialize_recipe_detail(db, r) for r in recipes]
 
 
-@api_router.get("/recipes/{recipe_id}", response_model=RecipeDetailOut, tags=["Recipes"])
-def get_recipe_by_id(recipe_id: int, db: DbSession, current_user: CurrentUser):
+@api_router.get("/recipes/{recipe_id_or_slug}", response_model=RecipeDetailOut, tags=["Recipes"])
+def get_recipe_by_id(
+    recipe_id_or_slug: str,
+    db: DbSession,
+    current_user: CurrentUser,
+    servings: Annotated[
+        float | None,
+        Query(gt=0, description="Optional target servings to dynamically scale ingredient quantities and nutrition"),
+    ] = None,
+):
+    from app.services.recipe_intelligence_service import get_recipe_by_id_or_slug
+
     hh = ensure_user_owned_household(db, current_user)
-    recipe = db.query(Recipe).filter(Recipe.id == recipe_id).first()
+    raw = str(recipe_id_or_slug).strip()
+    if raw.isdigit():
+        recipe = (
+            db.query(Recipe)
+            .options(joinedload(Recipe.ingredients), joinedload(Recipe.steps))
+            .filter(Recipe.id == int(raw))
+            .first()
+        )
+        if not recipe:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recipe not found")
+        if not recipe.is_system_template and recipe.household_id != hh.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: You do not have permission to view another household's recipe.",
+            )
+    else:
+        recipe = get_recipe_by_id_or_slug(db, raw, household_id=hh.id)
+        if not recipe:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recipe not found")
+    return serialize_recipe_detail(db, recipe, target_servings=servings)
+
+
+@api_router.post("/recipes/{recipe_id_or_slug}/enrich", response_model=RecipeDetailOut, tags=["Recipes"])
+def enrich_recipe_steps_endpoint(
+    recipe_id_or_slug: str,
+    db: DbSession,
+    current_user: CurrentUser,
+    payload: dict | None = None,
+):
+    from app.services.recipe_intelligence_service import (
+        enrich_recipe_steps,
+        get_recipe_by_id_or_slug,
+    )
+
+    hh = ensure_user_owned_household(db, current_user)
+    recipe = get_recipe_by_id_or_slug(db, recipe_id_or_slug, household_id=hh.id)
     if not recipe:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recipe not found")
-    if not recipe.is_system_template and recipe.household_id != hh.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied: You do not have permission to view another household's recipe.",
-        )
-    return serialize_recipe_detail(db, recipe)
+    return enrich_recipe_steps(db, recipe, payload or {})
+
+
+@api_router.post("/recipes/{recipe_id_or_slug}/rate", response_model=RecipeDetailOut, tags=["Recipes"])
+def rate_or_favourite_recipe_endpoint(
+    recipe_id_or_slug: str,
+    payload: dict,
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    from app.services.recipe_intelligence_service import (
+        get_recipe_by_id_or_slug,
+        rate_or_favourite_recipe,
+    )
+
+    hh = ensure_user_owned_household(db, current_user)
+    recipe = get_recipe_by_id_or_slug(db, recipe_id_or_slug, household_id=hh.id)
+    if not recipe:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recipe not found")
+    try:
+        return rate_or_favourite_recipe(db, recipe, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@api_router.post("/recipes/{recipe_id_or_slug}/log-diary", tags=["Recipes"])
+def log_recipe_to_diary_endpoint(
+    recipe_id_or_slug: str,
+    payload: dict,
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    from app.api.v1.ecosystem_router import _resolve_owned_member
+    from app.services.recipe_intelligence_service import (
+        get_recipe_by_id_or_slug,
+        log_recipe_to_diary_confirmed,
+    )
+
+    m_id = payload.get("member_id")
+    hh, member = _resolve_owned_member(
+        db, current_user, member_id=int(m_id) if m_id is not None else None
+    )
+    recipe = get_recipe_by_id_or_slug(db, recipe_id_or_slug, household_id=hh.id)
+    if not recipe:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recipe not found")
+    try:
+        return log_recipe_to_diary_confirmed(db, hh, member, recipe, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @api_router.delete("/recipes/{recipe_id}", tags=["Recipes"])
@@ -884,6 +978,32 @@ def assistant_models_endpoint(_current_user: CurrentUser):
         "configured_model": settings.OLLAMA_MODEL or None,
         "error_message": err_msg,
     }
+
+
+@api_router.get("/assistant/models/evaluate", tags=["AI Assistant"])
+def evaluate_assistant_models_endpoint(db: DbSession, _current_user: CurrentUser):
+    return evaluate_local_ollama_models(db)
+
+
+@api_router.get(
+    "/assistant/voice/status",
+    response_model=AssistantVoiceStatusResponse,
+    tags=["AI Assistant"],
+)
+def assistant_voice_status_endpoint(_current_user: CurrentUser):
+    return get_voice_assistant_status()
+
+
+@api_router.post(
+    "/assistant/voice/transcribe",
+    response_model=AssistantVoiceTranscribeResponse,
+    tags=["AI Assistant"],
+)
+def assistant_voice_transcribe_endpoint(
+    req: AssistantVoiceTranscribeRequest,
+    _current_user: CurrentUser,
+):
+    return transcribe_voice_input(req)
 
 
 def _build_message_preview(messages: list[AssistantMessage]) -> str | None:

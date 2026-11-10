@@ -12,12 +12,18 @@ import {
   ConditionExplorerPage,
 } from './pages/ConditionPages';
 import {
+  AIHabitBuilderPage,
   DailyTrackerPage,
   FitnessDashboardPage,
   GoalsHabitsPage,
   ProgressAnalyticsPage,
   WaterTrackerPage,
 } from './pages/FitnessTrackerPages';
+import {
+  BloodGlucoseTrackerPage,
+  BloodPressureTrackerPage,
+  HealthMeasurementsWorkspacePage,
+} from './pages/HealthMeasurementPages';
 import {
   FoodDetailPage,
   FoodExplorerPage,
@@ -34,7 +40,11 @@ import {
   SmartGroceryPantryPage,
 } from './pages/KitchenEcosystemPages';
 import {
+  BodyNutritionExplorerPage,
+} from './pages/BodyNutritionExplorerPage';
+import {
   RecipeCalculatorPage,
+  RecipeDetailPage,
   SavedRecipesPage,
 } from './pages/RecipePages';
 import {
@@ -90,17 +100,23 @@ export const AppRoutes: React.FC = () => (
             <Route path="/" element={<HomePage />} />
             <Route path="/foods" element={<FoodExplorerPage />} />
             <Route path="/foods/:slug" element={<FoodDetailPage />} />
+            <Route path="/explore/body-nutrition" element={<BodyNutritionExplorerPage />} />
             <Route path="/conditions" element={<ConditionExplorerPage />} />
             <Route path="/conditions/:code" element={<ConditionDetailPage />} />
             <Route path="/household" element={<HouseholdDashboardPage />} />
             <Route path="/household/member" element={<MemberProfilePage />} />
+            <Route path="/health/measurements" element={<HealthMeasurementsWorkspacePage />} />
+            <Route path="/health/blood-pressure" element={<BloodPressureTrackerPage />} />
+            <Route path="/health/blood-glucose" element={<BloodGlucoseTrackerPage />} />
             <Route path="/recipes/calculator" element={<RecipeCalculatorPage />} />
             <Route path="/recipes/saved" element={<SavedRecipesPage />} />
             <Route path="/recipes/discover" element={<RecipeDiscoveryPage />} />
+            <Route path="/recipes/:id" element={<RecipeDetailPage />} />
             <Route path="/fitness/dashboard" element={<FitnessDashboardPage />} />
             <Route path="/fitness/tracker" element={<DailyTrackerPage />} />
             <Route path="/fitness/hydration" element={<WaterTrackerPage />} />
             <Route path="/fitness/goals" element={<GoalsHabitsPage />} />
+            <Route path="/fitness/habit-builder" element={<AIHabitBuilderPage />} />
             <Route path="/fitness/analytics" element={<ProgressAnalyticsPage />} />
             <Route path="/fitness/protein" element={<ProteinIntelligencePage />} />
             <Route path="/kitchen/grocery" element={<SmartGroceryPantryPage />} />

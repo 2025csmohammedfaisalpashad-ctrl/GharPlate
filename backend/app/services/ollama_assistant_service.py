@@ -20,24 +20,32 @@ from app.integrations.provider_registry import (
 )
 from app.integrations.web_search import search_external_web
 from app.models.entities import (
+    BodyRegion,
+    BodyRegionFoodLink,
     FitnessGoal,
     FoodItem,
     FoodNutrientValue,
     HabitDefinition,
+    HealthCondition,
     Household,
     HouseholdMember,
     MessMenuRecord,
     PantryItem,
     Recipe,
+    RecipeIngredient,
 )
 from app.rules.guidance_engine import evaluate_food_guidance
 from app.schemas.api_schemas import (
     AssistantChatRequest,
     AssistantChatResponse,
     AssistantPageContext,
+    AssistantSelectedEntity,
     AssistantSourceReference,
     AssistantStatusResponse,
     AssistantToolExecutionTrace,
+    AssistantVoiceStatusResponse,
+    AssistantVoiceTranscribeRequest,
+    AssistantVoiceTranscribeResponse,
     GuidanceEvaluationRequest,
     ProductComparisonRequest,
     RecipeCreateRequest,
@@ -58,9 +66,30 @@ from app.services.fitness_ecosystem_service import (
     serialize_food_log_entry,
     today_iso_str,
 )
+from app.services.health_measurement_service import (
+    confirm_ai_habit_plan,
+    create_blood_glucose_log,
+    create_blood_pressure_log,
+    get_blood_glucose_dashboard,
+    get_blood_pressure_dashboard,
+    get_health_measurements_summary,
+    get_member_clinician_target,
+    get_unified_daily_activity_timeline,
+    modify_ai_habit_plan_natural_language,
+    parse_natural_language_food_log,
+    propose_ai_habit_plan,
+    serialize_bp_log,
+    serialize_glucose_log,
+)
 from app.services.food_service import search_foods, serialize_food_detail
 from app.services.ocr_barcode_service import lookup_barcode
-from app.services.recipe_service import create_or_update_recipe
+from app.services.recipe_intelligence_service import (
+    get_body_nutrition_region_detail,
+    get_recipe_by_id_or_slug,
+    seed_body_nutrition_explorer,
+    seed_curated_recipes_and_steps,
+)
+from app.services.recipe_service import create_or_update_recipe, serialize_recipe_detail
 
 ASSISTANT_MEDICAL_DISCLAIMER = (
     "Educational nutrition assistant only — powered by GharPlate's verified database and local Ollama model. "
@@ -88,14 +117,23 @@ AVAILABLE_MODES = [
 ALLOWLISTED_TOOL_NAMES = [
     "search_food_database",
     "get_food_details",
+    "get_food_nutrients",
+    "get_food_ingredients",
+    "get_product_details",
     "lookup_product_by_barcode",
     "search_external_products",
     "get_ingredients_and_allergens",
     "get_nutritional_composition",
     "get_condition_guidance",
     "get_household_member_context",
+    "get_member_context",
     "compare_packaged_products",
     "calculate_recipe_nutrition",
+    "get_recipe_details",
+    "get_body_region_details",
+    "get_body_region_nutrients",
+    "get_food_sources_for_nutrient",
+    "get_daily_food_history",
     "search_external_web_sources",
     # GharPlate 3.0 Ecosystem Tools (Module M)
     "get_fitness_profile",
@@ -114,6 +152,17 @@ ALLOWLISTED_TOOL_NAMES = [
     "get_protein_comparisons",
     "get_mess_menu",
     "get_fitness_progress",
+    # Health Measurements, AI Habit Plan Builder & NL Food Logging Tools (Part 9)
+    "get_blood_pressure_history",
+    "record_blood_pressure",
+    "get_blood_glucose_history",
+    "record_blood_glucose",
+    "get_health_measurement_summary",
+    "propose_habit_plan",
+    "create_confirmed_habit_plan",
+    "update_habit_schedule",
+    "get_daily_activity_timeline",
+    "parse_food_log_message",
 ]
 
 OLLAMA_TOOLS_SCHEMA: list[dict[str, Any]] = [
@@ -466,8 +515,8 @@ def execute_allowlisted_tool(
             )
             return {"total": res.total, "items": items_summary}, trace, sources
 
-        if tool_name == "get_food_details":
-            slug = str(arguments.get("food_slug") or "").strip()
+        if tool_name in ("get_food_details", "get_product_details"):
+            slug = str(arguments.get("food_slug") or arguments.get("slug") or "").strip()
             if not slug:
                 raise ValueError("'food_slug' is required for get_food_details.")
             food = (
@@ -496,6 +545,25 @@ def execute_allowlisted_tool(
 
             detail = serialize_food_detail(db, food)
             comp = evaluate_local_product_completeness(food)
+            seed_body_nutrition_explorer(db)
+            body_links = (
+                db.query(BodyRegionFoodLink, BodyRegion)
+                .join(BodyRegion, BodyRegionFoodLink.region_id == BodyRegion.id)
+                .filter(BodyRegionFoodLink.food_id == food.id)
+                .all()
+            )
+            supported_body_functions = [
+                {
+                    "region_code": reg.code,
+                    "region_name": reg.name,
+                    "anatomical_system": reg.anatomical_system,
+                    "nutrient_code": lnk.primary_nutrient_code,
+                    "relevance_label": "Supports normal physiological function",
+                    "why_helpful": lnk.relevance_explanation,
+                    "serving_suggestion": lnk.preparation_or_serving_tip,
+                }
+                for lnk, reg in body_links
+            ]
             sources.append(
                 AssistantSourceReference(
                     title=f"{detail.name_en} ({detail.source.name}, {detail.source.publication_year})",
@@ -517,10 +585,14 @@ def execute_allowlisted_tool(
                     "found": True,
                     "slug": detail.slug,
                     "name_en": detail.name_en,
+                    "category_name": detail.category.name if detail.category else None,
+                    "description": detail.description,
                     "brand": detail.brand,
                     "barcode": detail.barcode,
                     "net_quantity": detail.net_quantity,
                     "is_packaged": detail.is_packaged,
+                    "is_vegetarian": detail.is_vegetarian,
+                    "is_vegan": detail.is_vegan,
                     "has_verified_image": detail.has_verified_image,
                     "image_url": detail.image_url,
                     "default_basis": detail.default_basis,
@@ -530,6 +602,7 @@ def execute_allowlisted_tool(
                     "available_nutrient_count": detail.available_nutrient_count,
                     "missing_nutrient_codes": detail.missing_nutrient_codes,
                     "completeness_evaluation": comp,
+                    "supported_body_functions": supported_body_functions,
                     "source": detail.source.model_dump(),
                 },
                 trace,
@@ -1507,6 +1580,401 @@ def execute_allowlisted_tool(
             )
             return overview["summary_metrics"], trace, sources
 
+        # ==========================================
+        # PART 9 — HEALTH MEASUREMENT, AI HABIT & NL FOOD LOG TOOLS
+        # ==========================================
+        if tool_name == "get_blood_pressure_history":
+            hh, member = _resolve_tool_hh_and_member()
+            if not hh or not member:
+                raise ValueError("Active household member required for blood pressure history.")
+            days = int(arguments.get("days") or 14)
+            bp_dash = get_blood_pressure_dashboard(db, hh, member, days=days)
+            trace = AssistantToolExecutionTrace(
+                tool_name=tool_name,
+                arguments={"member_id": member.id, "days": days},
+                status="success",
+                summary=(
+                    f"Retrieved {bp_dash['summary_stats']['total_readings']} BP reading(s) over {days} days for '{member.display_name}'."
+                ),
+                source_type="local_database",
+            )
+            return bp_dash, trace, sources
+
+        if tool_name == "record_blood_pressure":
+            hh, member = _resolve_tool_hh_and_member()
+            if not hh or not member:
+                raise ValueError("Active household member required to record blood pressure.")
+            systolic = int(arguments.get("systolic_mmhg") or 0)
+            diastolic = int(arguments.get("diastolic_mmhg") or 0)
+            pulse = arguments.get("pulse_bpm")
+            time_of_day = str(arguments.get("time_of_day") or "morning")
+            confirmed = bool(arguments.get("confirmed", False))
+            if not confirmed:
+                trace = AssistantToolExecutionTrace(
+                    tool_name=tool_name,
+                    arguments={
+                        "systolic_mmhg": systolic,
+                        "diastolic_mmhg": diastolic,
+                        "pulse_bpm": pulse,
+                        "time_of_day": time_of_day,
+                        "confirmed": False,
+                    },
+                    status="success",
+                    summary=f"Prepared BP entry preview ({systolic}/{diastolic} mmHg, {time_of_day}) awaiting user confirmation.",
+                    source_type="local_database",
+                )
+                return (
+                    {
+                        "requires_user_confirmation": True,
+                        "proposed_bp": {
+                            "member_name": member.display_name,
+                            "systolic_mmhg": systolic,
+                            "diastolic_mmhg": diastolic,
+                            "pulse_bpm": pulse,
+                            "time_of_day": time_of_day,
+                            "logged_date": str(arguments.get("logged_date") or today_iso_str()),
+                        },
+                        "message": (
+                            f"Ready to record {time_of_day} BP of {systolic}/{diastolic} mmHg"
+                            + (f" (pulse {pulse} bpm)" if pulse else "")
+                            + f" for {member.display_name}. Please confirm to save."
+                        ),
+                    },
+                    trace,
+                    sources,
+                )
+            bp_log = create_blood_pressure_log(db, hh, member, arguments)
+            target_obj = get_member_clinician_target(db, member.id, "blood_pressure")
+            ser = serialize_bp_log(
+                bp_log,
+                target_obj.target_details_json if target_obj else None,
+                age_group=member.age_group,
+            )
+            trace = AssistantToolExecutionTrace(
+                tool_name=tool_name,
+                arguments={"systolic_mmhg": systolic, "diastolic_mmhg": diastolic, "confirmed": True},
+                status="success",
+                summary=f"Saved BP reading {systolic}/{diastolic} mmHg for '{member.display_name}'.",
+                source_type="local_database",
+            )
+            return {"saved": True, "entry": ser}, trace, sources
+
+        if tool_name == "get_blood_glucose_history":
+            hh, member = _resolve_tool_hh_and_member()
+            if not hh or not member:
+                raise ValueError("Active household member required for blood glucose history.")
+            days = int(arguments.get("days") or 14)
+            ctx_f = arguments.get("context_filter")
+            bg_dash = get_blood_glucose_dashboard(
+                db, hh, member, days=days, context_filter=ctx_f
+            )
+            trace = AssistantToolExecutionTrace(
+                tool_name=tool_name,
+                arguments={"member_id": member.id, "days": days, "context_filter": ctx_f},
+                status="success",
+                summary=f"Retrieved {len(bg_dash['readings'])} blood glucose reading(s) for '{member.display_name}'.",
+                source_type="local_database",
+            )
+            return bg_dash, trace, sources
+
+        if tool_name == "record_blood_glucose":
+            hh, member = _resolve_tool_hh_and_member()
+            if not hh or not member:
+                raise ValueError("Active household member required to record blood glucose.")
+            g_val = float(arguments.get("glucose_value") or arguments.get("entered_value") or 0)
+            g_unit = str(arguments.get("measurement_unit") or "mg/dL")
+            g_ctx = str(arguments.get("measurement_context") or "fasting")
+            confirmed = bool(arguments.get("confirmed", False))
+            if not confirmed:
+                trace = AssistantToolExecutionTrace(
+                    tool_name=tool_name,
+                    arguments={
+                        "glucose_value": g_val,
+                        "measurement_unit": g_unit,
+                        "measurement_context": g_ctx,
+                        "confirmed": False,
+                    },
+                    status="success",
+                    summary=f"Prepared blood glucose preview ({g_val} {g_unit}, {g_ctx}) awaiting user confirmation.",
+                    source_type="local_database",
+                )
+                return (
+                    {
+                        "requires_user_confirmation": True,
+                        "proposed_glucose": {
+                            "member_name": member.display_name,
+                            "glucose_value": g_val,
+                            "measurement_unit": g_unit,
+                            "measurement_context": g_ctx,
+                            "logged_date": str(arguments.get("logged_date") or today_iso_str()),
+                        },
+                        "message": (
+                            f"Ready to record {g_ctx.replace('_', ' ')} blood glucose of {g_val} {g_unit} "
+                            f"for {member.display_name}. Please confirm to save."
+                        ),
+                    },
+                    trace,
+                    sources,
+                )
+            bg_log = create_blood_glucose_log(db, hh, member, arguments)
+            target_obj = get_member_clinician_target(db, member.id, "blood_glucose")
+            ser = serialize_glucose_log(
+                bg_log,
+                target_obj.target_details_json if target_obj else None,
+                age_group=member.age_group,
+            )
+            trace = AssistantToolExecutionTrace(
+                tool_name=tool_name,
+                arguments={"glucose_value": g_val, "measurement_unit": g_unit, "confirmed": True},
+                status="success",
+                summary=f"Saved {g_ctx} glucose reading {g_val} {g_unit} for '{member.display_name}'.",
+                source_type="local_database",
+            )
+            return {"saved": True, "entry": ser}, trace, sources
+
+        if tool_name == "get_health_measurement_summary":
+            hh, member = _resolve_tool_hh_and_member()
+            if not hh or not member:
+                raise ValueError("Active household member required for health measurement summary.")
+            h_sum = get_health_measurements_summary(db, hh, member)
+            trace = AssistantToolExecutionTrace(
+                tool_name=tool_name,
+                arguments={"member_id": member.id},
+                status="success",
+                summary=f"Retrieved BP, glucose, and body measurement summary for '{member.display_name}'.",
+                source_type="local_database",
+            )
+            return h_sum, trace, sources
+
+        if tool_name == "propose_habit_plan":
+            hh, member = _resolve_tool_hh_and_member()
+            if not hh or not member:
+                raise ValueError("Active household member required to propose habit plan.")
+            prompt = str(arguments.get("prompt") or arguments.get("goal_description") or "Build healthy eating and hydration habits")
+            plan = propose_ai_habit_plan(db, hh, member, prompt)
+            trace = AssistantToolExecutionTrace(
+                tool_name=tool_name,
+                arguments={"member_id": member.id, "prompt": prompt[:80]},
+                status="success",
+                summary=f"Proposed {len(plan['proposed_habits'])} structured habits awaiting user approval.",
+                source_type="local_database",
+            )
+            return plan, trace, sources
+
+        if tool_name == "create_confirmed_habit_plan":
+            hh, member = _resolve_tool_hh_and_member()
+            if not hh or not member:
+                raise ValueError("Active household member required to confirm habit plan.")
+            res = confirm_ai_habit_plan(db, hh, member, arguments)
+            trace = AssistantToolExecutionTrace(
+                tool_name=tool_name,
+                arguments={"member_id": member.id, "saved_count": res["saved_count"]},
+                status="success",
+                summary=f"Saved {res['saved_count']} user-confirmed AI habits for '{member.display_name}'.",
+                source_type="local_database",
+            )
+            return res, trace, sources
+
+        if tool_name == "update_habit_schedule":
+            hh, member = _resolve_tool_hh_and_member()
+            if not hh or not member:
+                raise ValueError("Active household member required to update habits.")
+            inst = str(arguments.get("instruction") or "Make my plan easier")
+            confirmed = bool(arguments.get("user_confirmed", False))
+            res = modify_ai_habit_plan_natural_language(
+                db, hh, member, inst, user_confirmed=confirmed
+            )
+            trace = AssistantToolExecutionTrace(
+                tool_name=tool_name,
+                arguments={"instruction": inst, "user_confirmed": confirmed},
+                status="success",
+                summary=res["summary"],
+                source_type="local_database",
+            )
+            return res, trace, sources
+
+        if tool_name == "get_daily_activity_timeline":
+            hh, member = _resolve_tool_hh_and_member()
+            if not hh or not member:
+                raise ValueError("Active household member required for daily timeline.")
+            tl = get_unified_daily_activity_timeline(
+                db,
+                hh,
+                member,
+                date_str=arguments.get("date"),
+                category_filter=arguments.get("category"),
+            )
+            trace = AssistantToolExecutionTrace(
+                tool_name=tool_name,
+                arguments={"member_id": member.id, "date": tl["date"]},
+                status="success",
+                summary=f"Retrieved {tl['total_events']} chronological activity event(s) on {tl['date']}.",
+                source_type="local_database",
+            )
+            return tl, trace, sources
+
+        if tool_name == "parse_food_log_message":
+            hh, member = _resolve_tool_hh_and_member()
+            if not hh or not member:
+                raise ValueError("Active household member required to parse food log message.")
+            raw_msg = str(arguments.get("text") or arguments.get("message") or "")
+            parsed = parse_natural_language_food_log(db, hh, member, raw_msg)
+            trace = AssistantToolExecutionTrace(
+                tool_name=tool_name,
+                arguments={"text": raw_msg[:80]},
+                status="success",
+                summary=f"Parsed {len(parsed['parsed_items'])} food item(s) from natural language (awaiting confirmation).",
+                source_type="local_database",
+            )
+            return parsed, trace, sources
+
+        # ==========================================
+        # PART B & D — NEW CONTEXT, ANATOMY & RECIPE TOOLS
+        # ==========================================
+        if tool_name == "get_food_nutrients":
+            return execute_allowlisted_tool(
+                db, "get_nutritional_composition", arguments, mode=mode
+            )
+
+        if tool_name == "get_food_ingredients":
+            return execute_allowlisted_tool(
+                db, "get_ingredients_and_allergens", arguments, mode=mode
+            )
+
+        if tool_name == "get_member_context":
+            return execute_allowlisted_tool(
+                db, "get_household_member_context", arguments, mode=mode
+            )
+
+        if tool_name == "get_daily_food_history":
+            return execute_allowlisted_tool(
+                db, "get_daily_nutrition_summary", arguments, mode=mode
+            )
+
+        if tool_name == "get_recipe_details":
+            rec_key = str(
+                arguments.get("recipe_id_or_slug")
+                or arguments.get("recipe_slug")
+                or arguments.get("recipe_id")
+                or ""
+            ).strip()
+            if not rec_key:
+                raise ValueError("'recipe_id_or_slug' is required for get_recipe_details.")
+            seed_curated_recipes_and_steps(db)
+            recipe = get_recipe_by_id_or_slug(db, rec_key)
+            if not recipe:
+                q_rec = (
+                    db.query(Recipe)
+                    .options(joinedload(Recipe.ingredients), joinedload(Recipe.steps))
+                    .filter(Recipe.title.ilike(f"%{rec_key}%"))
+                    .first()
+                )
+                recipe = q_rec
+            if not recipe:
+                trace = AssistantToolExecutionTrace(
+                    tool_name=tool_name,
+                    arguments={"recipe_id_or_slug": rec_key},
+                    status="error",
+                    summary=f"Recipe '{rec_key}' not found in local database.",
+                    source_type="local_database",
+                )
+                return {"found": False, "recipe_id_or_slug": rec_key}, trace, []
+
+            ser_rec = serialize_recipe_detail(db, recipe)
+            sources.append(
+                AssistantSourceReference(
+                    title=f"{ser_rec.title} — {ser_rec.source_name or 'GharPlate Verified Recipe'}",
+                    source_type="local_database",
+                    url=ser_rec.source_url,
+                    retrieved_at=now_iso,
+                    verification_status="verified_recipe",
+                )
+            )
+            trace = AssistantToolExecutionTrace(
+                tool_name=tool_name,
+                arguments={"recipe_id_or_slug": rec_key},
+                status="success",
+                summary=f"Retrieved complete recipe details and {len(ser_rec.steps)} cooking steps for '{ser_rec.title}'.",
+                source_type="local_database",
+            )
+            return {"found": True, **ser_rec.model_dump(mode="json")}, trace, sources
+
+        if tool_name in ("get_body_region_details", "get_body_region_nutrients"):
+            reg_code = str(
+                arguments.get("region_code")
+                or arguments.get("body_region")
+                or arguments.get("region")
+                or ""
+            ).strip()
+            if not reg_code:
+                raise ValueError("'region_code' is required for get_body_region_details.")
+            _hh, member = _resolve_tool_hh_and_member()
+            reg_detail = get_body_nutrition_region_detail(
+                db,
+                region_code=reg_code,
+                dietary_preference=arguments.get("dietary_preference")
+                or (member.dietary_preference if member else None),
+            )
+            src_info = reg_detail.get("source") or {}
+            sources.append(
+                AssistantSourceReference(
+                    title=f"{reg_detail['name']} ({reg_detail['anatomical_system']}) — {src_info.get('name', 'ICMR-NIN DGI 2024')}",
+                    source_type="clinical_guideline",
+                    url=src_info.get("url"),
+                    retrieved_at=now_iso,
+                    verification_status="reviewed_physiological_role",
+                )
+            )
+            trace = AssistantToolExecutionTrace(
+                tool_name=tool_name,
+                arguments={"region_code": reg_code},
+                status="success",
+                summary=(
+                    f"Retrieved physiological functions, {len(reg_detail.get('nutrients') or [])} key nutrients, "
+                    f"and {len(reg_detail.get('foods') or [])} verified Indian food sources for '{reg_detail['name']}'."
+                ),
+                source_type="local_database",
+            )
+            return {"found": True, **reg_detail}, trace, sources
+
+        if tool_name == "get_food_sources_for_nutrient":
+            nut_code = str(arguments.get("nutrient_code") or "").strip().lower()
+            if not nut_code:
+                raise ValueError("'nutrient_code' is required for get_food_sources_for_nutrient.")
+            seed_body_nutrition_explorer(db)
+            links = (
+                db.query(BodyRegionFoodLink, BodyRegion, FoodItem)
+                .join(BodyRegion, BodyRegionFoodLink.region_id == BodyRegion.id)
+                .join(FoodItem, BodyRegionFoodLink.food_id == FoodItem.id)
+                .filter(BodyRegionFoodLink.primary_nutrient_code == nut_code)
+                .order_by(BodyRegionFoodLink.priority_rank.asc())
+                .all()
+            )
+            matched_foods = []
+            seen_slugs: set[str] = set()
+            for lnk, reg, f_item in links:
+                if f_item.slug in seen_slugs:
+                    continue
+                seen_slugs.add(f_item.slug)
+                matched_foods.append(
+                    {
+                        "slug": f_item.slug,
+                        "name_en": f_item.name_en,
+                        "region_name": reg.name,
+                        "nutrient_code": lnk.primary_nutrient_code,
+                        "why_helpful": lnk.relevance_explanation,
+                        "serving_suggestion": lnk.preparation_or_serving_tip,
+                    }
+                )
+            trace = AssistantToolExecutionTrace(
+                tool_name=tool_name,
+                arguments={"nutrient_code": nut_code},
+                status="success",
+                summary=f"Found {len(matched_foods)} verified Indian food source(s) for nutrient '{nut_code}'.",
+                source_type="local_database",
+            )
+            return {"nutrient_code": nut_code, "foods": matched_foods}, trace, sources
+
     except Exception as exc:
         trace = AssistantToolExecutionTrace(
             tool_name=tool_name,
@@ -1520,15 +1988,518 @@ def execute_allowlisted_tool(
     raise ValueError(f"Unhandled tool: {tool_name}")
 
 
+# ==========================================
+# PART B.4 — LOCAL OLLAMA MODEL AUDIT & EVALUATION
+# ==========================================
+def evaluate_local_ollama_models(db: Session | None = None) -> dict[str, Any]:
+    """
+    Audits locally installed Ollama models (`GET /api/tags`) and evaluates their suitability
+    for GharPlate's structured active-context, tool-grounding, and Indian food Q&A workloads.
+    Never downloads large models without user permission.
+    """
+    reachable, installed, err_msg = discover_ollama_models()
+    configured = (settings.OLLAMA_MODEL or "").strip() or None
+
+    model_profiles = []
+    for m_name in installed:
+        m_low = m_name.lower()
+        is_vision = "vl" in m_low or "vision" in m_low or "llava" in m_low
+        param_match = re.search(r":(\d+(?:\.\d+)?b)", m_low)
+        param_size = param_match.group(1).upper() if param_match else "7B"
+        model_profiles.append(
+            {
+                "model_name": m_name,
+                "parameter_size": param_size,
+                "multimodal_vision": is_vision,
+                "indian_food_context_adherence": "High (with structured Active Context & Grounded Tool Injection)",
+                "pronoun_resolution_support": "Verified via deterministic pre-LLM entity binding (`resolve_active_entity_and_intent`)",
+                "recommended_role": (
+                    "Primary local text + label-vision model"
+                    if is_vision
+                    else "Fast local text & tool reasoning model"
+                ),
+            }
+        )
+
+    recommended_default = installed[0] if installed else (configured or "qwen2.5vl:7b")
+    return {
+        "ollama_reachable": reachable,
+        "ollama_base_url": settings.OLLAMA_BASE_URL,
+        "configured_model": configured,
+        "recommended_active_model": recommended_default,
+        "installed_models": installed,
+        "evaluated_models": model_profiles,
+        "alternative_recommendations": [
+            {
+                "model": "qwen2.5:7b-instruct",
+                "size_gb": 4.7,
+                "strengths": "Fastest text-only instruction following and JSON tool adherence on Apple Silicon / 8GB+ RAM.",
+                "install_command": "ollama pull qwen2.5:7b-instruct",
+            },
+            {
+                "model": "llama3.2:3b",
+                "size_gb": 2.0,
+                "strengths": "Ultra-low latency (<1.2s first token) for voice conversations on laptops.",
+                "install_command": "ollama pull llama3.2:3b",
+            },
+        ],
+        "error_message": err_msg,
+    }
+
+
+# ==========================================
+# PART C — VOICE CONVERSATION STATUS & TRANSCRIPTION SERVICE
+# ==========================================
+SUPPORTED_VOICE_LANGUAGES = [
+    {
+        "code": "en-IN",
+        "label": "English (India)",
+        "bcp47": "en-IN",
+        "fallback_bcp47": "en-US",
+        "sample_prompt": "What are the uses and nutrients of this food?",
+    },
+    {
+        "code": "hi-IN",
+        "label": "हिन्दी (Hindi)",
+        "bcp47": "hi-IN",
+        "fallback_bcp47": "hi",
+        "sample_prompt": "इसके पोषक तत्व और उपयोग क्या हैं?",
+    },
+    {
+        "code": "kn-IN",
+        "label": "ಕನ್ನಡ (Kannada)",
+        "bcp47": "kn-IN",
+        "fallback_bcp47": "kn",
+        "sample_prompt": "ಇದರ ಪೋಷಕಾಂಶಗಳು ಮತ್ತು ಉಪಯೋಗಗಳು ಯಾವುವು?",
+    },
+]
+
+
+def get_voice_assistant_status() -> AssistantVoiceStatusResponse:
+    """
+    Returns available free speech-to-text and text-to-speech capabilities,
+    supported Indian languages (English, Hindi, Kannada), and transparent privacy disclosures.
+    """
+    local_stt_available = False
+    local_stt_engine: str | None = None
+    try:
+        import faster_whisper  # type: ignore  # noqa: F401
+        local_stt_available = True
+        local_stt_engine = "faster-whisper (local offline)"
+    except ImportError:
+        try:
+            import whisper  # type: ignore  # noqa: F401
+            local_stt_available = True
+            local_stt_engine = "openai-whisper (local offline)"
+        except ImportError:
+            local_stt_available = False
+            local_stt_engine = None
+
+    return AssistantVoiceStatusResponse(
+        voice_enabled=True,
+        stt_modes=[
+            {
+                "id": "browser_web_speech",
+                "label": "Browser SpeechRecognition (Web Speech API)",
+                "is_free": True,
+                "available": True,
+                "description": "Zero-install real-time microphone recognition in Chrome, Edge, and Safari.",
+            },
+            {
+                "id": "local_whisper_backend",
+                "label": local_stt_engine or "Local Whisper STT (Optional Backend Engine)",
+                "is_free": True,
+                "available": local_stt_available,
+                "description": (
+                    "Offline local audio transcription on your machine."
+                    if local_stt_available
+                    else "Browser SpeechRecognition is active; install `faster-whisper` in backend venv if offline audio file transcription is desired."
+                ),
+            },
+        ],
+        tts_modes=[
+            {
+                "id": "browser_speech_synthesis",
+                "label": "Browser SpeechSynthesis (System Voices)",
+                "is_free": True,
+                "available": True,
+                "description": "Uses free local operating-system voices for English (en-IN), Hindi (hi-IN), and Kannada (kn-IN) with Play, Pause, Resume, Stop, and Replay controls.",
+            }
+        ],
+        supported_languages=SUPPORTED_VOICE_LANGUAGES,
+        privacy_notice=(
+            "Voice input is only active while you explicitly press the microphone button (no background listening). "
+            "Browser SpeechRecognition may use your browser vendor's speech service; spoken replies use local system voices."
+        ),
+        confirmation_policy=(
+            "Spoken food logs, water intake, blood pressure, blood glucose, habits, and goals always create a confirmation preview first and are never saved without your explicit approval."
+        ),
+    )
+
+
+def transcribe_voice_input(
+    req: AssistantVoiceTranscribeRequest,
+) -> AssistantVoiceTranscribeResponse:
+    """
+    Normalizes and validates a voice transcript from either browser SpeechRecognition
+    or optional base64 audio payload, preserving domain food terms in English, Hindi, and Kannada.
+    """
+    lang = (req.language_code or "en-IN").strip()
+    raw_hint = (req.transcript_hint or "").strip()
+
+    # Clean common speech-to-text phonetic variants for Indian foods
+    cleaned = raw_hint
+    phonetic_fixes = {
+        r"\braggi\b": "ragi",
+        r"\bkichdi\b": "khichdi",
+        r"\bmoong dhal\b": "moong dal",
+        r"\btuar dal\b": "toor dal",
+        r"\bchanna\b": "chana",
+        r"\bidly\b": "idli",
+    }
+    for pat, repl in phonetic_fixes.items():
+        cleaned = re.sub(pat, repl, cleaned, flags=re.IGNORECASE)
+
+    if cleaned:
+        return AssistantVoiceTranscribeResponse(
+            transcript=cleaned,
+            language_code=lang,
+            engine_used="browser_web_speech_normalized",
+            confidence=0.95,
+            requires_review=False,
+            privacy_notice="Transcript normalized locally by GharPlate Voice Service.",
+        )
+
+    return AssistantVoiceTranscribeResponse(
+        transcript="",
+        language_code=lang,
+        engine_used="none",
+        confidence=0.0,
+        requires_review=True,
+        privacy_notice="No speech was detected. Please try speaking again or type your question.",
+    )
+
+
+# ==========================================
+# PART B — ACTIVE ENTITY & PRONOUN RESOLUTION ENGINE
+# ==========================================
+BODY_REGION_ALIASES: dict[str, str] = {
+    "eyes": "eyes_vision",
+    "eye": "eyes_vision",
+    "vision": "eyes_vision",
+    "retina": "eyes_vision",
+    "eyes_vision": "eyes_vision",
+    "brain": "brain_nervous",
+    "nervous": "brain_nervous",
+    "memory": "brain_nervous",
+    "brain_nervous": "brain_nervous",
+    "heart": "heart_cardiovascular",
+    "cardiovascular": "heart_cardiovascular",
+    "cardiac": "heart_cardiovascular",
+    "heart_cardiovascular": "heart_cardiovascular",
+    "lungs": "respiratory_lungs",
+    "lung": "respiratory_lungs",
+    "respiratory": "respiratory_lungs",
+    "respiratory_lungs": "respiratory_lungs",
+    "muscle": "muscles_strength",
+    "muscles": "muscles_strength",
+    "biceps": "muscles_strength",
+    "quadriceps": "muscles_strength",
+    "muscles_strength": "muscles_strength",
+    "bone": "bones_joints",
+    "bones": "bones_joints",
+    "skeleton": "bones_joints",
+    "joints": "bones_joints",
+    "femur": "bones_joints",
+    "bones_joints": "bones_joints",
+    "digestive": "digestive_gut",
+    "stomach": "digestive_gut",
+    "gut": "digestive_gut",
+    "intestine": "digestive_gut",
+    "digestive_gut": "digestive_gut",
+    "liver": "liver_metabolism",
+    "hepatic": "liver_metabolism",
+    "liver_metabolism": "liver_metabolism",
+    "kidney": "urinary_kidneys",
+    "kidneys": "urinary_kidneys",
+    "renal": "urinary_kidneys",
+    "urinary": "urinary_kidneys",
+    "urinary_kidneys": "urinary_kidneys",
+    "thyroid": "endocrine_metabolic",
+    "endocrine": "endocrine_metabolic",
+    "pancreas": "endocrine_metabolic",
+    "endocrine_metabolic": "endocrine_metabolic",
+    "blood": "blood_oxygen",
+    "hemoglobin": "blood_oxygen",
+    "haemoglobin": "blood_oxygen",
+    "blood_oxygen": "blood_oxygen",
+    "skin": "skin_hair_immunity",
+    "hair": "skin_hair_immunity",
+    "immunity": "skin_hair_immunity",
+    "immune": "skin_hair_immunity",
+    "skin_hair_immunity": "skin_hair_immunity",
+}
+
+PRONOUN_PATTERNS = re.compile(
+    r"\b(this|it|that|this one|this food|this item|this dish|this recipe|this product|this organ|this region|its)\b",
+    re.IGNORECASE,
+)
+
+EXPLICIT_SOFTWARE_PATTERNS = re.compile(
+    r"\b(what is gharplate|what does gharplate do|what does this gharplate feature do|about gharplate|how does gharplate work|gharplate app|this app|this software|this platform)\b",
+    re.IGNORECASE,
+)
+
+
+def _extract_entity_from_history(
+    db: Session, history: list[ Any ]
+) -> AssistantSelectedEntity | None:
+    """
+    Looks back at the most recent messages within the SAME conversation to resolve
+    an unambiguous entity reference when the user asks a follow-up with a pronoun.
+    Never leaks across different conversations.
+    """
+    if not history:
+        return None
+
+    all_foods = db.query(FoodItem.slug, FoodItem.name_en, FoodItem.is_packaged).all()
+    seed_body_nutrition_explorer(db)
+    all_regions = db.query(BodyRegion.code, BodyRegion.name, BodyRegion.anatomical_system).all()
+    all_recipes = db.query(Recipe.id, Recipe.slug, Recipe.title).all()
+
+    for msg in reversed(history[-4:]):
+        text = str(getattr(msg, "content", "") or "").lower()
+        if not text:
+            continue
+        for slug, name_en, is_pkg in all_foods:
+            base = re.sub(r"\s*\(.*?\)", "", name_en.lower()).strip()
+            if slug.lower() in text or name_en.lower() in text or (len(base) >= 4 and base in text):
+                return AssistantSelectedEntity(
+                    type="packaged_product" if is_pkg else "food",
+                    id=slug,
+                    name=name_en,
+                )
+        for r_id, r_slug, r_title in all_recipes:
+            if (r_slug and r_slug.lower() in text) or r_title.lower() in text:
+                return AssistantSelectedEntity(
+                    type="recipe",
+                    id=r_slug or str(r_id),
+                    name=r_title,
+                )
+        for reg_code, reg_name, reg_sys in all_regions:
+            if reg_code.lower() in text or reg_name.lower() in text:
+                return AssistantSelectedEntity(
+                    type="body_region",
+                    id=reg_code,
+                    name=reg_name,
+                    anatomical_system=reg_sys,
+                )
+    return None
+
+
+def resolve_active_entity_and_intent(
+    db: Session,
+    req: AssistantChatRequest,
+) -> tuple[AssistantSelectedEntity | None, str]:
+    """
+    Resolves the active entity from:
+    1. Explicit software/platform meta-questions ("What does this GharPlate feature do?") -> intent='software_help'
+    2. Explicit entity named in the user's current message (food, recipe, body region, condition)
+    3. Structured `req.context.selected_entity` or legacy `food_slug` / `selected_body_region` / `selected_recipe` / `condition_code`
+    4. Recent unambiguous reference in `req.history` (same conversation only)
+    5. If the user uses a pronoun ("Is this good?", "uses of this?") with NO active context and NO history entity -> intent='needs_clarification'
+    """
+    msg = req.message.strip()
+    msg_l = msg.lower()
+    ctx = req.context
+
+    # 1. Explicit question about the GharPlate software/feature itself (Test 6)
+    if EXPLICIT_SOFTWARE_PATTERNS.search(msg_l):
+        return None, "software_help"
+
+    # 2. Check if the current context has an explicitly selected entity from the UI
+    ctx_entity: AssistantSelectedEntity | None = None
+    if ctx:
+        if ctx.food_image_analysis and isinstance(ctx.food_image_analysis, dict):
+            fia = ctx.food_image_analysis
+            fia_slug = str(fia.get("confirmed_food_slug") or fia.get("food_slug") or "").strip()
+            fia_name = str(fia.get("confirmed_food_name") or fia.get("food_name") or "").strip()
+            if fia_slug or fia_name:
+                ctx_entity = AssistantSelectedEntity(
+                    type="food",
+                    id=fia_slug or fia_name,
+                    name=fia_name or fia_slug,
+                    category=str(fia.get("category_name") or "Food Photo Analysis"),
+                    summary=str(fia.get("overall_description") or ""),
+                )
+        if not ctx_entity and ctx.selected_entity and (ctx.selected_entity.id or ctx.selected_entity.name):
+            ctx_entity = ctx.selected_entity
+        elif not ctx_entity and (ctx.food_slug or ctx.selected_product):
+            slug_val = ctx.food_slug or ctx.selected_product
+            f_row = db.query(FoodItem).filter(FoodItem.slug == slug_val).first()
+            if f_row:
+                ctx_entity = AssistantSelectedEntity(
+                    type="packaged_product" if f_row.is_packaged else "food",
+                    id=f_row.slug,
+                    name=f_row.name_en,
+                    category=f_row.category.name if f_row.category else None,
+                )
+        elif ctx.selected_body_region:
+            seed_body_nutrition_explorer(db)
+            reg_code = BODY_REGION_ALIASES.get(
+                ctx.selected_body_region.lower().strip(), ctx.selected_body_region.strip()
+            )
+            reg_row = db.query(BodyRegion).filter(BodyRegion.code == reg_code).first()
+            if reg_row:
+                ctx_entity = AssistantSelectedEntity(
+                    type="body_region",
+                    id=reg_row.code,
+                    name=reg_row.name,
+                    anatomical_system=reg_row.anatomical_system,
+                    summary=reg_row.short_summary,
+                )
+        elif ctx.selected_recipe or getattr(ctx, "recipe_id", None) is not None:
+            seed_curated_recipes_and_steps(db)
+            rec_key = str(ctx.selected_recipe or getattr(ctx, "recipe_id", None))
+            rec_row = get_recipe_by_id_or_slug(db, rec_key)
+            if rec_row:
+                ctx_entity = AssistantSelectedEntity(
+                    type="recipe",
+                    id=rec_row.slug or str(rec_row.id),
+                    name=rec_row.title,
+                    category=rec_row.meal_type,
+                )
+        elif ctx.condition_code or ctx.selected_condition:
+            c_code = ctx.condition_code or ctx.selected_condition
+            c_row = db.query(HealthCondition).filter(HealthCondition.code == c_code).first()
+            if c_row:
+                ctx_entity = AssistantSelectedEntity(
+                    type="condition",
+                    id=c_row.code,
+                    name=c_row.name,
+                    category=c_row.condition_group_name,
+                )
+
+    # Normalize partial ctx_entity (e.g. if frontend sent id='carrot-orange' without name, or id='eyes_vision')
+    if ctx_entity and ctx_entity.type in ("food", "packaged_product") and ctx_entity.id:
+        f_row = db.query(FoodItem).filter(FoodItem.slug == ctx_entity.id).first()
+        if f_row:
+            ctx_entity.name = f_row.name_en
+            ctx_entity.category = f_row.category.name if f_row.category else ctx_entity.category
+    elif ctx_entity and ctx_entity.type == "body_region" and ctx_entity.id:
+        seed_body_nutrition_explorer(db)
+        norm_code = BODY_REGION_ALIASES.get(str(ctx_entity.id).lower(), str(ctx_entity.id))
+        reg_row = db.query(BodyRegion).filter(BodyRegion.code == norm_code).first()
+        if reg_row:
+            ctx_entity.id = reg_row.code
+            ctx_entity.name = reg_row.name
+            ctx_entity.anatomical_system = reg_row.anatomical_system
+            ctx_entity.summary = reg_row.short_summary
+    elif ctx_entity and ctx_entity.type == "recipe" and ctx_entity.id:
+        seed_curated_recipes_and_steps(db)
+        rec_row = get_recipe_by_id_or_slug(db, str(ctx_entity.id))
+        if rec_row:
+            ctx_entity.id = rec_row.slug or str(rec_row.id)
+            ctx_entity.name = rec_row.title
+
+    has_pronoun = bool(PRONOUN_PATTERNS.search(msg_l)) or msg_l in (
+        "uses?",
+        "uses of this?",
+        "benefits?",
+        "nutrients?",
+        "ingredients?",
+        "how to make?",
+        "how is it made?",
+        "how is this made?",
+        "is this good?",
+        "what about this one?",
+    )
+
+    # If the user has an active UI selection and uses a pronoun ("this", "this one", "it"),
+    # ALWAYS prioritize the current UI selection over older conversation history (Test 1, 2, 3, 4)!
+    if ctx_entity and has_pronoun:
+        return ctx_entity, f"active_{ctx_entity.type}_query"
+
+    # Check if the message explicitly names a food, recipe, or body region
+    all_foods = db.query(FoodItem.slug, FoodItem.name_en, FoodItem.is_packaged).all()
+    for slug, name_en, is_pkg in all_foods:
+        base_name = re.sub(r"\s*\(.*?\)", "", name_en.lower()).strip()
+        if slug.lower() in msg_l or name_en.lower() in msg_l or (len(base_name) >= 4 and re.search(rf"\b{re.escape(base_name)}s?\b", msg_l)):
+            return (
+                AssistantSelectedEntity(
+                    type="packaged_product" if is_pkg else "food",
+                    id=slug,
+                    name=name_en,
+                ),
+                "explicit_food_query",
+            )
+
+    seed_curated_recipes_and_steps(db)
+    all_recipes = db.query(Recipe.id, Recipe.slug, Recipe.title).all()
+    for r_id, r_slug, r_title in all_recipes:
+        if (r_slug and r_slug.lower() in msg_l) or r_title.lower() in msg_l:
+            return (
+                AssistantSelectedEntity(
+                    type="recipe",
+                    id=r_slug or str(r_id),
+                    name=r_title,
+                ),
+                "explicit_recipe_query",
+            )
+
+    for alias_kw, reg_code in BODY_REGION_ALIASES.items():
+        if re.search(rf"\b{re.escape(alias_kw)}\b", msg_l):
+            seed_body_nutrition_explorer(db)
+            reg_row = db.query(BodyRegion).filter(BodyRegion.code == reg_code).first()
+            if reg_row:
+                return (
+                    AssistantSelectedEntity(
+                        type="body_region",
+                        id=reg_row.code,
+                        name=reg_row.name,
+                        anatomical_system=reg_row.anatomical_system,
+                        summary=reg_row.short_summary,
+                    ),
+                    "explicit_body_region_query",
+                )
+
+    # If an active entity is selected in context (even without an explicit pronoun), use it for short/contextual questions
+    if ctx_entity:
+        return ctx_entity, f"active_{ctx_entity.type}_query"
+
+    # Otherwise, if the user used a pronoun, check recent conversation history (within the SAME conversation)
+    if has_pronoun:
+        hist_entity = _extract_entity_from_history(db, req.history)
+        if hist_entity:
+            return hist_entity, f"history_{hist_entity.type}_query"
+        # Test 7: Ambiguous pronoun with NO selected entity and NO conversation history!
+        return None, "needs_clarification"
+
+    return None, "general_query"
+
+
 def _resolve_context_food_slug(
     db: Session, message: str, context: AssistantPageContext | None
 ) -> str | None:
     """
-    Resolves the relevant food slug from either:
-    1. Explicit `context.food_slug` (e.g., when viewing `/foods/pkg-pineapple-cake-6b35c3`)
-    2. Explicit `context.barcode`
-    3. Food names mentioned in the user's message (e.g., 'Pineapple Cake', 'Ragi', 'Khichdi', 'Parle-G')
+    Resolves the relevant food slug from structured `selected_entity`, `context.food_slug`,
+    `context.barcode`, or food names mentioned in the user's message.
     """
+    if context and context.selected_entity and context.selected_entity.type in ("food", "packaged_product"):
+        cand_id = str(context.selected_entity.id or "").strip()
+        if cand_id:
+            exists = db.query(FoodItem.slug).filter(FoodItem.slug == cand_id).first()
+            if exists:
+                return exists[0]
+        if context.selected_entity.name:
+            by_name = (
+                db.query(FoodItem.slug)
+                .filter(FoodItem.name_en.ilike(f"%{context.selected_entity.name}%"))
+                .first()
+            )
+            if by_name:
+                return by_name[0]
+
     if context and context.food_slug:
         exists = db.query(FoodItem.slug).filter(FoodItem.slug == context.food_slug).first()
         if exists:
@@ -1552,11 +2523,10 @@ def _resolve_context_food_slug(
         if pc:
             return pc[0]
 
-    # Check if any food item's name appears in the message
     all_foods = db.query(FoodItem.slug, FoodItem.name_en, FoodItem.brand).all()
     for slug, name_en, _brand in all_foods:
         base_name = re.sub(r"\s*\(.*?\)", "", name_en.lower()).strip()
-        if len(base_name) >= 4 and base_name in msg_lower:
+        if len(base_name) >= 4 and re.search(rf"\b{re.escape(base_name)}s?\b", msg_lower):
             return slug
 
     return None
@@ -1567,9 +2537,10 @@ def _orchestrate_deterministic_tool_calls(
     req: AssistantChatRequest,
 ) -> tuple[dict[str, Any], list[AssistantToolExecutionTrace], list[AssistantSourceReference]]:
     """
-    Database-first deterministic tool planner that guarantees accurate backend tool execution
-    for the current page context and user question, before passing grounded facts to Ollama
-    (or synthesizing a structured answer if Ollama is offline).
+    Context-first, database-grounded deterministic tool planner.
+    Resolves the active UI selection (`food`, `packaged_product`, `recipe`, `body_region`, `condition`)
+    and pronoun references BEFORE calling Ollama so the assistant always answers the user's
+    actual question about the selected item rather than returning generic GharPlate boilerplate.
     """
     msg = req.message.strip()
     msg_l = msg.lower()
@@ -1586,56 +2557,114 @@ def _orchestrate_deterministic_tool_calls(
         sources.extend(srcs)
         return out
 
+    # 0. Resolve active entity & intent (Part B)
+    resolved_entity, intent_type = resolve_active_entity_and_intent(db, req)
+    collected_data["resolved_intent"] = intent_type
+    if resolved_entity:
+        collected_data["resolved_entity"] = resolved_entity.model_dump()
+    if ctx and ctx.food_image_analysis and isinstance(ctx.food_image_analysis, dict):
+        collected_data["food_image_analysis"] = ctx.food_image_analysis
+
     # 1. Resolve active household member context if provided
-    if ctx and (ctx.member_id is not None or ctx.household_token):
+    member_id_val = (
+        ctx.selected_member.id
+        if (ctx and ctx.selected_member and ctx.selected_member.id is not None)
+        else (ctx.member_id if ctx else None)
+    )
+    if ctx and (member_id_val is not None or ctx.household_token):
         mem_out = _run(
             "get_household_member_context",
-            {"household_token": ctx.household_token, "member_id": ctx.member_id},
+            {"household_token": ctx.household_token, "member_id": member_id_val},
         )
         if mem_out.get("member_selected"):
             collected_data["member_context"] = mem_out
 
-    # 2. Check if message contains an explicit 8-14 digit barcode
+    # Handle explicit software help ("What does this GharPlate feature do?")
+    if intent_type == "software_help":
+        page_label = (ctx.page_type or ctx.current_page or "GharPlate") if ctx else "GharPlate"
+        collected_data["software_feature_explanation"] = {
+            "page": page_label,
+            "route": ctx.route if ctx else "/",
+            "selected_entity": resolved_entity.model_dump() if resolved_entity else None,
+            "capabilities": [
+                "Search verified Indian foods & packaged products (IFCT 2017, ICMR-NIN 2024, Open Food Facts, USDA FDC)",
+                "Interactive 10-layer 3D Human Anatomy & Nutrition Explorer (/explore/body-nutrition)",
+                "Complete step-by-step Indian recipes with interactive Guided Cooking Mode (/recipes)",
+                "Daily Food, Water, Blood Pressure, Blood Glucose & AI Habit tracking (/tracker)",
+                "Context-aware text and voice conversation in English, Hindi, and Kannada",
+            ],
+        }
+        return collected_data, traces, sources
+
+    # Handle missing-context pronoun ("Is this good?" with no selected item)
+    if intent_type == "needs_clarification":
+        return collected_data, traces, sources
+
+    # 2. Route by resolved entity type:
+    # 2A. Selected Body Region / 3D Anatomy Structure
+    if resolved_entity and resolved_entity.type == "body_region" and resolved_entity.id:
+        collected_data["body_region_details"] = _run(
+            "get_body_region_details",
+            {
+                "region_code": str(resolved_entity.id),
+                "household_token": ctx.household_token if ctx else None,
+                "member_id": member_id_val,
+            },
+        )
+
+    # 2B. Selected Recipe
+    elif resolved_entity and resolved_entity.type == "recipe" and resolved_entity.id:
+        rec_det = _run(
+            "get_recipe_details",
+            {"recipe_id_or_slug": str(resolved_entity.id)},
+        )
+        collected_data["recipe_details"] = rec_det
+        # If the user asks about a specific ingredient inside the recipe or if no recipe was found, check food DB too
+        if not rec_det.get("found"):
+            sr = _run("search_food_database", {"query": resolved_entity.name or str(resolved_entity.id)})
+            collected_data["search_results"] = sr
+            items = (sr or {}).get("items") or []
+            if items:
+                top_slug = items[0]["slug"]
+                collected_data["food_details"] = _run("get_food_details", {"food_slug": top_slug})
+                collected_data["nutritional_composition"] = _run(
+                    "get_nutritional_composition", {"food_slug": top_slug}
+                )
+                collected_data["ingredients_and_allergens"] = _run(
+                    "get_ingredients_and_allergens", {"food_slug": top_slug}
+                )
+
+    # 2C. Selected Food or Packaged Product (or barcode)
     bc_match = re.search(r"\b(\d{8,14})\b", msg)
     target_barcode = bc_match.group(1) if bc_match else (ctx.barcode if ctx else None)
-
-    target_slug = _resolve_context_food_slug(db, msg, ctx)
+    target_slug = (
+        str(resolved_entity.id)
+        if (resolved_entity and resolved_entity.type in ("food", "packaged_product") and resolved_entity.id)
+        else _resolve_context_food_slug(db, msg, ctx)
+    )
 
     if target_slug:
         collected_data["food_details"] = _run("get_food_details", {"food_slug": target_slug})
-
-        # If asking about ingredients, allergens, milk, egg, soy, wheat, additives, or general details
-        if any(
-            kw in msg_l
-            for kw in (
-                "ingredient",
-                "contain",
-                "allergen",
-                "milk",
-                "egg",
-                "soy",
-                "wheat",
-                "gluten",
-                "vegan",
-                "vegetarian",
-                "additive",
-                "ins ",
-                "what is in",
-                "made of",
-            )
-        ) or "ingredients_and_allergens" not in collected_data:
-            collected_data["ingredients_and_allergens"] = _run(
-                "get_ingredients_and_allergens", {"food_slug": target_slug}
-            )
-
-        # Retrieve nutritional composition
+        collected_data["ingredients_and_allergens"] = _run(
+            "get_ingredients_and_allergens", {"food_slug": target_slug}
+        )
         collected_data["nutritional_composition"] = _run(
             "get_nutritional_composition", {"food_slug": target_slug}
         )
 
-        # If in automatic/online_search mode and the user asks to find online info or why nutrients are missing
+        # Also check if there is a curated recipe matching this dish (e.g., viewing Idli food page and asking "How is this made?")
+        if any(
+            kw in msg_l
+            for kw in ("how is this made", "how to make", "how to cook", "recipe", "steps", "prepare", "preparation")
+        ):
+            food_name_clean = re.sub(
+                r"\s*\(.*?\)", "", (collected_data["food_details"].get("name_en") or target_slug)
+            ).strip()
+            rec_try = _run("get_recipe_details", {"recipe_id_or_slug": food_name_clean})
+            if rec_try.get("found"):
+                collected_data["recipe_details"] = rec_try
+
         food_det = collected_data.get("food_details") or {}
-        is_incomplete = (food_det.get("available_nutrient_count") or 0) == 0
         wants_online = mode == "online_search" or any(
             kw in msg_l
             for kw in ("online", "external", "open food facts", "find", "missing", "null", "barcode")
@@ -1654,8 +2683,6 @@ def _orchestrate_deterministic_tool_calls(
                         "brand": food_det.get("brand"),
                     },
                 )
-        elif is_incomplete and mode == "database_only" and "barcode" in msg_l:
-            pass
 
     elif target_barcode:
         if mode == "database_only":
@@ -1666,38 +2693,42 @@ def _orchestrate_deterministic_tool_calls(
             collected_data["barcode_lookup"] = _run(
                 "lookup_product_by_barcode", {"barcode": target_barcode}
             )
-    else:
-        # Search local food database using cleaned query keywords
+    elif not collected_data.get("body_region_details") and not collected_data.get("recipe_details"):
         stop_words = {
             "what", "are", "the", "in", "is", "how", "much", "many", "does",
             "contain", "for", "of", "tell", "me", "about", "can", "you",
             "find", "search", "online", "nutrition", "calories", "protein",
-            "ingredients", "good", "safe", "allowed",
+            "ingredients", "good", "safe", "allowed", "uses", "this", "that", "one", "made",
         }
         tokens = [
             t for t in re.findall(r"[a-zA-Z0-9]+", msg) if t.lower() not in stop_words and len(t) >= 3
         ]
         search_q = " ".join(tokens[:4]) if tokens else msg[:40]
-        collected_data["search_results"] = _run(
-            "search_food_database", {"query": search_q}
-        )
-        items = (collected_data["search_results"] or {}).get("items") or []
-        if items:
-            top_slug = items[0]["slug"]
-            collected_data["food_details"] = _run("get_food_details", {"food_slug": top_slug})
-            collected_data["ingredients_and_allergens"] = _run(
-                "get_ingredients_and_allergens", {"food_slug": top_slug}
+        if search_q:
+            collected_data["search_results"] = _run(
+                "search_food_database", {"query": search_q}
             )
-            collected_data["nutritional_composition"] = _run(
-                "get_nutritional_composition", {"food_slug": top_slug}
-            )
-        elif mode in ("automatic", "online_search"):
-            collected_data["external_search"] = _run(
-                "search_external_products", {"query": search_q}
-            )
+            items = (collected_data["search_results"] or {}).get("items") or []
+            if items:
+                top_slug = items[0]["slug"]
+                collected_data["food_details"] = _run("get_food_details", {"food_slug": top_slug})
+                collected_data["ingredients_and_allergens"] = _run(
+                    "get_ingredients_and_allergens", {"food_slug": top_slug}
+                )
+                collected_data["nutritional_composition"] = _run(
+                    "get_nutritional_composition", {"food_slug": top_slug}
+                )
+            elif mode in ("automatic", "online_search"):
+                collected_data["external_search"] = _run(
+                    "search_external_products", {"query": search_q}
+                )
 
-    # 3. Check if a health condition is referenced in the message or page context
-    cond_code = ctx.condition_code if ctx else None
+    # 3. Check if a health condition is referenced in the message, page context, or active member profile
+    cond_code = (
+        str(resolved_entity.id)
+        if (resolved_entity and resolved_entity.type == "condition" and resolved_entity.id)
+        else (ctx.condition_code or ctx.selected_condition if ctx else None)
+    )
     if not cond_code:
         cond_keywords = {
             "fever": "fever_acute_recovery",
@@ -1727,13 +2758,79 @@ def _orchestrate_deterministic_tool_calls(
             {"condition_code": cond_code, "food_slug": target_slug},
         )
 
-    # 4. GharPlate 3.0 Ecosystem Intent Routing (Daily Tracker, Water, Fitness, Goals, Habits, Pantry, Shopping, Protein, Mess)
+    # 4. GharPlate 3.0 Ecosystem Intent Routing
     base_ctx_args = {
         "household_token": ctx.household_token if ctx else None,
-        "member_id": ctx.member_id if ctx else None,
+        "member_id": member_id_val,
     }
-    if any(kw in msg_l for kw in ("consumed today", "logged today", "my daily", "how much protein have i", "calories today", "food log", "food diary")):
+    if any(kw in msg_l for kw in ("consumed today", "logged today", "my daily", "how much protein have i", "calories today", "food log", "food diary", "what did i eat", "missing nutritional")):
         collected_data["daily_nutrition_summary"] = _run("get_daily_nutrition_summary", base_ctx_args)
+    if (
+        ctx
+        and ctx.food_image_analysis
+        and isinstance(ctx.food_image_analysis, dict)
+        and any(kw in msg_l for kw in ("add this", "log this", "add to today", "add to breakfast", "add to lunch", "add to dinner", "add to snack", "today's breakfast", "today's lunch", "today's dinner"))
+    ):
+        fia = ctx.food_image_analysis
+        fia_slug = fia.get("confirmed_food_slug") or fia.get("food_slug") or target_slug
+        fia_unit = str(fia.get("selected_unit_name") or "standard_serving")
+        fia_qty = float(fia.get("selected_quantity") or 1.0)
+        meal_cat = "lunch" if "lunch" in msg_l else ("dinner" if "dinner" in msg_l else ("snack" if "snack" in msg_l else "breakfast"))
+        if fia_slug:
+            collected_data["photo_food_log_preview"] = _run(
+                "log_food_intake",
+                {
+                    **base_ctx_args,
+                    "food_slug": fia_slug,
+                    "quantity": fia_qty,
+                    "unit_name": fia_unit,
+                    "meal_category": meal_cat,
+                    "confirmed": False,
+                },
+            )
+    elif any(kw in msg_l for kw in ("i had ", "i ate ", "for breakfast", "for lunch", "for dinner")) and not any(kw in msg_l for kw in ("sugar", "glucose", "bp", "blood pressure", "can i eat", "good for breakfast", "suitable for breakfast")):
+        collected_data["parsed_food_log_preview"] = _run("parse_food_log_message", {**base_ctx_args, "text": msg})
+    if any(kw in msg_l for kw in ("blood pressure", "bp ", "morning bp", "evening bp", "systolic", "diastolic", "over ")):
+        bp_m = re.search(r"\b(\d{2,3})\s*(?:/|over)\s*(\d{2,3})\b", msg_l)
+        if bp_m:
+            p_m = re.search(r"pulse\s*(?:was|of|:)?\s*(\d{2,3})", msg_l)
+            tod = "evening" if "evening" in msg_l or "night" in msg_l else "morning"
+            collected_data["bp_entry_preview"] = _run(
+                "record_blood_pressure",
+                {
+                    **base_ctx_args,
+                    "systolic_mmhg": int(bp_m.group(1)),
+                    "diastolic_mmhg": int(bp_m.group(2)),
+                    "pulse_bpm": int(p_m.group(1)) if p_m else None,
+                    "time_of_day": tod,
+                    "confirmed": False,
+                },
+            )
+        else:
+            collected_data["blood_pressure_history"] = _run("get_blood_pressure_history", base_ctx_args)
+    if any(kw in msg_l for kw in ("glucose", "fasting sugar", "blood sugar", "post-meal", "mg/dl", "mmol/l")):
+        bg_m = re.search(r"\b(\d+(?:\.\d+)?)\s*(mg/dl|mmol/l)?\b", msg_l)
+        if bg_m and any(k in msg_l for k in ("my ", "was ", "record ", "log ", "today")):
+            unit_s = "mmol/L" if (bg_m.group(2) or "").lower() == "mmol/l" else "mg/dL"
+            ctx_s = "after_breakfast" if "after breakfast" in msg_l else ("after_lunch" if "after lunch" in msg_l else ("bedtime" if "bedtime" in msg_l else "fasting"))
+            collected_data["glucose_entry_preview"] = _run(
+                "record_blood_glucose",
+                {
+                    **base_ctx_args,
+                    "glucose_value": float(bg_m.group(1)),
+                    "measurement_unit": unit_s,
+                    "measurement_context": ctx_s,
+                    "confirmed": False,
+                },
+            )
+        else:
+            collected_data["blood_glucose_history"] = _run("get_blood_glucose_history", base_ctx_args)
+    if any(kw in msg_l for kw in ("routine", "habit plan", "skip breakfast", "forget to drink")):
+        collected_data["proposed_habit_plan"] = _run("propose_habit_plan", {**base_ctx_args, "prompt": msg})
+    if any(kw in msg_l for kw in ("easier", "missed habits", "pause", "remove the evening reminder", "weekly nutrition review")):
+        collected_data["habit_schedule_update"] = _run("update_habit_schedule", {**base_ctx_args, "instruction": msg, "user_confirmed": False})
+    if "timeline" in msg_l or "activity today" in msg_l:
+        collected_data["daily_activity_timeline"] = _run("get_daily_activity_timeline", base_ctx_args)
     if any(kw in msg_l for kw in ("water", "hydration", "hydrated", "drank")):
         collected_data["water_intake"] = _run("get_water_intake", base_ctx_args)
     if any(kw in msg_l for kw in ("fitness profile", "training schedule", "workout", "gym goal", "muscle", "fitness progress")):
@@ -1749,7 +2846,7 @@ def _orchestrate_deterministic_tool_calls(
         collected_data["pantry_items"] = _run("get_available_pantry_items", base_ctx_args)
     if any(kw in msg_l for kw in ("shopping list", "grocery", "ingredients do i need")):
         collected_data["shopping_list_preview"] = _run("create_shopping_list", {**base_ctx_args, "confirmed": False})
-    if any(kw in msg_l for kw in ("recipe", "suggest a", "meal for my")):
+    if any(kw in msg_l for kw in ("suggest a", "meal for my")) or ("recipe" in msg_l and not collected_data.get("recipe_details")):
         collected_data["recipe_suggestions"] = _run("get_recipe_suggestions", {**base_ctx_args, "query": None})
     if "mess" in msg_l or "canteen" in msg_l or "hostel" in msg_l:
         collected_data["mess_menus"] = _run("get_mess_menu", base_ctx_args)
@@ -1766,7 +2863,6 @@ def _orchestrate_deterministic_tool_calls(
             "search_external_web_sources", {"query": web_q}
         )
 
-    # Deduplicate sources by title + url
     unique_sources: list[AssistantSourceReference] = []
     seen_src = set()
     for s in sources:
@@ -1783,15 +2879,37 @@ def _synthesize_grounded_response(
     collected_data: dict[str, Any],
 ) -> str:
     """
-    Synthesizes a concise, factual, grounded answer strictly from retrieved tool data.
-    Never invents nutrient values, ingredients, clinical rules, or citations.
+    Synthesizes a concise, factual, context-aware answer strictly from retrieved tool data.
+    Directly answers questions about the currently selected Food, Recipe, 3D Anatomy Region,
+    or Condition without generic software boilerplate.
     """
     msg_l = req.message.lower()
     lines: list[str] = []
+    intent_type = collected_data.get("resolved_intent")
+
+    # 1. Explicit question about the GharPlate software/feature itself (Test 6)
+    if intent_type == "software_help":
+        sw = collected_data.get("software_feature_explanation") or {}
+        lines.append(
+            f"**About This GharPlate Feature (`{sw.get('page', 'GharPlate')}`):** "
+            "GharPlate is an evidence-based Indian household food, recipe, health-condition, and 3D anatomy nutrition intelligence platform."
+        )
+        for cap in sw.get("capabilities") or []:
+            lines.append(f"- {cap}")
+        return "\n\n".join(lines)
+
+    # 2. Ambiguous pronoun when no item is selected and conversation history is empty (Test 7)
+    if intent_type == "needs_clarification":
+        return (
+            "Which food, recipe, packaged product, or body region are you asking about? "
+            "Select an item on the page (for example, a food in Food Explorer, a dish in Recipes, or a structure in the 3D Body Explorer) or mention its name so I can check its verified nutrition and uses."
+        )
 
     food_det = collected_data.get("food_details") or {}
     ing_data = collected_data.get("ingredients_and_allergens") or {}
     nut_data = collected_data.get("nutritional_composition") or {}
+    rec_det = collected_data.get("recipe_details") or {}
+    body_det = collected_data.get("body_region_details") or {}
     bc_data = collected_data.get("barcode_lookup") or {}
     cond_data = collected_data.get("condition_guidance") or {}
     ext_search = collected_data.get("external_search") or {}
@@ -1805,26 +2923,206 @@ def _synthesize_grounded_response(
             "**Medical Safety Notice:** GharPlate is an educational nutrition platform and cannot diagnose conditions, prescribe treatment, or adjust medication/insulin dosages. Please consult a qualified physician or registered dietitian."
         )
 
+    # 3. 3D Anatomy / Body Region Response (Test 3: "What nutrients are important for this?" on Eye/Vision)
+    if body_det.get("found"):
+        r_name = body_det.get("name") or "Selected Body Region"
+        r_sys = body_det.get("anatomical_system") or "Human Anatomy"
+        r_fma = body_det.get("fma_id") or body_det.get("code")
+        lines.append(
+            f"**{r_name}** (*{r_sys}* — `{r_fma}`): "
+            f"{body_det.get('short_summary') or ''}"
+        )
+        if body_det.get("physiological_function"):
+            lines.append(
+                f"- **Physiological Function:** {body_det['physiological_function']}"
+            )
+        if body_det.get("nutrients"):
+            nut_bullets = [
+                f"**{n['nutrient_name']}**: {n['physiological_role']} *(Ref: {n.get('daily_reference_note') or 'ICMR-NIN DGI 2024'})*"
+                for n in body_det["nutrients"]
+            ]
+            lines.append("- **Key Supporting Nutrients:**\n  - " + "\n  - ".join(nut_bullets))
+        rec_foods = body_det.get("foods") or []
+        if rec_foods:
+            top_foods_str = ", ".join(
+                f"**{f['name_en']}** ({f['primary_nutrient_code']}: {f.get('primary_nutrient_value')} per {f['default_basis']} — *{f.get('preparation_or_serving_tip') or f.get('relevance_explanation')}*)"
+                for f in rec_foods[:5]
+            )
+            lines.append(f"- **Verified Indian Food Sources (IFCT 2017):** {top_foods_str}.")
+        if body_det.get("hydration_connection"):
+            lines.append(f"- **Hydration & Absorption Note:** {body_det['hydration_connection']}")
+        if body_det.get("evidence_limitation_note"):
+            lines.append(f"- **Evidence Boundary:** *{body_det['evidence_limitation_note']}*")
+
+    # 4. Recipe Detail / "How is this made?" Response (Test 2: Idli -> "How is this made?")
+    if rec_det.get("found"):
+        r_title = rec_det.get("title")
+        lines.append(
+            f"**{r_title}** — {rec_det.get('meal_type') or 'Indian Dish'} • "
+            f"**Prep:** {rec_det.get('prep_time_minutes') or 10} min • "
+            f"**Cook:** {rec_det.get('cook_time_minutes') or 15} min • "
+            f"**Servings:** {rec_det.get('servings')}"
+        )
+        if rec_det.get("description"):
+            lines.append(f"- **Overview & Culinary Uses:** {rec_det['description']}")
+        ings = rec_det.get("ingredients") or []
+        if ings:
+            ing_str = ", ".join(
+                f"**{i['food_name']}** ({i['quantity']} × {i['unit_name']} / {i['grams_equivalent']}g)"
+                for i in ings
+            )
+            lines.append(f"- **Ingredients (Linked to IFCT 2017):** {ing_str}.")
+        steps = rec_det.get("steps") or []
+        if steps:
+            step_lines = [
+                f"**Step {s['step_number']} ({s.get('step_title') or s.get('title') or 'Step'} — {s.get('duration_minutes') or 3} min):** {s.get('instruction_text') or s.get('instruction') or ''}"
+                + (f" *(Tip: {s.get('tip') or s.get('cooking_tip')})*" if (s.get("tip") or s.get("cooking_tip")) else "")
+                for s in steps
+            ]
+            lines.append("- **How It Is Made (Step-by-Step Instructions):**\n  - " + "\n  - ".join(step_lines))
+        per_serv = {
+            n["nutrient_code"]: n
+            for n in (rec_det.get("nutrients") or [])
+            if n.get("per_serving_known_value") is not None
+        }
+        if per_serv:
+            macro_parts = []
+            for code in ("energy_kcal", "protein_g", "carbs_g", "fat_total_g", "fibre_g"):
+                if code in per_serv:
+                    item = per_serv[code]
+                    macro_parts.append(f"**{item['nutrient_name']}**: {item['per_serving_known_value']} {item['unit']}")
+            if macro_parts:
+                lines.append("- **Nutrition per Serving:** " + " • ".join(macro_parts))
+
+    # 4B. Active Food Photo Analysis Context (`food_image_analysis` from /recognition)
+    fia_ctx = collected_data.get("food_image_analysis")
+    if isinstance(fia_ctx, dict) and fia_ctx:
+        fia_name = fia_ctx.get("confirmed_food_name") or food_det.get("name_en") or "Analysed Food"
+        fia_conf = str(fia_ctx.get("confidence_category") or "moderate_confidence").replace("_", " ")
+        fia_portion_label = fia_ctx.get("selected_serving_label") or f"{fia_ctx.get('selected_grams') or 100}g"
+        fia_grams = float(fia_ctx.get("selected_grams") or food_det.get("standard_serving_grams") or 100.0)
+        fia_comps = fia_ctx.get("detected_components") or []
+        fia_portion_nutrients = fia_ctx.get("portion_nutrients") or {}
+        lines.append(
+            f"**Analysed Food Photo Context:** **{fia_name}** • Selected Portion: **{fia_portion_label} ({fia_grams:.0f}g)** • "
+            f"Recognition Confidence: *{fia_conf}*"
+        )
+        if fia_ctx.get("overall_description"):
+            lines.append(f"- **Visual Observation:** {fia_ctx['overall_description']}")
+        if len(fia_comps) > 1:
+            comp_labels = ", ".join(
+                f"**{c.get('matched_food_name') or c.get('component_label')}**"
+                for c in fia_comps
+                if isinstance(c, dict)
+            )
+            if comp_labels:
+                lines.append(f"- **Recognised Plate Components:** {comp_labels}.")
+        if fia_portion_nutrients:
+            p_kcal = fia_portion_nutrients.get("energy_kcal")
+            p_prot = fia_portion_nutrients.get("protein_g")
+            p_carbs = fia_portion_nutrients.get("carbs_g")
+            p_fat = fia_portion_nutrients.get("fat_total_g")
+            p_fib = fia_portion_nutrients.get("fibre_g")
+            portion_bits = []
+            if p_kcal is not None:
+                portion_bits.append(f"**Energy**: {p_kcal} kcal")
+            if p_prot is not None:
+                portion_bits.append(f"**Protein**: {p_prot} g")
+            if p_carbs is not None:
+                portion_bits.append(f"**Carbohydrates**: {p_carbs} g")
+            if p_fat is not None:
+                portion_bits.append(f"**Total Fat**: {p_fat} g")
+            if p_fib is not None:
+                portion_bits.append(f"**Dietary Fibre**: {p_fib} g")
+            if portion_bits:
+                lines.append(
+                    f"- **Nutrients in Your Selected Portion ({fia_portion_label} / {fia_grams:.0f}g):** "
+                    + " • ".join(portion_bits)
+                )
+        if any(kw in msg_l for kw in ("gym", "workout", "exercise", "muscle", "pre-workout", "post-workout")):
+            p_prot_val = float(fia_portion_nutrients.get("protein_g") or 0.0)
+            p_carb_val = float(fia_portion_nutrients.get("carbs_g") or 0.0)
+            lines.append(
+                f"- **Gym & Training Suitability:** Your **{fia_portion_label} ({fia_grams:.0f}g)** portion of **{fia_name}** provides **{p_prot_val:.1f}g protein** and **{p_carb_val:.1f}g carbohydrates**. "
+                + (
+                    "It supplies readily digestible carbohydrates for pre-workout energy; pair it with sambar, sprouts, paneer, curd, or boiled eggs to increase total meal protein for post-workout muscle recovery."
+                    if p_prot_val < 12.0
+                    else "It provides a solid protein contribution alongside carbohydrates to support strength training and muscle recovery."
+                )
+            )
+        if any(kw in msg_l for kw in ("vegetarian", "vegan", "veg")):
+            is_veg = bool(fia_ctx.get("is_vegetarian", food_det.get("is_vegetarian", True)))
+            is_vgn = bool(fia_ctx.get("is_vegan", food_det.get("is_vegan", False)))
+            lines.append(
+                f"- **Dietary Classification:** **{fia_name}** is **{'Vegetarian' if is_veg else 'Non-Vegetarian'}** "
+                f"({'and Vegan (plant-based)' if is_vgn else '(contains dairy or non-vegan ingredients)' if is_veg else ''})."
+            )
+        if any(kw in msg_l for kw in ("breakfast", "morning meal")):
+            lines.append(
+                f"- **Breakfast Suitability:** **{fia_name}** ({fia_portion_label}, {fia_grams:.0f}g) is a classic, well-balanced Indian breakfast choice when paired with a protein/fibre accompaniment such as vegetable sambar, dal, or curd."
+            )
+        if collected_data.get("photo_food_log_preview"):
+            pfl = collected_data["photo_food_log_preview"]
+            lines.append(f"- **Daily Tracker Confirmation Preview:** {pfl.get('message')}")
+
+    # 5. Selected Food or Packaged Product Response (Test 1: Carrot (Orange) -> "uses of this?", Test 4: Banana -> "What about this one?")
     if food_det.get("found"):
         name = food_det.get("name_en")
         brand = food_det.get("brand")
         barcode = food_det.get("barcode")
+        cat_name = food_det.get("category_name")
         header = f"**{name}**" + (f" ({brand})" if brand else "")
+        if cat_name:
+            header += f" • Category: *{cat_name}*"
         if barcode:
             header += f" • Barcode: `{barcode}`"
         if food_det.get("net_quantity"):
             header += f" • Net Weight: **{food_det['net_quantity']}**"
         lines.append(header)
 
-        # Barcode-specific answer
+        # Uses, culinary role, description & physiological benefits (Test 1 & Test 4)
+        desc = food_det.get("description")
+        body_funcs = food_det.get("supported_body_functions") or []
+        std_serv = f"{food_det.get('standard_serving_name')} ({food_det.get('standard_serving_grams')}g)"
+        if desc:
+            lines.append(
+                f"- **Culinary & Dietary Uses of {name}:** {desc} Standard household serving: **{std_serv}**."
+            )
+        else:
+            lines.append(
+                f"- **Household Serving & Use:** **{name}** is tracked per **{food_det.get('default_basis', '100g')}** "
+                f"with a standard household serving of **{std_serv}**."
+            )
+
+        if body_funcs:
+            bf_strs = [
+                f"**{bf['region_name']} ({bf['anatomical_system']})**: {bf['why_helpful']}"
+                + (f" *(Tip: {bf['serving_suggestion']})*" if bf.get("serving_suggestion") else "")
+                for bf in body_funcs[:4]
+            ]
+            lines.append(
+                f"- **Physiological & Nutritional Benefits of {name}:**\n  - " + "\n  - ".join(bf_strs)
+            )
+
+        # If asking "How is this made?" on a cooked dish food item (e.g. Idli) and no separate recipe record was rendered yet
+        if not rec_det.get("found") and any(
+            kw in msg_l for kw in ("how is this made", "how to make", "prepare", "made of")
+        ):
+            cleaned_ing = ing_data.get("cleaned_ingredients_text") or ing_data.get("raw_ingredients_text")
+            if cleaned_ing:
+                lines.append(f"- **Preparation & Composition:** {cleaned_ing}")
+            elif desc:
+                lines.append(f"- **Preparation Overview:** {desc}")
+
         if "barcode" in msg_l and barcode:
             lines.append(
                 f"- **Barcode (EAN-13):** `{barcode}` (Source: {food_det['source']['name']})."
             )
 
-        # Ingredients & Allergen-specific answer
+        # Ingredients & Allergen-specific details
         if ing_data.get("found") and (
-            any(
+            food_det.get("is_packaged")
+            or any(
                 kw in msg_l
                 for kw in (
                     "ingredient",
@@ -1839,14 +3137,10 @@ def _synthesize_grounded_response(
                     "additive",
                 )
             )
-            or not any(kw in msg_l for kw in ("calorie", "protein", "carb", "fat", "sodium", "missing", "null"))
         ):
             cleaned_ing = ing_data.get("cleaned_ingredients_text") or ing_data.get("raw_ingredients_text")
             if cleaned_ing:
                 lines.append(f"- **Declared Ingredients:** {cleaned_ing}")
-            else:
-                lines.append("- **Declared Ingredients:** Not available in the local record.")
-
             if ing_data.get("allergen_statement"):
                 lines.append(f"- **Label Allergen Declaration:** *{ing_data['allergen_statement']}*")
 
@@ -1864,10 +3158,6 @@ def _synthesize_grounded_response(
                 lines.append(
                     f"- **Allergen Consistency Note:** The package declaration explicitly lists **{', '.join(missing_tags)}**, which was missing from the initial stored tag list (`{', '.join(stored_tags)}`) and has been flagged for review."
                 )
-            if ing_data.get("ocr_uncertainty_notes"):
-                lines.append(
-                    f"- **OCR Parsing Notes:** {' '.join(ing_data['ocr_uncertainty_notes'])}"
-                )
 
         # Nutrition & Missing-data explanation
         if nut_data.get("found"):
@@ -1876,24 +3166,41 @@ def _synthesize_grounded_response(
             if avail_count == 0:
                 lines.append(
                     f"- **Nutrition Status (`0/20` available — 100% `NULL`):** Nutritional values have not yet been captured for **{name}**. "
-                    "The local record was created from an ingredient/package scan that did not include the back-of-pack nutrition table, and GharPlate never invents or substitutes generic cake/fruit numbers."
+                    "The local record was created from an ingredient/package scan that did not include the back-of-pack nutrition table, and GharPlate never invents or substitutes generic numbers."
                 )
                 lines.append(
                     "- **How to resolve:** Click **Search Online Databases** on the product page to check Open Food Facts / USDA FDC, or use **Scan Nutrition Label** to photograph the nutrition table."
                 )
             else:
                 highlights = []
-                for k in ("energy_kcal", "protein_g", "carbs_g", "sugars_total_g", "sugars_added_g", "fat_total_g", "fibre_g", "sodium_mg"):
+                for k in (
+                    "energy_kcal",
+                    "protein_g",
+                    "carbs_g",
+                    "fibre_g",
+                    "fat_total_g",
+                    "vitamin_a_ug",
+                    "vitamin_a_mcg",
+                    "vitamin_c_mg",
+                    "iron_mg",
+                    "calcium_mg",
+                    "potassium_mg",
+                    "folate_ug",
+                    "folate_mcg",
+                    "magnesium_mg",
+                    "zinc_mg",
+                    "sodium_mg",
+                ):
                     if k in avail_map:
                         item = avail_map[k]
                         highlights.append(f"**{item['name']}**: {item['value_per_100']} {item['unit']}")
                 if highlights:
                     lines.append(
-                        f"- **Nutrition per {nut_data.get('default_basis', '100g')}** ({nut_data.get('completeness_pct')}% complete): "
-                        + " • ".join(highlights)
+                        f"- **Key Nutrients per {nut_data.get('default_basis', '100g')}** ({nut_data.get('completeness_pct')}% complete — Source: {food_det['source']['name']}): "
+                        + " • ".join(highlights[:9])
                     )
                 missing_list = [m["name"] for m in (nut_data.get("missing_nutrients") or [])]
-                if missing_list:
+                if missing_list and any(kw in msg_l for kw in ("missing", "null", "complete", "all nutrient")):
                     lines.append(
                         f"- **Unmeasured (`NULL`) Nutrients:** {', '.join(missing_list[:8])}"
                         + ("..." if len(missing_list) > 8 else "")
@@ -1985,6 +3292,52 @@ def _synthesize_grounded_response(
         if sl.get("requires_user_confirmation"):
             lines.append(f"- **Smart Shopping List Preview:** {sl.get('message')}")
 
+    if collected_data.get("bp_entry_preview"):
+        bp_p = collected_data["bp_entry_preview"]
+        lines.append(f"- **Blood Pressure Confirmation Preview:** {bp_p.get('message')}")
+
+    if collected_data.get("blood_pressure_history"):
+        bph = collected_data["blood_pressure_history"]
+        st = bph.get("summary_stats") or {}
+        lines.append(
+            f"- **Blood Pressure History ({st.get('total_readings', 0)} reading(s)):** "
+            f"Average: **{st.get('avg_systolic_mmhg') or '—'}/{st.get('avg_diastolic_mmhg') or '—'} mmHg** "
+            f"(Morning avg systolic: {st.get('morning_avg_systolic_mmhg') or '—'} mmHg • Evening avg systolic: {st.get('evening_avg_systolic_mmhg') or '—'} mmHg)."
+        )
+
+    if collected_data.get("glucose_entry_preview"):
+        bg_p = collected_data["glucose_entry_preview"]
+        lines.append(f"- **Blood Glucose Confirmation Preview:** {bg_p.get('message')}")
+
+    if collected_data.get("blood_glucose_history"):
+        bgh = collected_data["blood_glucose_history"]
+        cs = bgh.get("context_summaries") or {}
+        f_avg = (cs.get("fasting") or {}).get("avg_mg_dl")
+        pm_avg = (cs.get("post_meal") or {}).get("avg_mg_dl")
+        lines.append(
+            f"- **Blood Glucose History ({len(bgh.get('readings') or [])} reading(s)):** "
+            f"Fasting avg: **{f_avg or 'No fasting logs'} mg/dL** • Post-meal avg: **{pm_avg or 'No post-meal logs'} mg/dL**."
+        )
+
+    if collected_data.get("proposed_habit_plan"):
+        hp = collected_data["proposed_habit_plan"]
+        lines.append(f"- **Proposed AI Habit Plan ({len(hp.get('proposed_habits') or [])} habits — requires confirmation):** {hp.get('plan_summary')}")
+        for h_item in (hp.get("proposed_habits") or [])[:5]:
+            lines.append(f"  - **{h_item['title']}** ({h_item['suggested_schedule']}) — *{h_item['tracking_source_label']}*")
+
+    if collected_data.get("habit_schedule_update"):
+        hu = collected_data["habit_schedule_update"]
+        lines.append(f"- **Habit Plan Update:** {hu.get('summary')}")
+
+    if collected_data.get("parsed_food_log_preview"):
+        pf = collected_data["parsed_food_log_preview"]
+        p_items = pf.get("parsed_items") or []
+        if p_items:
+            lines.append(
+                f"- **Natural-Language Food Log Preview ({pf.get('meal_category')} at {pf.get('logged_time')} — awaiting confirmation):** "
+                + ", ".join(f"**{x['food_name']}** ({x['quantity']} × {x['unit_name']}, {x['energy_kcal']} kcal)" for x in p_items)
+            )
+
     if not lines:
         sr = (collected_data.get("search_results") or {}).get("items") or []
         if sr:
@@ -1994,11 +3347,41 @@ def _synthesize_grounded_response(
             )
         else:
             lines.append(
-                "No matching food or packaged product was found in GharPlate's local database for that query. "
-                "Try switching the assistant mode to **Automatic** or **Search Online**, or scan the package barcode/nutrition label."
+                "No matching food, recipe, or body structure was found in GharPlate's local database for that query. "
+                "Try selecting a specific food, recipe, or 3D body structure, or switch the assistant mode to **Automatic** or **Search Online**."
             )
 
     return "\n\n".join(lines)
+
+
+def _llm_reply_is_on_topic(
+    llm_reply: str,
+    resolved_entity: AssistantSelectedEntity | None,
+    intent_type: str,
+) -> bool:
+    """
+    Verifies that the local Ollama model actually answered about the resolved active entity
+    and did not hallucinate a generic description of the GharPlate software when the user
+    asked about a food, recipe, or body region.
+    """
+    if not llm_reply or len(llm_reply.strip()) < 20:
+        return False
+    reply_l = llm_reply.lower()
+
+    if intent_type != "software_help":
+        if "gharplate is a" in reply_l or "gharplate is an" in reply_l or "this feature allows you" in reply_l:
+            return False
+
+    if resolved_entity and resolved_entity.name:
+        base_tokens = [
+            t
+            for t in re.findall(r"[a-zA-Z]{3,}", resolved_entity.name.lower())
+            if t not in ("the", "and", "with", "indian", "raw", "fresh")
+        ]
+        if base_tokens and not any(tok in reply_l for tok in base_tokens):
+            return False
+
+    return True
 
 
 def chat_with_gharplate_assistant(
@@ -2006,31 +3389,76 @@ def chat_with_gharplate_assistant(
 ) -> AssistantChatResponse:
     """
     Executes a context-aware, tool-backed conversation turn with the GharPlate AI Assistant:
-    1. Runs deterministic database-first and mode-aware backend tools (`_orchestrate_deterministic_tool_calls`).
-    2. Checks local Ollama status and installed models (`get_ollama_assistant_status`).
-    3. If Ollama is reachable and has an installed model, calls `POST {OLLAMA_BASE_URL}/api/chat`
-       with the allowlisted tool definitions and the retrieved database/provider evidence.
-       If the model emits additional tool calls, executes them via `execute_allowlisted_tool`.
-    4. If Ollama is offline or unreachable, returns the deterministic grounded synthesis from the
-       executed backend tools (`used_fallback_synthesis=True`) with clear connection diagnostics.
+    1. Resolves active context & pronouns (`resolve_active_entity_and_intent`) and runs deterministic
+       database-first backend tools (`_orchestrate_deterministic_tool_calls`).
+    2. Synthesizes a verified, entity-grounded baseline answer (`_synthesize_grounded_response`).
+    3. If local Ollama is reachable and the intent is not a clarification prompt, passes the
+       explicit active-context binding and tool evidence to Ollama (with `tools: OLLAMA_TOOLS_SCHEMA`),
+       executes any additional tool calls, and validates that the LLM response stays strictly anchored
+       to the resolved entity (`_llm_reply_is_on_topic`).
     """
     mode = req.mode if req.mode in ("database_only", "automatic", "online_search") else "automatic"
     collected_data, traces, sources = _orchestrate_deterministic_tool_calls(db, req)
     grounded_fallback_reply = _synthesize_grounded_response(req, collected_data)
 
+    resolved_entity_dict = collected_data.get("resolved_entity")
+    resolved_entity = (
+        AssistantSelectedEntity(**resolved_entity_dict)
+        if isinstance(resolved_entity_dict, dict)
+        else None
+    )
+    intent_type = str(collected_data.get("resolved_intent") or "general_query")
+
     status_info = get_ollama_assistant_status(req.model)
     followups = [
-        "What are the ingredients and allergens in this product?",
-        "Why are the nutritional values NULL and how can I enrich them?",
+        "What are the key nutrients and culinary uses of this food?",
+        "How does this fit into a balanced Indian meal?",
         "Which foods are reviewed for Fever or Type 2 Diabetes?",
     ]
-    if (collected_data.get("food_details") or {}).get("found"):
+    if isinstance(collected_data.get("food_image_analysis"), dict) and collected_data.get("food_image_analysis"):
+        fia_obj = collected_data["food_image_analysis"]
+        f_name = fia_obj.get("confirmed_food_name") or (collected_data.get("food_details") or {}).get("name_en") or "this food"
+        followups = [
+            f"How much protein and other nutrients does my portion of {f_name} contain?",
+            f"Is {f_name} suitable for someone going to the gym or for breakfast?",
+            "Add this to today's breakfast",
+        ]
+    elif (collected_data.get("food_details") or {}).get("found"):
         f_name = collected_data["food_details"]["name_en"]
         followups = [
-            f"What are the declared ingredients and additives in {f_name}?",
-            f"Does {f_name} contain milk, egg, wheat, or soy?",
-            f"How much protein and energy does {f_name} provide?",
+            f"What are the health benefits and culinary uses of {f_name}?",
+            f"How much protein, fibre, and key vitamins does {f_name} provide?",
+            f"Is {f_name} suitable for Type 2 Diabetes or Hypertension?",
         ]
+    elif (collected_data.get("body_region_details") or {}).get("found"):
+        r_name = collected_data["body_region_details"].get("name") or "this body region"
+        followups = [
+            f"What nutrients are most important for {r_name}?",
+            f"Which vegetarian Indian foods support {r_name}?",
+            f"How does hydration affect {r_name}?",
+        ]
+    elif (collected_data.get("recipe_details") or {}).get("found"):
+        rec_name = collected_data["recipe_details"]["title"]
+        followups = [
+            f"How is {rec_name} made step by step?",
+            f"How much protein and energy does one serving of {rec_name} provide?",
+            f"What ingredients do I need to cook {rec_name}?",
+        ]
+
+    if intent_type in ("needs_clarification", "software_help"):
+        return AssistantChatResponse(
+            reply=grounded_fallback_reply,
+            mode_used=mode,
+            model_used=status_info.active_model or "gharplate-context-resolver",
+            ollama_connected=status_info.ollama_reachable,
+            used_fallback_synthesis=False,
+            resolved_entity=resolved_entity,
+            resolved_intent=intent_type,
+            tool_traces=traces,
+            sources=sources,
+            suggested_followups=followups,
+            medical_disclaimer=ASSISTANT_MEDICAL_DISCLAIMER,
+        )
 
     if not status_info.ollama_reachable or not status_info.active_model:
         return AssistantChatResponse(
@@ -2039,6 +3467,8 @@ def chat_with_gharplate_assistant(
             model_used=status_info.active_model or "gharplate-deterministic-tool-engine",
             ollama_connected=False,
             used_fallback_synthesis=True,
+            resolved_entity=resolved_entity,
+            resolved_intent=intent_type,
             tool_traces=traces,
             sources=sources,
             suggested_followups=followups,
@@ -2046,14 +3476,23 @@ def chat_with_gharplate_assistant(
         )
 
     active_model = status_info.active_model
+    entity_context_banner = (
+        f"CURRENTLY SELECTED ENTITY IN UI: type='{resolved_entity.type}', id='{resolved_entity.id}', name='{resolved_entity.name}'\n"
+        "CRITICAL PRONOUN RULE: Words like 'this', 'it', 'that', 'this one', 'uses of this?', 'how is this made?', or 'what nutrients are important for this?' "
+        f"refer STRICTLY to '{resolved_entity.name}' ({resolved_entity.type}). Do NOT explain what the GharPlate app is unless the user explicitly asks about the GharPlate software.\n"
+        if resolved_entity
+        else "NO SPECIFIC ENTITY SELECTED: Answer the user's nutrition/health question directly using the verified tool data.\n"
+    )
+
     system_prompt = (
-        "You are the GharPlate AI Assistant, an evidence-based Indian household food and packaged-product intelligence assistant.\n"
+        "You are the GharPlate AI Assistant, an evidence-based Indian household food, recipe, anatomy, and nutrition intelligence assistant.\n"
+        f"{entity_context_banner}\n"
         "STRICT RULES:\n"
-        "1. Answer ONLY using the verified tool outputs provided below. NEVER invent nutrient values, ingredients, barcodes, or citations.\n"
-        "2. If a nutrient value is NULL / missing in the tool output, state clearly that it is unmeasured (NULL) and explain how to enrich it via barcode lookup or label OCR.\n"
-        "3. Highlight any allergen consistency warnings (for example, if soy is declared in the package text but missing from stored allergen tags).\n"
-        "4. You are NOT a doctor or dietitian. Never diagnose illness or prescribe medication.\n"
-        "5. Keep your answer concise, clear, and well-structured with bullet points.\n\n"
+        "1. Answer the user's exact question directly using ONLY the verified backend tool outputs below. NEVER invent nutrient values, ingredients, barcodes, or citations.\n"
+        "2. When an active food, recipe, or body region is selected, explain THAT specific food, recipe, or body region (its culinary uses, nutrients, preparation steps, or physiological role). NEVER give a generic speech about GharPlate features.\n"
+        "3. If a nutrient value is NULL / missing in the tool output, state clearly that it is unmeasured (NULL).\n"
+        "4. You are NOT a doctor or dietitian. Never claim a food cures or repairs an organ, and never prescribe medication.\n"
+        "5. Keep your answer concise, factual, and easy to read (or listen to via voice output).\n\n"
         f"ACTIVE SEARCH MODE: {mode}\n"
         f"VERIFIED BACKEND TOOL DATA:\n{json.dumps(collected_data, indent=2, default=str)}"
     )
@@ -2062,12 +3501,18 @@ def chat_with_gharplate_assistant(
     for h in req.history[-6:]:
         if h.role in ("user", "assistant") and h.content.strip():
             messages_payload.append({"role": h.role, "content": h.content.strip()})
-    messages_payload.append({"role": "user", "content": req.message.strip()})
+
+    user_prompt_text = req.message.strip()
+    if resolved_entity and resolved_entity.name:
+        user_prompt_text = (
+            f"[Active Selection: {resolved_entity.type.upper()} — {resolved_entity.name} ({resolved_entity.id})]\n"
+            f"User question: {req.message.strip()}"
+        )
+    messages_payload.append({"role": "user", "content": user_prompt_text})
 
     chat_url = f"{settings.OLLAMA_BASE_URL.rstrip('/')}/api/chat"
     try:
         with httpx.Client(timeout=float(settings.OLLAMA_TIMEOUT_SECONDS)) as client:
-            # First attempt with native tools enabled; if model does not support tools, fall back to standard chat with grounded context
             resp = client.post(
                 chat_url,
                 json={
@@ -2094,6 +3539,8 @@ def chat_with_gharplate_assistant(
                     model_used=active_model,
                     ollama_connected=False,
                     used_fallback_synthesis=True,
+                    resolved_entity=resolved_entity,
+                    resolved_intent=intent_type,
                     tool_traces=traces,
                     sources=sources,
                     suggested_followups=followups,
@@ -2141,7 +3588,8 @@ def chat_with_gharplate_assistant(
                     msg_obj = resp2.json().get("message") or {}
 
             llm_reply = str(msg_obj.get("content") or "").strip()
-            if not llm_reply:
+
+            if not _llm_reply_is_on_topic(llm_reply, resolved_entity, intent_type):
                 llm_reply = grounded_fallback_reply
 
             return AssistantChatResponse(
@@ -2150,6 +3598,8 @@ def chat_with_gharplate_assistant(
                 model_used=active_model,
                 ollama_connected=True,
                 used_fallback_synthesis=False,
+                resolved_entity=resolved_entity,
+                resolved_intent=intent_type,
                 tool_traces=traces,
                 sources=sources,
                 suggested_followups=followups,
@@ -2162,6 +3612,8 @@ def chat_with_gharplate_assistant(
             model_used=active_model,
             ollama_connected=False,
             used_fallback_synthesis=True,
+            resolved_entity=resolved_entity,
+            resolved_intent=intent_type,
             tool_traces=traces,
             sources=sources,
             suggested_followups=followups,

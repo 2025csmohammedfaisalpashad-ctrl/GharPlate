@@ -6,6 +6,10 @@ import {
   FoodImage,
   ObservationCard,
 } from '../components/UIWidgets';
+import {
+  clearAssistantEntityContext,
+  publishAssistantContext,
+} from '../hooks/useAssistantContext';
 import { useHousehold } from '../hooks/useHousehold';
 import { api } from '../services/api';
 import type {
@@ -302,6 +306,23 @@ export const ConditionDetailPage: React.FC = () => {
       .then(([condRes, recRes]) => {
         setCondition(condRes);
         setRecommendationData(recRes);
+        publishAssistantContext({
+          page_type: 'condition_detail',
+          route: `/conditions/${condRes.code}`,
+          condition_code: condRes.code,
+          selected_entity: {
+            type: 'condition',
+            id: condRes.code,
+            name: condRes.name,
+            category: condRes.condition_group_name,
+            summary: condRes.nutritional_meaning,
+          },
+          selected_condition: {
+            code: condRes.code,
+            name: condRes.name,
+            relevant_nutrients: condRes.relevant_nutrients,
+          },
+        });
         if (recRes.foods.length > 0) {
           setSelectedFoodForCheck((prev) => {
             if (prev && recRes.foods.some((f) => f.slug === prev.slug)) {
@@ -315,6 +336,10 @@ export const ConditionDetailPage: React.FC = () => {
       })
       .catch(() => null)
       .finally(() => setLoading(false));
+
+    return () => {
+      clearAssistantEntityContext(`/conditions/${code}`);
+    };
   }, [code, activeMember?.id, activeMember?.dietary_preference, household?.household_token, dietaryOverride]);
 
   useEffect(() => {

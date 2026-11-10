@@ -1,0 +1,50 @@
+{
+  "atlas_id": "gharplate-human-anatomy-3d-v2",
+  "title": "GharPlate Self-Hosted 3D Human Reference Anatomy Atlas",
+  "version": "2.0.0",
+  "upstream_references": [
+    {
+      "name": "BodyParts3D 4.0",
+      "organization": "Database Center for Life Science (DBCLS), Japan",
+      "license": "CC BY 4.0 (Creative Commons Attribution 4.0 International)",
+      "url": "https://lifesciencedb.jp/bp3d/",
+      "repository_reference": "https://github.com/ashemag/human-atlas",
+      "application_code_license": "MIT License (ashemag/human-atlas)",
+      "notes": "Adult reference anatomical ontology (FMA IDs) and system layer taxonomy adapted for self-hosted interactive 3D mesh rendering."
+    },
+    {
+      "name": "Z-Anatomy / LearnAnatomy3D Reference Taxonomy",
+      "organization": "Z-Anatomy Open Source Project",
+      "license": "CC BY-SA 4.0",
+      "url": "https://learnanatomy3d.com/",
+      "notes": "Anatomical system grouping and educational camera preset conventions."
+    }
+  ],
+  "anatomical_scope_disclaimer": "This 3D reference atlas represents a generalized adult human anatomical model for educational nutrition exploration. It does not represent every individual's anatomical variation, age, sex, or clinical state.",
+  "layers": [
+    { "id": "skin_external", "order": 1, "label": "1. External Body & Skin", "group": "whole_body", "default_region_code": "skin_epithelial" },
+    { "id": "skeletal", "order": 2, "label": "2. Skeletal System", "group": "skeleton", "default_region_code": "bones_joints" },
+    { "id": "muscular", "order": 3, "label": "3. Muscular System", "group": "muscles", "default_region_code": "muscles_strength" },
+    { "id": "nervous", "order": 4, "label": "4. Brain & Nervous System", "group": "organs", "default_region_code": "brain_nerves" },
+    { "id": "cardiovascular", "order": 5, "label": "5. Cardiovascular & Blood", "group": "organs", "default_region_code": "heart_cardiovascular" },
+    { "id": "digestive", "order": 6, "label": "6. Digestive System", "group": "organs", "default_region_code": "digestive_gut" },
+    { "id": "respiratory", "order": 7, "label": "7. Respiratory System", "group": "organs", "default_region_code": "respiratory_lungs" },
+    { "id": "urinary", "order": 8, "label": "8. Urinary & Renal System", "group": "organs", "default_region_code": "urinary_kidneys" },
+    { "id": "endocrine", "order": 9, "label": "9. Endocrine System", "group": "organs", "default_region_code": "endocrine_metabolic" },
+    { "id": "sensory_immune", "order": 10, "label": "10. Eyes, Sensory & Immune", "group": "organs", "default_region_code": "eyes_vision" }
+  ],
+  "structures": [
+    { "mesh_id": "FMA_50801_BRAIN", "fma_id": "FMA:50801", "name": "Cerebrum, Cerebellum & Brainstem", "region_code": "brain_nerves", "layer_id": "nervous" },
+    { "mesh_id": "FMA_54448_EYES", "fma_id": "FMA:54448", "name": "Bilateral Ocular Globes & Optic Tracts", "region_code": "eyes_vision", "layer_id": "sensory_immune" },
+    { "mesh_id": "FMA_7088_HEART", "fma_id": "FMA:7088", "name": "Heart, Myocardium & Aortic Arch", "region_code": "heart_cardiovascular", "layer_id": "cardiovascular" },
+    { "mesh_id": "FMA_50723_VESSELS", "fma_id": "FMA:50723", "name": "Systemic Arterial & Venous Tree", "region_code": "blood_circulation", "layer_id": "cardiovascular" },
+    { "mesh_id": "FMA_7195_LUNGS", "fma_id": "FMA:7195", "name": "Left & Right Lungs, Trachea & Bronchi", "region_code": "respiratory_lungs", "layer_id": "respiratory" },
+    { "mesh_id": "FMA_71132_GI_TRACT", "fma_id": "FMA:71132", "name": "Stomach, Liver, Small & Large Intestines", "region_code": "digestive_gut", "layer_id": "digestive" },
+    { "mesh_id": "FMA_7203_KIDNEYS", "fma_id": "FMA:7203", "name": "Bilateral Kidneys & Renal Cortex", "region_code": "urinary_kidneys", "layer_id": "urinary" },
+    { "mesh_id": "FMA_9603_ENDOCRINE", "fma_id": "FMA:9603", "name": "Thyroid Gland & Endocrine Pancreas", "region_code": "endocrine_metabolic", "layer_id": "endocrine" },
+    { "mesh_id": "FMA_9611_THYMUS_SPLEEN", "fma_id": "FMA:9611", "name": "Thymus, Spleen & Lymphatic Nodes", "region_code": "immune_defence", "layer_id": "sensory_immune" },
+    { "mesh_id": "FMA_23881_SKELETON", "fma_id": "FMA:23881", "name": "Cranium, Ribcage, Vertebral Column, Pelvis & Long Bones", "region_code": "bones_joints", "layer_id": "skeletal" },
+    { "mesh_id": "FMA_32558_MUSCLES", "fma_id": "FMA:32558", "name": "Pectoralis, Deltoids, Biceps, Rectus Abdominis & Quadriceps", "region_code": "muscles_strength", "layer_id": "muscular" },
+    { "mesh_id": "FMA_7163_INTEGUMENT", "fma_id": "FMA:7163", "name": "External Body Surface & Dermal Envelope", "region_code": "skin_epithelial", "layer_id": "skin_external" }
+  ]
+}

@@ -231,6 +231,13 @@ export const RecipeDiscoveryPage: React.FC = () => {
             </div>
             <p className="text-stone-600">{genResult.nutrition_provenance_notice}</p>
             <div className="flex flex-wrap gap-2 pt-1">
+              <Link
+                to={`/recipes/${genResult.generated_recipe.id}`}
+                data-testid={`view-recipe-btn-${genResult.generated_recipe.id}`}
+                className="rounded-xl bg-emerald-800 px-3.5 py-1.5 font-extrabold text-white hover:bg-emerald-700"
+              >
+                📖 View Recipe &amp; Cook Mode
+              </Link>
               <button
                 type="button"
                 onClick={() =>
@@ -271,16 +278,29 @@ export const RecipeDiscoveryPage: React.FC = () => {
                 className="overflow-hidden rounded-3xl border border-stone-200/90 bg-white shadow-sm flex flex-col justify-between"
               >
                 <div>
-                  <FoodImage
-                    src={rec.image_url}
-                    foodName={rec.title}
-                    categorySlug="indian-dishes"
-                    aspectClass="aspect-[16/10]"
-                  />
+                  <Link to={`/recipes/${rec.id}`} className="block group relative">
+                    <FoodImage
+                      src={rec.image_url}
+                      foodName={rec.title}
+                      categorySlug="indian-dishes"
+                      aspectClass="aspect-[16/10]"
+                    />
+                    <div className="absolute top-3 left-3 flex flex-wrap gap-1.5">
+                      <span className="rounded-full bg-white/95 px-2.5 py-0.5 text-[10px] font-extrabold text-emerald-950 shadow-2xs">
+                        {rec.verification_badge_label || 'GharPlate-curated recipe'}
+                      </span>
+                      {rec.step_count > 0 && (
+                        <span className="rounded-full bg-emerald-800/95 px-2.5 py-0.5 text-[10px] font-extrabold text-white shadow-2xs">
+                          {rec.step_count} Cooking Steps
+                        </span>
+                      )}
+                    </div>
+                  </Link>
                   <div className="p-5 space-y-2.5">
                     <div className="flex items-center justify-between text-[11px] font-bold">
                       <span className="uppercase text-emerald-800">
-                        {rec.meal_type.replace('_', ' ')} • {rec.servings} servings
+                        {rec.meal_type.replace('_', ' ')} • {rec.servings} servings •{' '}
+                        {(rec.prep_time_minutes || 15) + (rec.cook_time_minutes || 15)} min
                       </span>
                       {rec.estimated_cost_inr && (
                         <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-amber-950">
@@ -288,9 +308,12 @@ export const RecipeDiscoveryPage: React.FC = () => {
                         </span>
                       )}
                     </div>
-                    <h3 className="text-base font-extrabold text-stone-900">
+                    <Link
+                      to={`/recipes/${rec.id}`}
+                      className="block text-base font-extrabold text-stone-900 hover:text-emerald-800 transition"
+                    >
                       {rec.title}
-                    </h3>
+                    </Link>
                     <p className="text-xs text-stone-600 line-clamp-2">
                       {rec.why_recommended}
                     </p>
@@ -313,15 +336,24 @@ export const RecipeDiscoveryPage: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="border-t border-stone-100 px-5 py-3.5 flex items-center justify-between gap-2 text-xs">
-                  <button
-                    type="button"
-                    data-testid={`get-ingredients-btn-${rec.id}`}
-                    onClick={() => void handleGetIngredients(rec.id, rec.title)}
-                    className="rounded-xl bg-amber-400 px-3.5 py-1.5 font-extrabold text-stone-950 hover:bg-amber-300 transition"
-                  >
-                    🛒 Get Ingredients
-                  </button>
+                <div className="border-t border-stone-100 px-5 py-3.5 flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Link
+                      to={`/recipes/${rec.id}`}
+                      data-testid={`view-recipe-btn-${rec.id}`}
+                      className="rounded-xl bg-emerald-800 px-3.5 py-1.5 font-extrabold text-white hover:bg-emerald-700 transition"
+                    >
+                      📖 View Recipe
+                    </Link>
+                    <button
+                      type="button"
+                      data-testid={`get-ingredients-btn-${rec.id}`}
+                      onClick={() => void handleGetIngredients(rec.id, rec.title)}
+                      className="rounded-xl bg-amber-400 px-3 py-1.5 font-extrabold text-stone-950 hover:bg-amber-300 transition"
+                    >
+                      🛒 Get Ingredients
+                    </button>
+                  </div>
                   <Link
                     to={`/recipes/calculator?edit=${rec.id}`}
                     className="font-extrabold text-emerald-800 hover:underline"

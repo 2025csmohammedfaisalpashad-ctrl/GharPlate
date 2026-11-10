@@ -1720,4 +1720,1408 @@ describe('GharPlate Targeted Food Images, Barcode Camera Scanner & Resizable AI 
       screen.getByTestId('protein-row-soya-chunks-textured-veg-protein')
     ).toHaveTextContent('₹3.08 / 10g P');
   });
+
+  it("verifies Premium Minimalist UX Transformation: consolidated sidebar, Quick Add menu, progressive Fitness Profile, simplified Today's Food tracker, Graph-First Habits with deduplication & once-only rewards, and assistant-style AI Habit Builder", async () => {
+    const prevImpl = mockFetch.getMockImplementation();
+    mockFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.includes("/fitness/profile")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            member_id: 1,
+            member_name: "Ajji",
+            primary_goal: "build_muscle",
+            height_cm: 162,
+            current_weight_kg: 61,
+            target_weight_kg: 63,
+            training_frequency_days_per_week: 3,
+            training_type: "strength_training",
+            daily_activity_level: "moderately_active",
+            computed_targets: {
+              calories_kcal: 2050,
+              protein_g: 80,
+              fiber_g: 30,
+              assumptions_disclosure: "Conservative estimate.",
+            },
+            training_schedule: [
+              { day_of_week: "monday", is_training_day: true, workout_type: "Strength", duration_minutes: 45 },
+              { day_of_week: "tuesday", is_training_day: false, workout_type: "Rest", duration_minutes: 0 },
+            ],
+          }),
+        };
+      }
+      if (url.includes("/tracker/daily")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            date: "2026-11-08",
+            weekday: "sunday",
+            today_training: { is_training_day: false, workout_type: "Rest" },
+            member: { id: 1, display_name: "Ajji", primary_goal: "build_muscle" },
+            targets: { calories_kcal: 2050, protein_g: 80, carbs_g: 240, fat_g: 55, fiber_g: 30 },
+            daily_nutrition: {
+              entry_count: 1,
+              totals: { energy_kcal: 260, protein_g: 9.2, carbs_g: 44, fat_total_g: 3.1, fibre_g: 4.8 },
+              has_incomplete_entries: false,
+              incomplete_entry_names: [],
+            },
+            meals: [
+              {
+                meal_category: "breakfast",
+                meal_label: "Breakfast",
+                summary: { entry_count: 1, totals: { energy_kcal: 260, protein_g: 9.2 } },
+                entries: [
+                  {
+                    id: 910,
+                    food_name: "Idli & Sambar",
+                    quantity: 1,
+                    unit_name: "standard_serving",
+                    grams_equivalent: 180,
+                    meal_category: "breakfast",
+                    energy_kcal: 260,
+                    protein_g: 9.2,
+                  },
+                ],
+              },
+              {
+                meal_category: "dinner",
+                meal_label: "Dinner",
+                summary: { entry_count: 0, totals: {} },
+                entries: [],
+              },
+            ],
+            hydration: { total_ml: 1500, goal_ml: 2250, progress_pct: 66.7 },
+            meal_templates: [{ id: 11, name: "South Indian Breakfast", items_count: 2 }],
+            meal_categories_catalog: [
+              { code: "breakfast", label: "Breakfast" },
+              { code: "dinner", label: "Dinner" },
+            ],
+          }),
+        };
+      }
+      if (url.includes("/tracker/food-logs/parse")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            raw_text: "I had two idlis and one bowl of sambar for breakfast",
+            logged_date: "2026-11-08",
+            meal_category: "breakfast",
+            requires_user_confirmation: true,
+            parsed_items: [
+              {
+                food_slug: "idli-steamed-rice-lentil",
+                food_name: "Idli (Steamed Rice & Lentil Cake)",
+                quantity: 2,
+                unit_name: "standard_serving",
+                grams_equivalent: 120,
+                energy_kcal: 176,
+                protein_g: 5.8,
+              },
+            ],
+            clarification_questions: [],
+          }),
+        };
+      }
+      if (url.includes("/fitness/goals")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            {
+              id: 301,
+              goal_name: "Reach Daily Protein Target",
+              goal_type: "protein_intake",
+              target_value: 80,
+              current_value: 80,
+              progress_pct: 100,
+              unit: "g / day",
+              status: "active",
+            },
+          ],
+        };
+      }
+      if (url.includes("/fitness/habits/ai-plan") && !url.includes("confirm")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            ai_plan_id: "ai_plan_test_99",
+            plan_summary: "Proposed 3 focused habits.",
+            proposed_habits: [
+              {
+                title: "Eat & log a protein-rich breakfast",
+                frequency: "daily",
+                category: "nutrition",
+                description: "Anchors morning energy and protein.",
+              },
+              {
+                title: "Record water intake throughout the day",
+                frequency: "daily",
+                category: "hydration",
+                description: "Steady hydration across meals.",
+              },
+              {
+                title: "Complete scheduled workout (3 days/week)",
+                frequency: "training_days",
+                category: "training",
+                description: "Consistent strength sessions.",
+              },
+            ],
+          }),
+        };
+      }
+      if (url.includes("/fitness/habits/ai-plan/confirm")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            saved: true,
+            saved_count: 3,
+            habits: [],
+          }),
+        };
+      }
+      if (url.includes("/fitness/habits")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            {
+              id: 401,
+              title: "Drink water regularly",
+              description: "Keep a water bottle nearby",
+              category: "hydration",
+              frequency: "daily",
+              is_active: true,
+              completed_on_date: true,
+              completed_days_last_7: 6,
+              weekly_consistency_pct: 85.7,
+              completed_dates: ["2026-11-06", "2026-11-07", "2026-11-08"],
+            },
+            {
+              id: 402,
+              title: "Drink water regularly",
+              description: "Duplicate row that should be deduplicated on frontend",
+              category: "hydration",
+              frequency: "daily",
+              is_active: true,
+              completed_on_date: false,
+              completed_days_last_7: 1,
+              weekly_consistency_pct: 14.3,
+              completed_dates: ["2026-11-08"],
+            },
+            {
+              id: 403,
+              title: "Paused evening stretch",
+              category: "training",
+              frequency: "daily",
+              is_active: false,
+              completed_on_date: false,
+              completed_days_last_7: 0,
+              weekly_consistency_pct: 0,
+              completed_dates: [],
+            },
+          ],
+        };
+      }
+      return prevImpl ? prevImpl(url, init) : { ok: true, json: async () => [] };
+    });
+
+    // 1. Test Fitness Dashboard & Progressive Profile Setup + Header Quick Add Menu
+    const rFit = render(
+      <HouseholdProvider>
+        <MemoryRouter initialEntries={["/fitness/dashboard"]}>
+          <AppRoutes />
+        </MemoryRouter>
+      </HouseholdProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("fitness-dashboard-page")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("fitness-dashboard-progress-chart")).toBeInTheDocument();
+
+    // Open Quick Add menu in header and verify all 6 unified items exist
+    fireEvent.click(screen.getByTestId("header-quick-add-btn"));
+    expect(screen.getByTestId("quick-add-log-food")).toBeInTheDocument();
+    expect(screen.getByTestId("quick-add-add-water")).toBeInTheDocument();
+    expect(screen.getByTestId("quick-add-record-bp")).toBeInTheDocument();
+    expect(screen.getByTestId("quick-add-record-glucose")).toBeInTheDocument();
+    expect(screen.getByTestId("quick-add-log-workout")).toBeInTheDocument();
+    expect(screen.getByTestId("quick-add-complete-habit")).toBeInTheDocument();
+
+    // Open progressive profile editor
+    fireEvent.click(screen.getByTestId("edit-fitness-profile-btn"));
+    expect(screen.getByTestId("primary-goal-select")).toBeInTheDocument();
+    rFit.unmount();
+
+    // 2. Test Simplified Daily Tracker ("Today's Food"): only logged meal cards shown, + Log Food modal, NL preview, Saved Meals
+    const rDay = render(
+      <HouseholdProvider>
+        <MemoryRouter initialEntries={["/fitness/tracker"]}>
+          <AppRoutes />
+        </MemoryRouter>
+      </HouseholdProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("daily-tracker-page")).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Today’s Food/i)).toBeInTheDocument();
+    expect(screen.getByTestId("meal-card-breakfast")).toBeInTheDocument();
+    // Dinner has 0 entries so it should NOT render an empty meal card, only a compact + Add Dinner button
+    expect(screen.queryByTestId("meal-card-dinner")).not.toBeInTheDocument();
+    expect(screen.getByTestId("quick-add-meal-dinner")).toBeInTheDocument();
+
+    // Expand More nutrition
+    fireEvent.click(screen.getByTestId("toggle-more-nutrition-btn"));
+    expect(screen.getByTestId("more-nutrition-panel")).toBeInTheDocument();
+
+    // Open + Log Food drawer and test Natural Language meal preview
+    fireEvent.click(screen.getByTestId("open-log-food-modal-btn"));
+    fireEvent.click(screen.getByTestId("log-mode-nl"));
+    fireEvent.change(screen.getByTestId("nl-food-log-input"), {
+      target: { value: "I had two idlis and one bowl of sambar for breakfast" },
+    });
+    fireEvent.click(screen.getByTestId("nl-food-parse-btn"));
+    await waitFor(() => {
+      expect(screen.getByTestId("nl-food-preview-card")).toBeInTheDocument();
+    });
+    rDay.unmount();
+
+    // 3. Test Rebuilt Goals & Habits: Graph-First Habit Chart, Deduplicated Habits, and Once-Only Celebration Banner
+    const rHab = render(
+      <HouseholdProvider>
+        <MemoryRouter initialEntries={["/fitness/goals"]}>
+          <AppRoutes />
+        </MemoryRouter>
+      </HouseholdProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("goals-habits-page")).toBeInTheDocument();
+    });
+    expect(screen.getByText(/My Goals & Habits/i)).toBeInTheDocument();
+    expect(screen.getByTestId("habit-completion-svg-chart")).toBeInTheDocument();
+    expect(screen.getByTestId("goal-achievement-celebration")).toBeInTheDocument();
+
+    // Verify duplicate "Drink water regularly" (id 402) and paused habit (id 403) are not shown in active checklist
+    expect(screen.getByTestId("habit-item-401")).toBeInTheDocument();
+    expect(screen.queryByTestId("habit-item-402")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("habit-item-403")).not.toBeInTheDocument();
+
+    // Switch range on habit graph (7d -> 30d -> 90d)
+    fireEvent.click(screen.getByTestId("habit-range-30d"));
+    fireEvent.click(screen.getByTestId("habit-range-90d"));
+    expect(screen.getByTestId("habit-completion-svg-chart")).toBeInTheDocument();
+    rHab.unmount();
+
+    // 4. Test Assistant-Style AI Habit Builder: clean initial view, generate 3-5 cards, revise, and confirm
+    const rAi = render(
+      <HouseholdProvider>
+        <MemoryRouter initialEntries={["/fitness/habit-builder"]}>
+          <AppRoutes />
+        </MemoryRouter>
+      </HouseholdProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("ai-habit-builder-page")).toBeInTheDocument();
+    });
+    expect(screen.getByText(/What would you like to improve\?/i)).toBeInTheDocument();
+    expect(screen.queryByTestId("ai-habit-plan-preview")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("generate-habit-plan-btn"));
+    await waitFor(() => {
+      expect(screen.getByTestId("proposed-habit-card-0")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId("confirm-habit-plan-btn"));
+    await waitFor(() => {
+      expect(screen.getByTestId("ai-habit-success-banner")).toBeInTheDocument();
+    });
+    rAi.unmount();
+  });
+
+  it("verifies Recipe Detail Page, Guided Cooking Mode with step timer & confirmed diary logging, Persistent Achievement History, and Interactive 3D Human Body & Nutrition Explorer", async () => {
+    const prevImpl = mockFetch.getMockImplementation();
+    mockFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.includes("/recipes/discover")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            local_verified_recipes: [
+              {
+                id: 1,
+                slug: "idli-steamed-rice-lentil",
+                title: "South Indian Steamed Idli",
+                why_recommended: "Balanced fermented cereal-pulse breakfast",
+                meal_type: "breakfast",
+                prep_time_minutes: 25,
+                cook_time_minutes: 12,
+                servings: 4,
+                step_count: 6,
+                verification_badge_label: "GharPlate-curated recipe",
+                source_name: "ICMR-NIN IFCT 2017",
+                completeness_pct: 100,
+                per_serving_macros: {
+                  energy_kcal: 234,
+                  protein_g: 7.4,
+                  fibre_g: 3.1,
+                },
+              },
+            ],
+          }),
+        };
+      }
+      if (url.includes("/recipes/1/log-diary")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            logged: true,
+            entry: { id: 991, food_name: "South Indian Steamed Idli" },
+            daily_summary: {},
+          }),
+        };
+      }
+      if (url.includes("/recipes/1")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            id: 1,
+            slug: "idli-steamed-rice-lentil",
+            title: "South Indian Steamed Idli",
+            description: "Soft steamed fermented parboiled rice and black gram cakes.",
+            servings: 4,
+            meal_type: "breakfast",
+            prep_time_minutes: 25,
+            cook_time_minutes: 12,
+            total_time_minutes: 37,
+            difficulty: "Easy",
+            dietary_tags: ["vegetarian", "fermented"],
+            suitable_goals: ["maintain_balanced_diet"],
+            source_type: "gharplate_verified",
+            source_name: "GharPlate IFCT 2017 / ICMR-NIN DGI 2024 Kitchen",
+            source_url: "https://www.nin.res.in/",
+            verification_status: "gharplate_verified",
+            verification_badge_label: "GharPlate-curated recipe",
+            instructions_reviewed: true,
+            instructions_status: "available",
+            is_favourite: false,
+            user_rating: 5,
+            total_weight_grams: 390,
+            serving_weight_grams: 97.5,
+            completeness_pct: 100,
+            completeness_notice: "All 20 nutrients measured in IFCT 2017.",
+            instructions_notes: "Steam for 10-12 minutes.",
+            created_at: new Date().toISOString(),
+            ingredients: [
+              {
+                food_slug: "idli-steamed-rice-lentil",
+                food_name: "Idli (Steamed Rice & Lentil Cake)",
+                quantity: 3,
+                unit_name: "standard_serving",
+                grams_equivalent: 360,
+                household_measure_note: "8 steamed idlis",
+                preparation_note: "Naturally fermented 8-10 hours",
+                energy_kcal_contribution: 468,
+                protein_g_contribution: 14.8,
+                carbs_g_contribution: 92.4,
+                fat_total_g_contribution: 2.8,
+                missing_nutrients: [],
+              },
+            ],
+            steps: [
+              {
+                id: 10,
+                step_number: 1,
+                step_title: "Grease the idli moulds",
+                instruction_text: "Lightly brush each idli plate cavity with sesame oil.",
+                duration_minutes: 2,
+                temperature: "Room temperature",
+                tip: "Avoid over-stirring fermented batter.",
+                equipment: "Idli steamer",
+              },
+              {
+                id: 11,
+                step_number: 2,
+                step_title: "Steam over boiling water",
+                instruction_text: "Steam covered on medium-high flame for 10 to 12 minutes.",
+                duration_minutes: 12,
+                temperature: "Medium-high steam",
+                tip: "Wait 2 minutes before unmoulding.",
+                equipment: "Idli steamer",
+              },
+            ],
+            nutrients: [
+              {
+                nutrient_code: "energy_kcal",
+                nutrient_name: "Energy",
+                unit: "kcal",
+                total_known_value: 936,
+                per_serving_known_value: 234,
+                ingredients_with_data: 1,
+                ingredients_missing_data: 0,
+                missing_ingredient_names: [],
+                is_complete: true,
+              },
+              {
+                nutrient_code: "protein_g",
+                nutrient_name: "Protein",
+                unit: "g",
+                total_known_value: 29.6,
+                per_serving_known_value: 7.4,
+                ingredients_with_data: 1,
+                ingredients_missing_data: 0,
+                missing_ingredient_names: [],
+                is_complete: true,
+              },
+            ],
+          }),
+        };
+      }
+      if (url.includes("/explore/body-nutrition/eyes_vision")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            id: 2,
+            code: "eyes_vision",
+            name: "Eyes & Vision",
+            anatomical_system: "Ocular & Retinal System",
+            category: "Eyes",
+            short_summary: "Retinal phototransduction and macular pigment protection.",
+            physiological_function:
+              "Vitamin A forms rhodopsin in retinal rod cells for dim-light vision.",
+            nutrition_connection:
+              "Provitamin A carotenoids from dark leafy greens and orange produce.",
+            key_nutrients_summary: ["Vitamin A / Beta-Carotene", "Vitamin C", "Zinc"],
+            dietary_pattern_guidance: "Cook beta-carotene vegetables with a little healthy fat.",
+            hydration_connection: "Supports tear film stability.",
+            evidence_limitation_note: "Educational nutrition reference only.",
+            source: {
+              name: "ICMR-NIN Dietary Guidelines for Indians",
+              organization: "ICMR-NIN",
+              year: 2024,
+              url: "https://www.nin.res.in/",
+              section: "Ocular Health",
+            },
+            nutrients: [
+              {
+                nutrient_code: "vitamin_a_ug",
+                nutrient_name: "Vitamin A (Retinol / Beta-Carotene RAE)",
+                physiological_role: "Essential component of rhodopsin for night vision.",
+                daily_reference_note: "ICMR-NIN RDA ~840-1000 ug RAE/day",
+                evidence_grade: "Established physiological function",
+                source_name: "ICMR-NIN DGI 2024",
+                source_url: "https://www.nin.res.in/",
+                source_section: "Ocular Health",
+              },
+            ],
+            foods: [
+              {
+                food_id: 12,
+                slug: "spinach-palak",
+                name_en: "Spinach (Palak)",
+                image_url: "/images/foods/vegetables/spinach-palak.webp",
+                default_basis: "100g",
+                standard_serving_name: "1 cup chopped (100g)",
+                standard_serving_grams: 100,
+                is_vegetarian: true,
+                is_vegan: true,
+                primary_nutrient_code: "vitamin_a_ug",
+                relevance_explanation: "Provides 469 ug RAE/100g vitamin A equivalents.",
+                preparation_or_serving_tip: "Cook with dal and a little ghee.",
+                priority_rank: 1,
+                nutrients_per_100: {
+                  vitamin_a_ug: 469,
+                  protein_g: 2.0,
+                  energy_kcal: 26,
+                },
+                missing_relevant_nutrients: [],
+                source_name: "ICMR-NIN IFCT 2017",
+                source_url: "https://www.nin.res.in/",
+                source_year: 2017,
+              },
+            ],
+          }),
+        };
+      }
+      if (url.includes("/explore/body-nutrition")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            total_regions: 2,
+            initial_prompt: "Select a body region to explore its nutritional needs.",
+            medical_disclaimer: "Educational physiology reference only.",
+            regions: [
+              {
+                id: 1,
+                code: "brain_nerves",
+                name: "Brain & Nervous System",
+                anatomical_system: "Central Nervous System",
+                category: "Brain & Nerves",
+                display_order: 1,
+                short_summary: "Neurotransmitter synthesis and nerve conduction.",
+                key_nutrients_summary: ["Folate", "Vitamin B12"],
+                camera_position: { theta: 0, phi: 0.15, zoom: 1.35 },
+                mesh_coordinates: { cx: 0, cy: 1.55, cz: 0.04, rx: 0.17, ry: 0.2, rz: 0.18, color: "#059669" },
+                nutrient_count: 4,
+                verified_food_count: 6,
+                source_name: "ICMR-NIN DGI 2024",
+                source_year: 2024,
+              },
+              {
+                id: 2,
+                code: "eyes_vision",
+                name: "Eyes & Vision",
+                anatomical_system: "Ocular System",
+                category: "Eyes",
+                display_order: 2,
+                short_summary: "Retinal phototransduction and macular protection.",
+                key_nutrients_summary: ["Vitamin A", "Vitamin C"],
+                camera_position: { theta: 0, phi: 0.12, zoom: 1.45 },
+                mesh_coordinates: { cx: 0, cy: 1.48, cz: 0.15, rx: 0.12, ry: 0.07, rz: 0.08, color: "#d97706" },
+                nutrient_count: 3,
+                verified_food_count: 5,
+                source_name: "ICMR-NIN DGI 2024",
+                source_year: 2024,
+              },
+            ],
+          }),
+        };
+      }
+      return prevImpl ? prevImpl(url, init) : { ok: true, json: async () => [] };
+    });
+
+    // 1. Verify Recipe Discovery Page shows View Recipe button
+    const rDisc = render(
+      <HouseholdProvider>
+        <MemoryRouter initialEntries={["/recipes/discover"]}>
+          <AppRoutes />
+        </MemoryRouter>
+      </HouseholdProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("view-recipe-btn-1")).toBeInTheDocument();
+    });
+    rDisc.unmount();
+
+    // 2. Verify RecipeDetailPage & Guided Cooking Mode (/recipes/1)
+    const rRec = render(
+      <HouseholdProvider>
+        <MemoryRouter initialEntries={["/recipes/1"]}>
+          <AppRoutes />
+        </MemoryRouter>
+      </HouseholdProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recipe-detail-page")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("recipe-detail-title")).toHaveTextContent(
+      /South Indian Steamed Idli/i
+    );
+    expect(screen.getByTestId("recipe-step-card-1")).toBeInTheDocument();
+    expect(screen.getByTestId("recipe-step-card-2")).toBeInTheDocument();
+
+    // Launch Guided Cooking Mode
+    fireEvent.click(screen.getByTestId("start-cooking-btn"));
+    await waitFor(() => {
+      expect(screen.getByTestId("guided-cook-mode")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("cook-mode-progress-indicator")).toHaveTextContent(/Step 1 of 2/i);
+    expect(screen.getByTestId("cook-timer-display")).toBeInTheDocument();
+
+    // Advance to Step 2 and Finish Cooking
+    fireEvent.click(screen.getByTestId("cook-next-step-btn"));
+    expect(screen.getByTestId("cook-mode-progress-indicator")).toHaveTextContent(/Step 2 of 2/i);
+    fireEvent.click(screen.getByTestId("cook-finish-btn"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("cook-completion-panel")).toBeInTheDocument();
+    });
+
+    // Confirm logging cooked recipe to today's food diary
+    fireEvent.click(screen.getByTestId("confirm-log-cooked-recipe-btn"));
+    await waitFor(() => {
+      expect(screen.getByTestId("recipe-detail-action-banner")).toBeInTheDocument();
+    });
+    rRec.unmount();
+
+    // 3. Verify Interactive 3D Human Body & Nutrition Explorer (/explore/body-nutrition)
+    const rBody = render(
+      <HouseholdProvider>
+        <MemoryRouter initialEntries={["/explore/body-nutrition"]}>
+          <AppRoutes />
+        </MemoryRouter>
+      </HouseholdProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("body-nutrition-explorer-page")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("body-explorer-empty-prompt")).toHaveTextContent(
+      /Select a body region to explore its nutritional needs/i
+    );
+
+    // Select "Eyes & Vision" structure and verify Level A (top 2-column) and Level B (full-width lower sections)
+    expect(screen.getByTestId("anatomy-exploration-level-a")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("body-region-pill-eyes_vision"));
+    await waitFor(() => {
+      expect(screen.getByTestId("body-region-detail-panel")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("anatomy-full-width-level-b")).toBeInTheDocument();
+    expect(screen.getByTestId("selected-body-region-title")).toHaveTextContent(/Eyes & Vision/i);
+    expect(screen.getByTestId("full-width-nutrients-section")).toBeInTheDocument();
+    expect(screen.getByTestId("full-width-foods-section")).toBeInTheDocument();
+    expect(screen.getByTestId("full-width-food-comparison-section")).toBeInTheDocument();
+    expect(screen.getByTestId("full-width-evidence-section")).toBeInTheDocument();
+    expect(screen.getByTestId("body-region-food-card-spinach-palak")).toHaveTextContent(/Spinach \(Palak\)/i);
+    expect(screen.getByTestId("body-region-food-card-spinach-palak")).toHaveTextContent(/469/i);
+
+    // Switch between 2D Accessible Diagram and 3D Interactive Model
+    fireEvent.click(screen.getByTestId("body-view-mode-toggle"));
+    rBody.unmount();
+  });
+
+  it("verifies Realistic 10-Layer 3D Anatomy presets & layer controls, Active Context Badge synchronization, and Voice Conversation controls (Mic, en-IN/hi-IN/kn-IN, Auto-speak, Speak Answer)", async () => {
+    const prevImpl = mockFetch.getMockImplementation();
+    mockFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.includes("/explore/body-nutrition/eyes_vision")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            id: 2,
+            code: "eyes_vision",
+            name: "Eyes & Vision",
+            anatomical_system: "Ocular & Retinal System",
+            category: "Eyes",
+            layer_id: "sensory_immune",
+            fma_id: "FMA:54448",
+            mesh_id: "eyes_vision",
+            short_summary: "Retinal phototransduction and macular pigment protection.",
+            physiological_function: "Vitamin A forms rhodopsin in retinal rod cells for dim-light vision.",
+            nutrition_connection: "Provitamin A carotenoids from dark leafy greens and orange produce.",
+            key_nutrients_summary: ["Vitamin A / Beta-Carotene", "Vitamin C", "Zinc"],
+            dietary_pattern_guidance: "Cook beta-carotene vegetables with a little healthy fat.",
+            hydration_connection: "Supports tear film stability.",
+            evidence_limitation_note: "Educational nutrition reference only.",
+            source: {
+              name: "ICMR-NIN Dietary Guidelines for Indians",
+              organization: "ICMR-NIN",
+              year: 2024,
+              url: "https://www.nin.res.in/",
+              section: "Ocular Health",
+            },
+            nutrients: [
+              {
+                nutrient_code: "vitamin_a_ug",
+                nutrient_name: "Vitamin A (Retinol / Beta-Carotene RAE)",
+                physiological_role: "Essential component of rhodopsin for night vision.",
+                daily_reference_note: "ICMR-NIN RDA ~840-1000 ug RAE/day",
+                evidence_grade: "Established physiological function",
+                source_name: "ICMR-NIN DGI 2024",
+                source_url: "https://www.nin.res.in/",
+                source_section: "Ocular Health",
+              },
+            ],
+            foods: [
+              {
+                food_id: 12,
+                slug: "spinach-palak",
+                name_en: "Spinach (Palak)",
+                image_url: "/images/foods/vegetables/spinach-palak.webp",
+                default_basis: "100g",
+                standard_serving_name: "1 cup chopped (100g)",
+                standard_serving_grams: 100,
+                is_vegetarian: true,
+                is_vegan: true,
+                primary_nutrient_code: "vitamin_a_ug",
+                relevance_explanation: "Provides 469 ug RAE/100g vitamin A equivalents.",
+                preparation_or_serving_tip: "Cook with dal and a little ghee.",
+                priority_rank: 1,
+                nutrients_per_100: { vitamin_a_ug: 469, protein_g: 2.0, energy_kcal: 26 },
+                missing_relevant_nutrients: [],
+                source_name: "ICMR-NIN IFCT 2017",
+                source_url: "https://www.nin.res.in/",
+                source_year: 2017,
+              },
+            ],
+          }),
+        };
+      }
+      if (url.includes("/explore/body-nutrition")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            total_regions: 2,
+            initial_prompt: "Select a body region to explore its nutritional needs.",
+            medical_disclaimer: "Educational physiology reference only.",
+            regions: [
+              {
+                id: 1,
+                code: "brain_nerves",
+                name: "Brain & Nervous System",
+                anatomical_system: "Central Nervous System",
+                category: "Brain & Nerves",
+                display_order: 1,
+                short_summary: "Neurotransmitter synthesis and nerve conduction.",
+                key_nutrients_summary: ["Folate", "Vitamin B12"],
+                camera_position: { theta: 0, phi: 0.15, zoom: 1.35 },
+                mesh_coordinates: { cx: 0, cy: 1.55, cz: 0.04, rx: 0.17, ry: 0.2, rz: 0.18, color: "#059669" },
+                nutrient_count: 4,
+                verified_food_count: 6,
+                source_name: "ICMR-NIN DGI 2024",
+                source_year: 2024,
+              },
+              {
+                id: 2,
+                code: "eyes_vision",
+                name: "Eyes & Vision",
+                anatomical_system: "Ocular System",
+                category: "Eyes",
+                display_order: 2,
+                short_summary: "Retinal phototransduction and macular protection.",
+                key_nutrients_summary: ["Vitamin A", "Vitamin C"],
+                camera_position: { theta: 0, phi: 0.12, zoom: 1.45 },
+                mesh_coordinates: { cx: 0, cy: 1.48, cz: 0.15, rx: 0.12, ry: 0.07, rz: 0.08, color: "#d97706" },
+                nutrient_count: 3,
+                verified_food_count: 5,
+                source_name: "ICMR-NIN DGI 2024",
+                source_year: 2024,
+              },
+            ],
+          }),
+        };
+      }
+      return prevImpl ? prevImpl(url, init) : { ok: true, json: async () => [] };
+    });
+
+    const speakMock = vi.fn();
+    const cancelMock = vi.fn();
+    Object.defineProperty(window, "speechSynthesis", {
+      configurable: true,
+      writable: true,
+      value: {
+        speak: speakMock,
+        cancel: cancelMock,
+        pause: vi.fn(),
+        resume: vi.fn(),
+        getVoices: () => [
+          { lang: "en-IN", name: "Rishi (en-IN)" },
+          { lang: "hi-IN", name: "Lekha (hi-IN)" },
+          { lang: "kn-IN", name: "Soumya (kn-IN)" },
+        ],
+        onvoiceschanged: null,
+      },
+    });
+    (window as unknown as { SpeechSynthesisUtterance: unknown }).SpeechSynthesisUtterance =
+      class MockUtterance {
+        text: string;
+        lang = "en-IN";
+        rate = 1;
+        volume = 1;
+        voice: unknown = null;
+        onstart: (() => void) | null = null;
+        onend: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        constructor(t: string) {
+          this.text = t;
+        }
+      };
+
+    const rUp = render(
+      <HouseholdProvider>
+        <MemoryRouter initialEntries={["/explore/body-nutrition"]}>
+          <AppRoutes />
+        </MemoryRouter>
+      </HouseholdProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("body-nutrition-explorer-page")).toBeInTheDocument();
+    });
+
+    // 1. Verify 3D Anatomy Layer Presets & 10-Layer Popover
+    expect(screen.getByTestId("anatomy-preset-whole_body")).toBeInTheDocument();
+    expect(screen.getByTestId("anatomy-preset-organs")).toBeInTheDocument();
+    expect(screen.getByTestId("anatomy-preset-muscles")).toBeInTheDocument();
+    expect(screen.getByTestId("anatomy-preset-skeleton")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("anatomy-preset-muscles"));
+    fireEvent.click(screen.getByTestId("anatomy-layers-menu-trigger"));
+    expect(screen.getByTestId("anatomy-layers-popover")).toBeInTheDocument();
+    expect(screen.getByTestId("layer-toggle-skeletal")).toBeInTheDocument();
+    expect(screen.getByTestId("layer-toggle-muscular")).toBeInTheDocument();
+
+    // 2. Select "Eyes & Vision" structure and verify Ask GharPlate syncs Active Context Badge
+    fireEvent.click(screen.getByTestId("body-region-pill-eyes_vision"));
+    await waitFor(() => {
+      expect(screen.getByTestId("selected-body-region-title")).toHaveTextContent(/Eyes & Vision/i);
+    });
+
+    // Click Ask GharPlate FAB to open the AI Assistant Drawer with synchronized context
+    fireEvent.click(screen.getByTestId("ask-gharplate-fab"));
+    await waitFor(() => {
+      expect(screen.getByTestId("assistant-drawer")).toBeInTheDocument();
+    });
+
+    // Verify Active Context Badge displays "Eyes & Vision"
+    expect(screen.getByTestId("assistant-active-context-badge")).toHaveTextContent(
+      /Eyes & Vision/i
+    );
+
+    // 3. Verify Voice Conversation controls (Mic button, Language selector en-IN/hi-IN/kn-IN, Auto-speak toggle, Voice settings)
+    expect(screen.getByTestId("assistant-mic-toggle")).toBeInTheDocument();
+    const langSelect = screen.getByTestId("assistant-voice-lang-select") as HTMLSelectElement;
+    expect(langSelect.value).toBe("en-IN");
+    fireEvent.change(langSelect, { target: { value: "kn-IN" } });
+    expect(langSelect.value).toBe("kn-IN");
+
+    const autoSpeakBtn = screen.getByTestId("assistant-voice-autospeak-toggle");
+    fireEvent.click(autoSpeakBtn);
+    expect(autoSpeakBtn).toHaveTextContent(/Auto-speak ON/i);
+
+    expect(screen.getByTestId("assistant-voice-controls-bar")).toBeInTheDocument();
+    expect(screen.getByTestId("assistant-voice-rate-select")).toBeInTheDocument();
+    expect(screen.getByTestId("assistant-voice-volume-select")).toBeInTheDocument();
+
+    // Send a question with Auto-speak ON and verify SpeechSynthesis automatically speaks the reply
+    const input = screen.getByLabelText(/Ask GharPlate Input/i);
+    fireEvent.change(input, { target: { value: "What nutrients are important for this?" } });
+    fireEvent.click(screen.getByText(/Send ↑/i));
+
+    await waitFor(() => {
+      expect(speakMock).toHaveBeenCalled();
+      expect(screen.getByTestId("stop-speak-answer-btn")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId("stop-speak-answer-btn"));
+    expect(cancelMock).toHaveBeenCalled();
+
+    rUp.unmount();
+  });
+
+  it("verifies AI Assistant Sidebar layout, Enter-to-Send / Shift+Enter newline / IME / error-preservation, Voice Auto-Send on Silence, and Smooth Male/Female 3D Human Reference Anatomy without wireframes", async () => {
+    const prevImpl = mockFetch.getMockImplementation();
+    let chatCallCount = 0;
+    let shouldFailNextChat = false;
+
+    mockFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.includes("/assistant/voice/transcribe")) {
+        const body = init?.body ? JSON.parse(String(init.body)) : {};
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            transcript: body.transcript_hint || "",
+            normalized_transcript: body.transcript_hint || "",
+            language_code: body.language_code || "en-IN",
+          }),
+        };
+      }
+      if (url.includes("/assistant/chat")) {
+        chatCallCount += 1;
+        if (shouldFailNextChat) {
+          shouldFailNextChat = false;
+          return {
+            ok: false,
+            status: 500,
+            json: async () => ({ detail: "Simulated network failure" }),
+          };
+        }
+        const body = init?.body ? JSON.parse(String(init.body)) : {};
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            conversation_id: 301,
+            conversation_title: String(body.message || "Chat").slice(0, 50),
+            reply: `### Grounded Anatomy & Nutrition Response\n\nAnswered: **${body.message}** for context **${body.context?.selected_entity?.name || "General"}**.`,
+            mode_used: body.mode || "automatic",
+            model_used: "qwen2.5:7b",
+            ollama_connected: true,
+            used_fallback_synthesis: false,
+            resolved_entity: body.context?.selected_entity || null,
+            resolved_intent: "anatomy_nutrition",
+            tool_traces: [
+              {
+                tool_name: "get_body_region_nutrition",
+                arguments: { region_code: "muscles_strength" },
+                status: "success",
+                summary: "Retrieved reviewed nutrients for Skeletal Musculature",
+                source_type: "local_database",
+              },
+            ],
+            sources: [
+              {
+                title: "ICMR-NIN DGI 2024",
+                source_type: "local_database",
+                url: "https://www.nin.res.in/",
+                retrieved_at: new Date().toISOString(),
+                verification_status: "verified",
+              },
+            ],
+            suggested_followups: ["Which vegetarian foods support this?"],
+            medical_disclaimer: "Educational only.",
+          }),
+        };
+      }
+      return prevImpl ? prevImpl(url, init) : { ok: true, json: async () => [] };
+    });
+
+    // Install mock SpeechRecognition for Voice Auto-Send on Silence verification
+    let activeRecognitionInstance: any = null;
+    class MockSpeechRecognition {
+      lang = "en-IN";
+      continuous = true;
+      interimResults = true;
+      onstart: (() => void) | null = null;
+      onresult: ((e: any) => void) | null = null;
+      onerror: ((e: any) => void) | null = null;
+      onend: (() => void) | null = null;
+      start() {
+        activeRecognitionInstance = this;
+        if (this.onstart) this.onstart();
+      }
+      stop() {
+        if (this.onend) this.onend();
+      }
+      abort() {
+        activeRecognitionInstance = null;
+      }
+    }
+    (window as any).SpeechRecognition = MockSpeechRecognition;
+
+    const rFinal = render(
+      <HouseholdProvider>
+        <MemoryRouter initialEntries={["/explore/body-nutrition"]}>
+          <AppRoutes />
+        </MemoryRouter>
+      </HouseholdProvider>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("body-nutrition-explorer-page")).toBeInTheDocument();
+    });
+
+    // 1. Verify Default Preset is 'Full Internal Anatomy' with Skin Layer DISABLED and Muscles/Organs/Skeleton ENABLED
+    const defaultPresetBtn = screen.getByTestId("anatomy-preset-whole_body");
+    expect(defaultPresetBtn).toHaveTextContent(/Full Internal Anatomy/i);
+    expect(screen.getByTestId("anatomy-default-preset-badge")).toHaveTextContent(/Default/i);
+
+    fireEvent.click(screen.getByTestId("anatomy-layers-menu-trigger"));
+    const skinCheckbox = screen.getByTestId("layer-toggle-skin_external") as HTMLInputElement;
+    const muscleCheckbox = screen.getByTestId("layer-toggle-muscular") as HTMLInputElement;
+    const skeletalCheckbox = screen.getByTestId("layer-toggle-skeletal") as HTMLInputElement;
+    const cardioCheckbox = screen.getByTestId("layer-toggle-cardiovascular") as HTMLInputElement;
+    expect(skinCheckbox.checked).toBe(false);
+    expect(muscleCheckbox.checked).toBe(true);
+    expect(skeletalCheckbox.checked).toBe(true);
+    expect(cardioCheckbox.checked).toBe(true);
+    fireEvent.click(screen.getByTestId("anatomy-layers-menu-trigger"));
+
+    // Verify Male / Female Reference 3D Anatomy toggle, 29 selectable 3D structures, structure search, and individual mesh selection
+    const maleBtn = screen.getByTestId("anatomy-sex-male");
+    const femaleBtn = screen.getByTestId("anatomy-sex-female");
+    expect(maleBtn).toBeInTheDocument();
+    expect(femaleBtn).toBeInTheDocument();
+    fireEvent.click(femaleBtn);
+    fireEvent.click(maleBtn);
+
+    // Verify individual 3D structure chips & search (Pectoralis Major, Rib Cage, Heart, Liver, Femur)
+    expect(screen.getByTestId("anatomy-structure-chip-FMA_9627_PECTORALIS_MAJOR")).toBeInTheDocument();
+    expect(screen.getByTestId("anatomy-structure-chip-FMA_7480_RIB_CAGE")).toBeInTheDocument();
+    expect(screen.getByTestId("anatomy-structure-chip-FMA_7088_HEART")).toBeInTheDocument();
+    expect(screen.getByTestId("anatomy-structure-chip-FMA_7197_LIVER_GALLBLADDER")).toBeInTheDocument();
+
+    const structSearch = screen.getByTestId("anatomy-structure-search") as HTMLInputElement;
+    fireEvent.change(structSearch, { target: { value: "Pectoralis" } });
+    expect(screen.getByTestId("anatomy-structure-chip-FMA_9627_PECTORALIS_MAJOR")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("anatomy-structure-chip-FMA_9627_PECTORALIS_MAJOR"));
+    expect(screen.getByTestId("active-3d-mesh-badge")).toHaveTextContent(/Pectoralis Major/i);
+    fireEvent.change(structSearch, { target: { value: "" } });
+
+    // 2. Open Ask GharPlate and verify the Collapsible Left Assistant Control Sidebar + Header New Chat when collapsed
+    fireEvent.click(screen.getByTestId("ask-gharplate-fab"));
+    await waitFor(() => {
+      expect(screen.getByTestId("assistant-sidebar")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("assistant-floating-window").getAttribute("data-sidebar-state")).toBe("expanded");
+    expect(screen.getByTestId("assistant-saved-chats-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("assistant-model-settings-section")).toBeInTheDocument();
+    expect(screen.getByTestId("assistant-voice-autosend-toggle")).toHaveTextContent("ON");
+    // Only 1 New Chat button exists when expanded (in sidebar, not duplicated in header)
+    expect(screen.getAllByTestId("assistant-new-conversation-btn").length).toBe(1);
+
+    // Type draft text, collapse the sidebar via the header toggle, verify sidebar is hidden & draft text is preserved
+    const draftInput = screen.getByTestId("assistant-chat-input") as HTMLTextAreaElement;
+    fireEvent.change(draftInput, { target: { value: "Preserved unsent draft" } });
+
+    const sidebarToggleBtn = screen.getByTestId("assistant-sidebar-toggle");
+    expect(sidebarToggleBtn).toHaveTextContent(/Hide Sidebar/i);
+    fireEvent.click(sidebarToggleBtn);
+
+    expect(screen.queryByTestId("assistant-sidebar")).not.toBeInTheDocument();
+    expect(screen.getByTestId("assistant-floating-window").getAttribute("data-sidebar-state")).toBe("collapsed");
+    expect(window.localStorage.getItem("gharplate_assistant_sidebar_open")).toBe("false");
+    expect(draftInput.value).toBe("Preserved unsent draft");
+    // Microphone remains accessible in composer when sidebar is collapsed
+    expect(screen.getByTestId("assistant-mic-toggle")).toBeInTheDocument();
+    // + New Chat button remains visible in the main conversation header while sidebar is collapsed!
+    const collapsedHeaderNewChatBtn = screen.getByTestId("assistant-new-conversation-btn");
+    expect(collapsedHeaderNewChatBtn).toBeInTheDocument();
+
+    // Click + New Chat while sidebar is closed -> clears draft and starts a fresh conversation without opening sidebar
+    fireEvent.click(collapsedHeaderNewChatBtn);
+    expect(draftInput.value).toBe("");
+    expect(screen.queryByTestId("assistant-sidebar")).not.toBeInTheDocument();
+
+    // Reopen sidebar via the persistent header toggle
+    expect(sidebarToggleBtn).toHaveTextContent(/Show Sidebar/i);
+    fireEvent.click(sidebarToggleBtn);
+    expect(screen.getByTestId("assistant-sidebar")).toBeInTheDocument();
+    expect(screen.getByTestId("assistant-floating-window").getAttribute("data-sidebar-state")).toBe("expanded");
+    expect(window.localStorage.getItem("gharplate_assistant_sidebar_open")).toBe("true");
+
+    // 3. Verify Keyboard Composer: empty Enter does not send, IME composition does not send, Shift+Enter does not send, Enter sends
+    const chatInput = screen.getByTestId("assistant-chat-input") as HTMLTextAreaElement;
+    fireEvent.change(chatInput, { target: { value: "   " } });
+    fireEvent.keyDown(chatInput, { key: "Enter", shiftKey: false });
+    expect(chatCallCount).toBe(0);
+
+    fireEvent.change(chatInput, { target: { value: "What does Skeletal Musculature do?" } });
+    // IME composition should not send
+    fireEvent.keyDown(chatInput, { key: "Enter", shiftKey: false, isComposing: true, keyCode: 229 });
+    expect(chatCallCount).toBe(0);
+
+    // Shift+Enter should not send
+    fireEvent.keyDown(chatInput, { key: "Enter", shiftKey: true });
+    expect(chatCallCount).toBe(0);
+
+    // Failed request preserves user's input text
+    shouldFailNextChat = true;
+    fireEvent.keyDown(chatInput, { key: "Enter", shiftKey: false });
+    await waitFor(() => {
+      expect(screen.getByTestId("assistant-error-banner")).toBeInTheDocument();
+    });
+    expect(chatInput.value).toBe("What does Skeletal Musculature do?");
+
+    // Successful Enter-to-send submits and clears input
+    fireEvent.keyDown(chatInput, { key: "Enter", shiftKey: false });
+    await waitFor(() => {
+      expect(chatInput.value).toBe("");
+      expect(screen.getByText(/Grounded Anatomy & Nutrition Response/i)).toBeInTheDocument();
+    });
+
+    // 4. Verify Voice Auto-Send on Silence & Cancel Guardrail
+    const countBeforeVoice = chatCallCount;
+    fireEvent.click(screen.getByTestId("assistant-mic-toggle"));
+    expect(activeRecognitionInstance).not.toBeNull();
+
+    // Test cancelling voice recording does not send
+    activeRecognitionInstance.onresult?.({
+      results: [[{ transcript: "Cancelled voice query" }]],
+    });
+    fireEvent.click(screen.getByTestId("assistant-mic-cancel"));
+    expect(chatCallCount).toBe(countBeforeVoice);
+
+    // Start mic again, speak final result, and let recognition end -> auto-sends once
+    fireEvent.click(screen.getByTestId("assistant-mic-toggle"));
+    const finalResultItem: any = [{ transcript: "Which nutrients support muscles?" }];
+    finalResultItem.isFinal = true;
+    activeRecognitionInstance.onresult?.({
+      results: [finalResultItem],
+    });
+    activeRecognitionInstance.onend?.();
+
+    await waitFor(() => {
+      expect(chatCallCount).toBe(countBeforeVoice + 1);
+    });
+
+    rFinal.unmount();
+  });
+
+  it("verifies AI Food Photo Analyzer in Tools sidebar, Ask GharPlate AI in main left sidebar, unbiased upload, portion nutrition scaling, and contextual food photo conversation", async () => {
+    let lastAssistantContext: any = null;
+    const origFetch = globalThis.fetch;
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+
+      if (url.includes("/scan/recognize-dish")) {
+        return new Response(
+          JSON.stringify({
+            recognition_id: "rec_live_photo_01",
+            analysis_status: "success",
+            vision_provider: "ollama_local_vision",
+            vision_model_used: "qwen2.5vl:7b",
+            vision_reachable: true,
+            overall_description:
+              "Two fluffy steamed white idlis served with vegetable sambar.",
+            experimental_disclaimer:
+              "EXPERIMENTAL FEATURE — AI FOOD PHOTO ANALYSIS: Confirm food and portion.",
+            privacy_confirmation:
+              "Image (640x480px) was analysed strictly in RAM and purged immediately.",
+            requires_user_confirmation: true,
+            image_quality_notes: "Analysed 640x480px RGB photograph in memory.",
+            detected_components: [
+              {
+                component_label: "Idli",
+                confidence_score: 0.94,
+                confidence_category: "high_confidence",
+                visual_description: "Two steamed rice-lentil cakes",
+                matched_in_database: true,
+                matched_food_id: 101,
+                matched_food_slug: "idli-steamed-rice-lentil",
+                matched_food_name: "Idli (Steamed Rice-Lentil Cake)",
+                category_name: "Indian Cooked Dishes",
+                standard_serving_name: "2 idlis",
+                standard_serving_grams: 120,
+              },
+              {
+                component_label: "Sambar",
+                confidence_score: 0.88,
+                confidence_category: "high_confidence",
+                visual_description: "Bowl of lentil vegetable sambar",
+                matched_in_database: true,
+                matched_food_id: 102,
+                matched_food_slug: "sambar-vegetable-lentil-stew",
+                matched_food_name: "Sambar (Vegetable-Lentil Stew)",
+                category_name: "Indian Cooked Dishes",
+                standard_serving_name: "1 katori",
+                standard_serving_grams: 150,
+              },
+            ],
+            unrecognized_items: [],
+            ambiguity_notes: [],
+            remediation_instructions: [],
+            candidates: [
+              {
+                food_id: 101,
+                food_slug: "idli-steamed-rice-lentil",
+                food_name: "Idli (Steamed Rice-Lentil Cake)",
+                matched_in_database: true,
+                image_url: "/images/foods/idli-steamed-rice-lentil.webp",
+                regional_aliases: ["ಇಡ್ಲಿ", "इडली"],
+                visual_similarity_score: 0.94,
+                confidence_category: "high_confidence",
+                uncertainty_label: "High visual confidence (confirm portion below)",
+                visual_cue_explanation:
+                  "Identified as steamed rice-lentil idli by qwen2.5vl:7b.",
+                category_name: "Indian Cooked Dishes",
+                default_basis: "100g",
+                standard_serving_name: "2 idlis",
+                standard_serving_grams: 120,
+                is_vegetarian: true,
+                is_vegan: true,
+                completeness_pct: 95,
+                available_nutrient_count: 19,
+                missing_nutrient_codes: ["vitamin_d_ug"],
+                source_name: "ICMR-NIN IFCT",
+                source_url: "https://www.nin.res.in/",
+                publication_year: 2017,
+                servings: [
+                  {
+                    unit_name: "1_idli",
+                    unit_label: "1 idli",
+                    grams_equivalent: 60,
+                    is_default: false,
+                    conversion_source: "ICMR-NIN Household Measures",
+                  },
+                  {
+                    unit_name: "standard_serving",
+                    unit_label: "2 idlis",
+                    grams_equivalent: 120,
+                    is_default: true,
+                    conversion_source: "ICMR-NIN Household Measures",
+                  },
+                ],
+                nutrients: [
+                  {
+                    nutrient_code: "energy_kcal",
+                    nutrient_name: "Energy",
+                    unit: "kcal",
+                    category: "macronutrient",
+                    value_per_100: 146,
+                    value_for_serving: 175.2,
+                    basis: "100g",
+                    is_available: true,
+                    confidence_status: "verified_ifct",
+                    source_name: "ICMR-NIN IFCT",
+                    source_url: "https://www.nin.res.in/",
+                    publication_year: 2017,
+                  },
+                  {
+                    nutrient_code: "protein_g",
+                    nutrient_name: "Protein",
+                    unit: "g",
+                    category: "macronutrient",
+                    value_per_100: 4.8,
+                    value_for_serving: 5.8,
+                    basis: "100g",
+                    is_available: true,
+                    confidence_status: "verified_ifct",
+                    source_name: "ICMR-NIN IFCT",
+                    source_url: "https://www.nin.res.in/",
+                    publication_year: 2017,
+                  },
+                  {
+                    nutrient_code: "carbs_g",
+                    nutrient_name: "Total Carbohydrates",
+                    unit: "g",
+                    category: "macronutrient",
+                    value_per_100: 28.8,
+                    value_for_serving: 34.6,
+                    basis: "100g",
+                    is_available: true,
+                    confidence_status: "verified_ifct",
+                    source_name: "ICMR-NIN IFCT",
+                    source_url: "https://www.nin.res.in/",
+                    publication_year: 2017,
+                  },
+                  {
+                    nutrient_code: "fat_total_g",
+                    nutrient_name: "Total Fat",
+                    unit: "g",
+                    category: "macronutrient",
+                    value_per_100: 0.7,
+                    value_for_serving: 0.8,
+                    basis: "100g",
+                    is_available: true,
+                    confidence_status: "verified_ifct",
+                    source_name: "ICMR-NIN IFCT",
+                    source_url: "https://www.nin.res.in/",
+                    publication_year: 2017,
+                  },
+                ],
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      if (url.includes("/assistant/chat") && init?.body) {
+        const parsed = JSON.parse(String(init.body));
+        lastAssistantContext = parsed.context;
+        return new Response(
+          JSON.stringify({
+            conversation_id: 707,
+            conversation_title: "Photo Nutrition Chat",
+            reply:
+              "**Analysed Food Photo Context:** **Idli (Steamed Rice-Lentil Cake)** provides **5.8 g** protein in your **2 idlis (120g)** portion.",
+            mode_used: "automatic",
+            model_used: "qwen2.5vl:7b",
+            ollama_connected: true,
+            used_fallback_synthesis: false,
+            resolved_entity: {
+              type: "food",
+              id: "idli-steamed-rice-lentil",
+              name: "Idli (Steamed Rice-Lentil Cake)",
+            },
+            resolved_intent: "active_food_query",
+            tool_traces: [],
+            sources: [],
+            suggested_followups: [
+              "Is Idli suitable for someone going to the gym?",
+              "Add this to today's breakfast",
+            ],
+            medical_disclaimer: "Educational nutrition assistant only.",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
+
+      return origFetch(input, init);
+    });
+
+    if (!globalThis.URL.createObjectURL) {
+      globalThis.URL.createObjectURL = vi.fn(() => "blob:http://localhost/mock-photo");
+    }
+    if (!globalThis.URL.revokeObjectURL) {
+      globalThis.URL.revokeObjectURL = vi.fn();
+    }
+
+    const rPhoto = render(
+      <HouseholdProvider>
+        <MemoryRouter initialEntries={["/recognition"]}>
+          <AppRoutes />
+        </MemoryRouter>
+      </HouseholdProvider>
+    );
+
+    // 1. Verify Food Photo Analyzer page heading and unbiased empty description input
+    await waitFor(() => {
+      expect(screen.getByText("AI Food Photo Analyzer")).toBeInTheDocument();
+    });
+    const hintInput = screen.getByTestId("optional-food-hint-input") as HTMLInputElement;
+    expect(hintInput.value).toBe("");
+    expect(hintInput.placeholder).toBe(
+      "Optional: describe anything you already know about the food."
+    );
+
+    // 2. Verify Tools group in left sidebar includes "Food Photo Analyzer" and main sidebar has "Ask GharPlate AI"
+    expect(screen.getByText("Food Photo Analyzer")).toBeInTheDocument();
+    const sidebarAiBtn = screen.getByTestId("sidebar-ask-gharplate-btn");
+    expect(sidebarAiBtn).toBeInTheDocument();
+
+    // 3. Upload a food image from Mac and analyze it
+    const fileInput = screen.getByTestId("food-photo-input");
+    const samplePhoto = new File(["fake_jpeg_bytes"], "my_breakfast.jpg", {
+      type: "image/jpeg",
+    });
+    fireEvent.change(fileInput, { target: { files: [samplePhoto] } });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("uploaded-food-preview")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId("analyze-food-btn"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("confirmed-food-title")).toHaveTextContent(
+        "Idli (Steamed Rice-Lentil Cake)"
+      );
+    });
+
+    // 4. Verify Portion Selector updates nutrition values (1 idli = 60g -> 2.9g protein; 2 idlis = 120g -> 5.8g protein)
+    const portionSelect = screen.getByTestId("portion-preset-select") as HTMLSelectElement;
+    fireEvent.change(portionSelect, { target: { value: "srv_standard_serving_1" } });
+    await waitFor(() => {
+      expect(screen.getByTestId("photo-nutrition-summary-card")).toHaveTextContent("5.8 g");
+    });
+
+    // 5. Click "Ask GharPlate about this food" -> opens shared AssistantWorkspacePanel with food_image_analysis context
+    fireEvent.click(screen.getByTestId("ask-assistant-about-photo-btn"));
+    await waitFor(() => {
+      expect(screen.getByTestId("assistant-drawer")).toBeInTheDocument();
+    });
+
+    const chatInput = screen.getByTestId("assistant-chat-input");
+    fireEvent.change(chatInput, {
+      target: { value: "How much protein does this contain?" },
+    });
+    fireEvent.click(screen.getByTestId("assistant-send-btn"));
+
+    await waitFor(() => {
+      expect(lastAssistantContext).not.toBeNull();
+      expect(lastAssistantContext.page_type).toBe("food_image_analysis");
+      expect(lastAssistantContext.food_image_analysis.confirmed_food_slug).toBe(
+        "idli-steamed-rice-lentil"
+      );
+      expect(lastAssistantContext.food_image_analysis.selected_grams).toBe(120);
+    });
+
+    rPhoto.unmount();
+  });
 });

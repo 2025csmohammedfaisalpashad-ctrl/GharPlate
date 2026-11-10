@@ -1,31 +1,39 @@
-# GharPlate Project Status Record (`docs/PROJECT_STATUS.md`)
+# GharPlate — Project Status & Verification Report
 
-**Last Updated:** 2026-11-07 (GharPlate 3.0 Complete Fitness Intelligence, Daily Nutrition Tracker, Water & Hydration Tracker, Goals & Habits, Visual Analytics, Online Recipe Discovery, Smart Pantry & Grocery Ecosystem, Indian Protein Intelligence, Smart Mess Analyzer, Family Meal Personalisation, Supplement Intelligence & 27-Tool Ollama AI Assistant)
+## 1. Latest Completed Upgrades (2026-11-09)
 
----
+1. **Definitive 3D Internal Human Anatomy (`Full Internal Anatomy — Skin Hidden` Default)**:
+   - Upgraded [realisticHumanAnatomy3D.ts](../frontend/src/utils/realisticHumanAnatomy3D.ts), [anatomicalModel3D.ts](../frontend/src/utils/anatomicalModel3D.ts), and `frontend/public/models/human_anatomy_atlas.json` with high-resolution multi-belly muscular, articulated skeletal, and visceral organ meshes (`11,000+` triangles per reference body) and medical-atlas lighting without wireframes.
+   - Configured **`Full Internal Anatomy`** (`whole_body`, marked with a `Default` badge `data-testid="anatomy-default-preset-badge"`) with `skin_external` disabled (`skinLayer.visible = false`) and an anatomical Écorché dissection window exposing the Brain (`FMA:50801`), Eyes (`FMA:54448`), Thyroid (`FMA:9603`), Lungs & Trachea (`FMA:7195`), Heart & Aortic Arch (`FMA:7088`), Liver & Gallbladder (`FMA:7197`), Stomach & Pancreas (`FMA:7148`), Small Intestine & Colon (`FMA:71132`), and Kidneys (`FMA:7203`) framed by striated muscles and skeletal structures.
+   - Verified all 4 presets: **`Full Internal Anatomy` (Default)**, **`Muscular System`**, **`Internal Organs`**, and **`Skeletal System`**, plus hover/click raycast selection (`selectedMeshId`), camera focus (`⌖ Focus`), structure isolation, and live **Ask GharPlate** synchronization.
+2. **Two-Level Full-Width Body & Nutrition Explorer Layout (`BodyNutritionExplorerPage.tsx`)**:
+   - **Level A (`data-testid="anatomy-exploration-level-a"`)**: Balanced 12-column top area with the 3D Internal Anatomy Viewer (`lg:col-span-7`) on the left and Selected Anatomy Information (`lg:col-span-5`) on the right.
+   - **Level B (`data-testid="anatomy-full-width-level-b"`)**: Full-width lower sections spanning `100%` of the `max-w-7xl` workspace from left edge to right edge:
+     1. `full-width-nutrients-section` (4-column desktop grid)
+     2. `full-width-foods-section` (3–4 column desktop grid with food photo, nutrient value/basis, serving size, IFCT 2017 source, `Open Food Detail`, and `+ Log in Diary`)
+     3. `full-width-food-comparison-section` (side-by-side comparison table)
+     4. `full-width-recipes-section` (3-column recommended Indian recipes grid)
+     5. `full-width-evidence-section` (3-column clinical references & CC BY 4.0 attribution footer)
+3. **Mysuru Dasara-Inspired Light-Green Botanical Visual Identity (`index.css`, `Layout.tsx`)**:
+   - Introduced CSS custom properties (`--background: #f1f6f1`, `--surface`, `--surface-soft: #e8f2e9`, `--primary: #087153`, `--primary-dark: #064d3c`, `--primary-light: #d8f0e1`, `--text-primary: #172b23`, `--text-secondary: #566960`, `--border`), subtle glossy glass surfaces (`.gp-surface-elevated`, `.gp-hero-surface`), non-blocking ambient botanical orbs (`data-testid="ambient-botanical-backdrop"`), and `@media (prefers-reduced-motion: reduce)` compliance.
 
-## 1. Completed & Verified Modules (Definition of Done)
+## 2. Automated Test & Build Verification
 
-| Area | Status | Implementation & Verification Summary |
-|---|---|---|
-| **Existing Health & Food System** (`backend/app/api/v1/router.py`, `frontend/src/pages/HomePages.tsx`, `ConditionPages.tsx`) | **Completed & Tested** | Preserved 77+ multilingual Indian food records (English, Hindi, Kannada), 84 local `.webp` food photographs, 24 clinical health conditions, reviewed condition-food mappings, barcode lookup, OCR label scanner, and real Argon2id + HttpOnly session authentication. |
-| **Module A — Fitness Profiles & Weekly Training Schedules** (`backend/app/models/entities.py`, `frontend/src/pages/FitnessTrackerPages.tsx`, `HouseholdPages.tsx`) | **Completed & Tested** | Added `primary_goal` on `HouseholdMember`, `MemberFitnessProfile`, and 7-day `TrainingScheduleEntry` (Mon–Sun) co-existing safely with medical conditions (e.g., Diabetes + Muscle Gain or CKD + Fitness). |
-| **Module B — Daily Nutrition Tracker & Food Diary** (`DailyFoodLogEntry`, `SavedMealTemplate`, `/api/v1/tracker/*`, `DailyTrackerPage`) | **Completed & Tested** | Persistent food logging across 9 meal slots (`Early Morning` through `Dinner`), immutable historical nutrient snapshots, `NULL` missing-nutrient preservation, Copy Previous Day's Meals, and reusable Meal Templates. |
-| **Module C — Water & Hydration Tracker** (`WaterIntakeLog`, `HydrationSetting`, `/api/v1/hydration/*`, `WaterTrackerPage`) | **Completed & Tested** | Quick-action buttons (`150 ml`–`500 ml` + custom), container selector, undo/delete entries, configurable daily hydration goal, non-intrusive reminder settings, and automatic CKD/heart/BP fluid-restriction medical notice. |
-| **Module D — Goal, Habit & Measurement Tracker** (`FitnessGoal`, `HabitDefinition`, `HabitCompletionLog`, `BodyMeasurementLog`, `GoalsHabitsPage`) | **Completed & Tested** | Configurable nutrition/fitness goals, gentle non-shaming daily habit checklist with 7-day completion dots, and optional body weight/waist/milestone tracking. |
-| **Module E — Daily, Weekly & Monthly Visual Analytics** (`/api/v1/analytics/overview`, `ProgressAnalyticsPage`) | **Completed & Tested** | Interactive SVG line charts and meal-pattern breakdowns distinguishing `recorded`, `no_entry_recorded` (never fabricated as zero), and `incomplete_nutrient_data`, plus Training-Day vs. Rest-Day comparisons. |
-| **Modules F & N — Recipe Discovery, Online Adapters & Personal Recipe Generator** (`/api/v1/recipes/discover`, `/api/v1/recipes/generate`, `RecipeDiscoveryPage`) | **Completed & Tested** | Profile-aware recipe discovery combining verified local ICMR-NIN / IFCT recipes, **Edamam Recipe Search API v2** adapter (when `EDAMAM_APP_ID` / `EDAMAM_APP_KEY` are configured), **TheMealDB** open recipe adapter, and deterministic Personal Recipe Generator from DB ingredients. |
-| **Modules G & H — Smart Pantry, Consolidated Shopping List & Genuine Indian Retailer Links** (`PantryItem`, `ShoppingList`, `ShoppingListItem`, `SmartGroceryPantryPage`) | **Completed & Tested** | One-click **Get Ingredients** on recipes, automatic pantry subtraction, duplicate ingredient consolidation across multiple recipes, optional PIN code with explicit consent, and verified official search destinations for **Blinkit**, **Zepto**, **Swiggy Instamart**, and **BigBasket**. |
-| **Modules I, J, K, L — Protein Intelligence, Smart Mess Analyzer, Family Meals & Supplement Intelligence** (`KitchenEcosystemPages.tsx`, `ecosystem_router.py`) | **Completed & Tested** | Cost per 10g protein calculator with user-editable local prices; hostel/college mess menu analyzer with 1-click daily tracker logging; multi-member family portion calculator; and supplement vs. whole-food intelligence. |
-| **Module M — Extended 27-Tool Ollama AI Assistant** (`backend/app/services/ollama_assistant_service.py`, `AssistantDrawer.tsx`) | **Completed & Tested** | Added all 17 new ecosystem tools (`get_fitness_profile`, `get_daily_nutrition_log`, `log_food_intake`, `get_daily_nutrition_summary`, `get_water_intake`, `log_water_intake`, `get_goal_progress`, `update_user_goal`, `get_habit_history`, `get_recipe_suggestions`, `search_online_recipes`, `calculate_recipe_nutrition`, `create_shopping_list`, `get_available_pantry_items`, `get_protein_comparisons`, `get_mess_menu`, `get_fitness_progress`) with user-confirmation safety on mutating actions. |
+- **Frontend Vitest Suite (`cd frontend && npm test -- --run`)**: `16 passed (16)` in `tests/App.test.tsx`.
+- **Frontend Production Build (`cd frontend && npm run build`)**: `tsc -b && vite build` succeeded with `0` errors.
+- **Backend Pytest Suite (`cd backend && .venv/bin/pytest -q`)**: `68 passed`.
 
----
+## 3. 12 Required Verification Screenshots (`docs/screenshots/`)
 
-## 2. Executed Automated Verification Results
-
-- **Backend Bytecode Compilation**: `python3 -m compileall -q backend/app backend/tests` — **PASSED (0 errors)**
-- **Backend Ruff Static Linting**: `ruff check backend/app backend/tests` — **PASSED (All checks passed!)**
-- **Backend Pytest Suite**: `PYTHONPATH=backend pytest -v backend/tests/` — **53 / 53 PASSED**
-- **Frontend TypeScript Lint**: `npm run lint` (`tsc --noEmit`) — **PASSED (0 errors)**
-- **Frontend Vitest Suite**: `npm test` (`vitest run tests/App.test.tsx`) — **12 / 12 PASSED**
-- **Frontend Production Build**: `npm run build` (`tsc -b && vite build`) — **PASSED (`539 modules transformed`)**
+1. `docs/screenshots/01_anatomy_full_internal_default.png` — Default **Full Internal Anatomy** view (skin hidden; muscles, organs, and skeleton visible)
+2. `docs/screenshots/02_anatomy_muscular_system.png` — **Muscular System** preset
+3. `docs/screenshots/03_anatomy_internal_organs.png` — **Internal Organs** preset
+4. `docs/screenshots/04_anatomy_skeletal_system.png` — **Skeletal System** preset
+5. `docs/screenshots/05_anatomy_selected_heart_brain.png` — Selected **Heart (`FMA:7088`) / Brain (`FMA:50801`)** structure highlight & detail panel
+6. `docs/screenshots/06_lower_full_width_nutrients.png` — Lower **Full-Width Key Nutrients** section (`100%` content width)
+7. `docs/screenshots/07_full_width_food_recommendations.png` — Lower **Full-Width Verified Indian Food Recommendations, Comparison & Recipes** section (`100%` content width)
+8. `docs/screenshots/08_visual_redesign_home.png` — Redesigned **Home** page in light-green botanical theme
+9. `docs/screenshots/09_visual_redesign_food_explorer.png` — Redesigned **Food Explorer** page
+10. `docs/screenshots/10_visual_redesign_fitness_dashboard.png` — Redesigned **Fitness Dashboard** page
+11. `docs/screenshots/11_visual_redesign_daily_tracker.png` — Redesigned **Daily Tracker** page
+12. `docs/screenshots/12_visual_redesign_ask_gharplate.png` — Redesigned **Ask GharPlate** workspace with collapsible sidebar & context sync

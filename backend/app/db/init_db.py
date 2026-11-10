@@ -7,9 +7,15 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.models.entities import (
+    AchievementDefinition,
     AssistantConversation,
     AssistantMessage,
+    BloodGlucoseLog,
+    BloodPressureLog,
     BodyMeasurementLog,
+    BodyRegion,
+    BodyRegionFoodLink,
+    BodyRegionNutrient,
     ConditionConflictRule,
     ConditionFoodMapping,
     DailyFoodLogEntry,
@@ -25,8 +31,10 @@ from app.models.entities import (
     HabitCompletionLog,
     HabitDefinition,
     HealthCondition,
+    HealthMeasurementTarget,
     HydrationSetting,
     LocalFoodPrice,
+    MemberAchievement,
     MemberFitnessProfile,
     MessMenuRecord,
     NutrientDefinition,
@@ -36,6 +44,7 @@ from app.models.entities import (
     ProductFieldProvenance,
     Recipe,
     RecipeIngredient,
+    RecipeStep,
     SavedMealTemplate,
     ServingConversion,
     ShoppingList,
@@ -136,6 +145,13 @@ def ensure_image_and_intelligence_columns(db: Session) -> None:
         ("source_type", "VARCHAR(50) DEFAULT 'gharplate_verified'"),
         ("source_name", "VARCHAR(200) DEFAULT 'GharPlate IFCT 2017 / ICMR-NIN DGI 2024 Kitchen'"),
         ("source_url", "VARCHAR(500)"),
+        ("slug", "VARCHAR(120)"),
+        ("difficulty", "VARCHAR(40) DEFAULT 'Easy'"),
+        ("verification_status", "VARCHAR(60) DEFAULT 'gharplate_verified'"),
+        ("instructions_reviewed", "BOOLEAN DEFAULT 1 NOT NULL"),
+        ("is_favourite", "BOOLEAN DEFAULT 0 NOT NULL"),
+        ("user_rating", "INTEGER"),
+        ("rating_notes", "TEXT"),
         ("dietary_tags", "JSON DEFAULT '[]'"),
         ("suitable_goals", "JSON DEFAULT '[]'"),
     ]:
@@ -144,6 +160,27 @@ def ensure_image_and_intelligence_columns(db: Session) -> None:
             db.commit()
         except Exception:
             db.rollback()
+
+    for ri_col, ri_type in [
+        ("household_measure_note", "VARCHAR(160)"),
+        ("alternative_ingredient", "VARCHAR(160)"),
+        ("preparation_note", "VARCHAR(160)"),
+    ]:
+        try:
+            db.execute(text(f"ALTER TABLE recipe_ingredients ADD COLUMN {ri_col} {ri_type}"))
+            db.commit()
+        except Exception:
+            db.rollback()
+
+    try:
+        db.execute(
+            text(
+                "ALTER TABLE member_fitness_profiles ADD COLUMN rewards_enabled BOOLEAN DEFAULT 1 NOT NULL"
+            )
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
 
     # Ensure new tables exist on existing SQLite files
     bind = db.get_bind()
@@ -155,6 +192,7 @@ def ensure_image_and_intelligence_columns(db: Session) -> None:
         ProductFieldProvenance,
         ProductDataConflict,
         ExternalLookupCache,
+        RecipeStep,
         MemberFitnessProfile,
         TrainingScheduleEntry,
         FitnessGoal,
@@ -170,8 +208,30 @@ def ensure_image_and_intelligence_columns(db: Session) -> None:
         ShoppingListItem,
         LocalFoodPrice,
         MessMenuRecord,
+        BloodPressureLog,
+        BloodGlucoseLog,
+        HealthMeasurementTarget,
+        AchievementDefinition,
+        MemberAchievement,
+        BodyRegion,
+        BodyRegionNutrient,
+        BodyRegionFoodLink,
     ):
         tbl_cls.__table__.create(bind=bind, checkfirst=True)
+
+    for h_col, h_type in [
+        ("description", "TEXT"),
+        ("schedule_metadata_json", "JSON DEFAULT '{}'"),
+        ("tracking_method", "VARCHAR(60) DEFAULT 'manual_check'"),
+        ("completion_criteria", "VARCHAR(200)"),
+        ("ai_plan_id", "VARCHAR(80)"),
+        ("user_approved_at", "DATETIME"),
+    ]:
+        try:
+            db.execute(text(f"ALTER TABLE habit_definitions ADD COLUMN {h_col} {h_type}"))
+            db.commit()
+        except Exception:
+            db.rollback()
 
 
 def ensure_pineapple_cake_regression_record(
@@ -780,6 +840,16 @@ def seed_database(db: Session, write_report: bool = True) -> dict[str, Any]:
                     )
 
     db.commit()
+
+    from app.services.recipe_intelligence_service import (
+        seed_achievement_definitions,
+        seed_body_nutrition_explorer,
+        seed_curated_recipes_and_steps,
+    )
+
+    seed_curated_recipes_and_steps(db)
+    seed_achievement_definitions(db)
+    seed_body_nutrition_explorer(db)
 
     total_known = db.query(FoodNutrientValue).filter(FoodNutrientValue.value.isnot(None)).count()
     total_null = db.query(FoodNutrientValue).filter(FoodNutrientValue.value.is_(None)).count()

@@ -25,6 +25,8 @@ from app.core.security import (
 )
 from app.db.session import get_db
 from app.models.entities import (
+    BloodGlucoseLog,
+    BloodPressureLog,
     BodyMeasurementLog,
     DailyFoodLogEntry,
     FitnessGoal,
@@ -60,6 +62,24 @@ from app.services.fitness_ecosystem_service import (
     serialize_food_log_entry,
     today_iso_str,
     update_member_fitness_profile,
+)
+from app.services.health_measurement_service import (
+    confirm_ai_habit_plan,
+    confirm_natural_language_food_logs,
+    convert_glucose_units,
+    create_blood_glucose_log,
+    create_blood_pressure_log,
+    get_blood_glucose_dashboard,
+    get_blood_pressure_dashboard,
+    get_health_measurements_summary,
+    get_member_clinician_target,
+    get_unified_daily_activity_timeline,
+    modify_ai_habit_plan_natural_language,
+    parse_natural_language_food_log,
+    propose_ai_habit_plan,
+    save_clinician_measurement_target,
+    serialize_bp_log,
+    serialize_glucose_log,
 )
 
 ecosystem_router = APIRouter()
@@ -807,30 +827,63 @@ def list_habits_endpoint(
         for offset in range(6, -1, -1)
     ]
 
-    out = []
+    def _habit_dedup_key(h_obj: HabitDefinition) -> str:
+        t_norm = (h_obj.title or "").strip().lower()
+        m_norm = (h_obj.tracking_method or "").strip().lower()
+        c_norm = (h_obj.category or "").strip().lower()
+        if m_norm == "water_tracker" or c_norm == "hydration" or "drink water" in t_norm or "record water" in t_norm:
+            return "core_intent::hydration_water"
+        if m_norm == "food_diary" or "breakfast" in t_norm:
+            return "core_intent::breakfast_logging"
+        return f"title::{t_norm}"
+
+    grouped_habits: dict[str, list[HabitDefinition]] = {}
     for h in habits:
-        comp_dates = {
-            c.logged_date for c in (h.completions or []) if c.completed
-        }
+        key = _habit_dedup_key(h) if h.is_active else f"inactive::{h.id}"
+        grouped_habits.setdefault(key, []).append(h)
+
+    out = []
+    for _key, h_group in grouped_habits.items():
+        primary_h = sorted(
+            h_group,
+            key=lambda x: (1 if x.ai_plan_id else 0, len(x.completions or []), x.id),
+            reverse=True,
+        )[0]
+        comp_dates: set[str] = set()
+        for member_h in h_group:
+            for c in member_h.completions or []:
+                if c.completed:
+                    comp_dates.add(c.logged_date)
+
         weekly_days = [
             {"date": d_s, "completed": d_s in comp_dates} for d_s in last_7_dates
         ]
         completed_7d = sum(1 for d in weekly_days if d["completed"])
         out.append(
             {
-                "id": h.id,
-                "member_id": h.member_id,
-                "title": h.title,
-                "category": h.category,
-                "frequency": h.frequency,
-                "reminder_time": h.reminder_time,
-                "is_active": h.is_active,
+                "id": primary_h.id,
+                "member_id": primary_h.member_id,
+                "title": primary_h.title,
+                "description": primary_h.description,
+                "category": primary_h.category,
+                "frequency": primary_h.frequency,
+                "reminder_time": primary_h.reminder_time,
+                "schedule_metadata": primary_h.schedule_metadata_json or {},
+                "tracking_method": primary_h.tracking_method or "manual_check",
+                "completion_criteria": primary_h.completion_criteria,
+                "ai_plan_id": primary_h.ai_plan_id,
+                "user_approved_at": primary_h.user_approved_at.isoformat()
+                if primary_h.user_approved_at
+                else None,
+                "is_active": primary_h.is_active,
                 "completed_on_date": target_date in comp_dates,
                 "completed_days_last_7": completed_7d,
                 "weekly_consistency_pct": round((completed_7d / 7.0) * 100.0, 1),
                 "weekly_days": weekly_days,
+                "completed_dates": sorted(list(comp_dates)),
             }
         )
+    out.sort(key=lambda item: item["id"])
     return out
 
 
@@ -847,9 +900,13 @@ def create_habit_endpoint(
     h = HabitDefinition(
         member_id=member.id,
         title=str(payload.get("title") or "Healthy Daily Habit")[:160],
+        description=payload.get("description"),
         category=str(payload.get("category") or "nutrition"),
         frequency=str(payload.get("frequency") or "daily"),
         reminder_time=payload.get("reminder_time"),
+        schedule_metadata_json=payload.get("schedule_metadata") or {},
+        tracking_method=str(payload.get("tracking_method") or "manual_check"),
+        completion_criteria=payload.get("completion_criteria"),
         is_active=True,
     )
     db.add(h)
@@ -924,7 +981,7 @@ def update_habit_endpoint(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Habit not found."
         )
-    for field in ("title", "category", "frequency", "reminder_time", "is_active"):
+    for field in ("title", "description", "category", "frequency", "reminder_time", "is_active"):
         if field in payload:
             setattr(habit, field, payload[field])
     db.commit()
@@ -1675,3 +1732,572 @@ def get_supplement_and_packaged_intelligence_endpoint(
             "Individuals with kidney, liver, or metabolic conditions should consult a physician before using concentrated protein or electrolyte supplements."
         ),
     }
+
+
+# ==========================================
+# PART 2, 3, 4 & 5 — BLOOD PRESSURE, BLOOD GLUCOSE & HEALTH MEASUREMENTS
+# ==========================================
+@ecosystem_router.get("/health/blood-pressure", tags=["Health Measurements"])
+def get_blood_pressure_endpoint(
+    db: DbSession,
+    current_user: CurrentUser,
+    member_id: Annotated[int | None, Query()] = None,
+    days: Annotated[int, Query(ge=7, le=90)] = 30,
+    end_date: Annotated[str | None, Query()] = None,
+):
+    hh, member = _resolve_owned_member(db, current_user, member_id=member_id)
+    return get_blood_pressure_dashboard(db, hh, member, days=days, end_date_str=end_date)
+
+
+@ecosystem_router.post("/health/blood-pressure", tags=["Health Measurements"])
+def add_blood_pressure_endpoint(
+    payload: dict[str, Any],
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    m_id = payload.get("member_id")
+    hh, member = _resolve_owned_member(
+        db, current_user, member_id=int(m_id) if m_id is not None else None
+    )
+    try:
+        log = create_blood_pressure_log(db, hh, member, payload)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    target_obj = get_member_clinician_target(db, member.id, "blood_pressure")
+    return {
+        "entry": serialize_bp_log(
+            log,
+            target_obj.target_details_json if target_obj else None,
+            age_group=member.age_group,
+        ),
+        "dashboard": get_blood_pressure_dashboard(db, hh, member),
+    }
+
+
+@ecosystem_router.put("/health/blood-pressure/{reading_id}", tags=["Health Measurements"])
+def update_blood_pressure_endpoint(
+    reading_id: int,
+    payload: dict[str, Any],
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    hh = ensure_user_owned_household(db, current_user)
+    log = (
+        db.query(BloodPressureLog)
+        .filter(
+            BloodPressureLog.id == reading_id,
+            BloodPressureLog.household_id == hh.id,
+        )
+        .first()
+    )
+    if not log:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Blood pressure reading not found.",
+        )
+
+    if "systolic_mmhg" in payload and payload["systolic_mmhg"] is not None:
+        log.systolic_mmhg = int(payload["systolic_mmhg"])
+    if "diastolic_mmhg" in payload and payload["diastolic_mmhg"] is not None:
+        log.diastolic_mmhg = int(payload["diastolic_mmhg"])
+    if not (50 <= log.systolic_mmhg <= 260) or not (30 <= log.diastolic_mmhg <= 180) or log.systolic_mmhg <= log.diastolic_mmhg:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid systolic/diastolic values.",
+        )
+    if "pulse_bpm" in payload:
+        log.pulse_bpm = int(payload["pulse_bpm"]) if payload["pulse_bpm"] not in (None, "") else None
+    for field in (
+        "logged_date",
+        "logged_time",
+        "time_of_day",
+        "measurement_arm",
+        "measurement_position",
+        "reading_sequence",
+        "device_type",
+        "notes",
+    ):
+        if field in payload:
+            setattr(log, field, payload[field])
+    db.commit()
+    db.refresh(log)
+    _, member = _resolve_owned_member(db, current_user, member_id=log.member_id)
+    target_obj = get_member_clinician_target(db, member.id, "blood_pressure")
+    return {
+        "entry": serialize_bp_log(
+            log,
+            target_obj.target_details_json if target_obj else None,
+            age_group=member.age_group,
+        ),
+        "dashboard": get_blood_pressure_dashboard(db, hh, member),
+    }
+
+
+@ecosystem_router.delete("/health/blood-pressure/{reading_id}", tags=["Health Measurements"])
+def delete_blood_pressure_endpoint(
+    reading_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    hh = ensure_user_owned_household(db, current_user)
+    log = (
+        db.query(BloodPressureLog)
+        .filter(
+            BloodPressureLog.id == reading_id,
+            BloodPressureLog.household_id == hh.id,
+        )
+        .first()
+    )
+    if not log:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Blood pressure reading not found.",
+        )
+    m_id = log.member_id
+    db.delete(log)
+    db.commit()
+    _, member = _resolve_owned_member(db, current_user, member_id=m_id)
+    return {
+        "deleted": True,
+        "reading_id": reading_id,
+        "dashboard": get_blood_pressure_dashboard(db, hh, member),
+    }
+
+
+@ecosystem_router.get("/health/blood-glucose", tags=["Health Measurements"])
+def get_blood_glucose_endpoint(
+    db: DbSession,
+    current_user: CurrentUser,
+    member_id: Annotated[int | None, Query()] = None,
+    days: Annotated[int, Query(ge=7, le=90)] = 30,
+    end_date: Annotated[str | None, Query()] = None,
+    context_filter: Annotated[str | None, Query()] = None,
+):
+    hh, member = _resolve_owned_member(db, current_user, member_id=member_id)
+    return get_blood_glucose_dashboard(
+        db,
+        hh,
+        member,
+        days=days,
+        end_date_str=end_date,
+        context_filter=context_filter,
+    )
+
+
+@ecosystem_router.post("/health/blood-glucose", tags=["Health Measurements"])
+def add_blood_glucose_endpoint(
+    payload: dict[str, Any],
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    m_id = payload.get("member_id")
+    hh, member = _resolve_owned_member(
+        db, current_user, member_id=int(m_id) if m_id is not None else None
+    )
+    try:
+        log = create_blood_glucose_log(db, hh, member, payload)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    target_obj = get_member_clinician_target(db, member.id, "blood_glucose")
+    return {
+        "entry": serialize_glucose_log(
+            log,
+            target_obj.target_details_json if target_obj else None,
+            age_group=member.age_group,
+        ),
+        "dashboard": get_blood_glucose_dashboard(db, hh, member),
+    }
+
+
+@ecosystem_router.put("/health/blood-glucose/{reading_id}", tags=["Health Measurements"])
+def update_blood_glucose_endpoint(
+    reading_id: int,
+    payload: dict[str, Any],
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    hh = ensure_user_owned_household(db, current_user)
+    log = (
+        db.query(BloodGlucoseLog)
+        .filter(
+            BloodGlucoseLog.id == reading_id,
+            BloodGlucoseLog.household_id == hh.id,
+        )
+        .first()
+    )
+    if not log:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Blood glucose reading not found.",
+        )
+
+    raw_val = payload.get("glucose_value")
+    if raw_val is None:
+        raw_val = payload.get("entered_value")
+    if raw_val is not None:
+        unit = str(
+            payload.get("measurement_unit")
+            or payload.get("entered_unit")
+            or log.entered_unit
+        )
+        val_mg, val_mmol, can_unit = convert_glucose_units(float(raw_val), unit)
+        if not (20.0 <= val_mg <= 800.0):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Glucose value out of physiological recording range.",
+            )
+        log.entered_value = round(float(raw_val), 2)
+        log.entered_unit = can_unit
+        log.value_mg_dl = val_mg
+        log.value_mmol_l = val_mmol
+
+    for field in (
+        "logged_date",
+        "logged_time",
+        "measurement_context",
+        "minutes_after_meal",
+        "meal_reference",
+        "device_type",
+        "notes",
+    ):
+        if field in payload:
+            setattr(log, field, payload[field])
+    db.commit()
+    db.refresh(log)
+    _, member = _resolve_owned_member(db, current_user, member_id=log.member_id)
+    target_obj = get_member_clinician_target(db, member.id, "blood_glucose")
+    return {
+        "entry": serialize_glucose_log(
+            log,
+            target_obj.target_details_json if target_obj else None,
+            age_group=member.age_group,
+        ),
+        "dashboard": get_blood_glucose_dashboard(db, hh, member),
+    }
+
+
+@ecosystem_router.delete("/health/blood-glucose/{reading_id}", tags=["Health Measurements"])
+def delete_blood_glucose_endpoint(
+    reading_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    hh = ensure_user_owned_household(db, current_user)
+    log = (
+        db.query(BloodGlucoseLog)
+        .filter(
+            BloodGlucoseLog.id == reading_id,
+            BloodGlucoseLog.household_id == hh.id,
+        )
+        .first()
+    )
+    if not log:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Blood glucose reading not found.",
+        )
+    m_id = log.member_id
+    db.delete(log)
+    db.commit()
+    _, member = _resolve_owned_member(db, current_user, member_id=m_id)
+    return {
+        "deleted": True,
+        "reading_id": reading_id,
+        "dashboard": get_blood_glucose_dashboard(db, hh, member),
+    }
+
+
+@ecosystem_router.put("/health/measurements/targets", tags=["Health Measurements"])
+def save_clinician_target_endpoint(
+    payload: dict[str, Any],
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    m_id = payload.get("member_id")
+    hh, member = _resolve_owned_member(
+        db, current_user, member_id=int(m_id) if m_id is not None else None
+    )
+    try:
+        return save_clinician_measurement_target(db, hh, member, payload)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+
+
+@ecosystem_router.get("/health/measurements/summary", tags=["Health Measurements"])
+def get_health_measurements_summary_endpoint(
+    db: DbSession,
+    current_user: CurrentUser,
+    member_id: Annotated[int | None, Query()] = None,
+):
+    hh, member = _resolve_owned_member(db, current_user, member_id=member_id)
+    return get_health_measurements_summary(db, hh, member)
+
+
+@ecosystem_router.get("/health/measurements/history", tags=["Health Measurements"])
+def get_health_measurements_history_endpoint(
+    db: DbSession,
+    current_user: CurrentUser,
+    member_id: Annotated[int | None, Query()] = None,
+    days: Annotated[int, Query(ge=7, le=90)] = 30,
+):
+    hh, member = _resolve_owned_member(db, current_user, member_id=member_id)
+    bp = get_blood_pressure_dashboard(db, hh, member, days=days)
+    bg = get_blood_glucose_dashboard(db, hh, member, days=days)
+    body = list_measurements_endpoint(db, current_user, member_id=member.id)
+    return {
+        "member_id": member.id,
+        "member_name": member.display_name,
+        "blood_pressure": bp,
+        "blood_glucose": bg,
+        "body_measurements": body,
+    }
+
+
+@ecosystem_router.get("/health/timeline", tags=["Health Measurements"])
+def get_daily_activity_timeline_endpoint(
+    db: DbSession,
+    current_user: CurrentUser,
+    member_id: Annotated[int | None, Query()] = None,
+    date: Annotated[str | None, Query()] = None,
+    category: Annotated[str | None, Query()] = None,
+):
+    hh, member = _resolve_owned_member(db, current_user, member_id=member_id)
+    return get_unified_daily_activity_timeline(
+        db, hh, member, date_str=date, category_filter=category
+    )
+
+
+# ==========================================
+# PART 6 — AI-POWERED HABIT PLAN BUILDER
+# ==========================================
+@ecosystem_router.post("/fitness/habits/ai-plan", tags=["Fitness & Goals"])
+def propose_ai_habit_plan_endpoint(
+    payload: dict[str, Any],
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    m_id = payload.get("member_id")
+    hh, member = _resolve_owned_member(
+        db, current_user, member_id=int(m_id) if m_id is not None else None
+    )
+    prompt = str(payload.get("prompt") or payload.get("goal_description") or "").strip()
+    return propose_ai_habit_plan(db, hh, member, prompt)
+
+
+@ecosystem_router.post("/fitness/habits/ai-plan/confirm", tags=["Fitness & Goals"])
+def confirm_ai_habit_plan_endpoint(
+    payload: dict[str, Any],
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    m_id = payload.get("member_id")
+    hh, member = _resolve_owned_member(
+        db, current_user, member_id=int(m_id) if m_id is not None else None
+    )
+    try:
+        res = confirm_ai_habit_plan(db, hh, member, payload)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    return {
+        **res,
+        "habits": list_habits_endpoint(db, current_user, member_id=member.id),
+    }
+
+
+@ecosystem_router.post("/fitness/habits/ai-plan/modify", tags=["Fitness & Goals"])
+def modify_ai_habit_plan_endpoint(
+    payload: dict[str, Any],
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    m_id = payload.get("member_id")
+    hh, member = _resolve_owned_member(
+        db, current_user, member_id=int(m_id) if m_id is not None else None
+    )
+    instruction = str(payload.get("instruction") or "").strip()
+    if not instruction:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="'instruction' is required.",
+        )
+    confirmed = bool(payload.get("user_confirmed", False))
+    res = modify_ai_habit_plan_natural_language(
+        db, hh, member, instruction, user_confirmed=confirmed
+    )
+    return {
+        **res,
+        "habits": list_habits_endpoint(db, current_user, member_id=member.id),
+    }
+
+
+# ==========================================
+# PART 7 — NATURAL-LANGUAGE DAILY FOOD LOGGING
+# ==========================================
+@ecosystem_router.post("/tracker/food-logs/parse", tags=["Daily Tracker"])
+def parse_nl_food_log_endpoint(
+    payload: dict[str, Any],
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    m_id = payload.get("member_id")
+    hh, member = _resolve_owned_member(
+        db, current_user, member_id=int(m_id) if m_id is not None else None
+    )
+    raw_text = str(payload.get("text") or payload.get("raw_text") or "").strip()
+    try:
+        return parse_natural_language_food_log(
+            db, hh, member, raw_text, default_date=payload.get("logged_date")
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+
+
+@ecosystem_router.post("/tracker/food-logs/confirm-parsed", tags=["Daily Tracker"])
+def confirm_nl_food_log_endpoint(
+    payload: dict[str, Any],
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    m_id = payload.get("member_id")
+    hh, member = _resolve_owned_member(
+        db, current_user, member_id=int(m_id) if m_id is not None else None
+    )
+    try:
+        entries = confirm_natural_language_food_logs(db, hh, member, payload)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    target_date = str(payload.get("logged_date") or today_iso_str())
+    return {
+        "saved_count": len(entries),
+        "entries": entries,
+        "daily_summary": get_daily_tracker_summary(db, hh, member, target_date),
+    }
+
+
+# ==========================================
+# PART B — DATABASE-PERSISTENT ACHIEVEMENT & REWARD SYSTEM
+# ==========================================
+@ecosystem_router.get("/fitness/achievements", tags=["Fitness & Goals"])
+def get_member_achievements_endpoint(
+    db: DbSession,
+    current_user: CurrentUser,
+    member_id: Annotated[int | None, Query()] = None,
+):
+    from app.services.recipe_intelligence_service import (
+        evaluate_and_get_member_achievements,
+    )
+
+    hh, member = _resolve_owned_member(db, current_user, member_id=member_id)
+    return evaluate_and_get_member_achievements(db, hh, member)
+
+
+@ecosystem_router.post("/fitness/achievements/migrate-local", tags=["Fitness & Goals"])
+def migrate_local_achievements_endpoint(
+    payload: dict[str, Any],
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    from app.services.recipe_intelligence_service import migrate_local_achievements
+
+    m_id = payload.get("member_id")
+    hh, member = _resolve_owned_member(
+        db, current_user, member_id=int(m_id) if m_id is not None else None
+    )
+    local_codes = (
+        payload.get("badge_codes")
+        or payload.get("local_badge_codes")
+        or payload.get("local_badges")
+        or []
+    )
+    return migrate_local_achievements(db, hh, member, local_codes)
+
+
+@ecosystem_router.post("/fitness/achievements/seen", tags=["Fitness & Goals"])
+def mark_achievements_seen_endpoint(
+    payload: dict[str, Any],
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    from app.services.recipe_intelligence_service import mark_member_achievements_seen
+
+    m_id = payload.get("member_id")
+    _hh, member = _resolve_owned_member(
+        db, current_user, member_id=int(m_id) if m_id is not None else None
+    )
+    codes = payload.get("achievement_codes")
+    return mark_member_achievements_seen(db, member, codes)
+
+
+@ecosystem_router.put("/fitness/achievements/preferences", tags=["Fitness & Goals"])
+def update_achievement_preferences_endpoint(
+    payload: dict[str, Any],
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    from app.services.recipe_intelligence_service import (
+        update_member_achievement_preferences,
+    )
+
+    m_id = payload.get("member_id")
+    hh, member = _resolve_owned_member(
+        db, current_user, member_id=int(m_id) if m_id is not None else None
+    )
+    rewards_enabled = bool(payload.get("rewards_enabled", True))
+    return update_member_achievement_preferences(db, hh, member, rewards_enabled)
+
+
+# ==========================================
+# PART C — INTERACTIVE 3D HUMAN BODY & NUTRITION EXPLORER
+# ==========================================
+@ecosystem_router.get("/explore/body-nutrition", tags=["3D Body & Nutrition Explorer"])
+def list_body_nutrition_regions_endpoint(
+    db: DbSession,
+    _current_user: CurrentUser,
+):
+    from app.services.recipe_intelligence_service import list_body_nutrition_regions
+
+    return list_body_nutrition_regions(db)
+
+
+@ecosystem_router.get(
+    "/explore/body-nutrition/{region_code}",
+    tags=["3D Body & Nutrition Explorer"],
+)
+def get_body_nutrition_region_detail_endpoint(
+    region_code: str,
+    db: DbSession,
+    current_user: CurrentUser,
+    member_id: Annotated[int | None, Query()] = None,
+    dietary_preference: Annotated[str | None, Query()] = None,
+):
+    from app.services.recipe_intelligence_service import (
+        get_body_nutrition_region_detail,
+    )
+
+    eff_diet = dietary_preference
+    if eff_diet is None and member_id is not None:
+        _hh, member = _resolve_owned_member(db, current_user, member_id=member_id)
+        eff_diet = member.dietary_preference
+
+    detail = get_body_nutrition_region_detail(
+        db, region_code=region_code, dietary_preference=eff_diet
+    )
+    if not detail:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Body region '{region_code}' not found.",
+        )
+    return detail
+
