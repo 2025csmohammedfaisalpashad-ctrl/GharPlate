@@ -25,7 +25,6 @@ from app.models.entities import (
     BloodPressureLog,
     BodyMeasurementLog,
     DailyFoodLogEntry,
-    FoodAlias,
     FoodItem,
     HabitCompletionLog,
     HabitDefinition,
@@ -386,7 +385,8 @@ def get_blood_pressure_dashboard(
     )
 
     serialized_logs = [
-        serialize_bp_log(l, target_details, age_group=member.age_group) for l in logs
+    serialize_bp_log(log, target_details, age_group=member.age_group)
+    for log in logs
     ]
     today_readings = [r for r in serialized_logs if r["logged_date"] == end_dt_s]
     morning_readings = [r for r in serialized_logs if r["time_of_day"] == "morning"]
@@ -731,7 +731,8 @@ def get_blood_glucose_dashboard(
 
     logs = q.order_by(BloodGlucoseLog.logged_date.desc(), BloodGlucoseLog.id.desc()).all()
     serialized = [
-        serialize_glucose_log(l, target_details, age_group=member.age_group) for l in logs
+    serialize_glucose_log(log, target_details, age_group=member.age_group)
+    for log in logs
     ]
 
     today_readings = [r for r in serialized if r["logged_date"] == end_dt_s]

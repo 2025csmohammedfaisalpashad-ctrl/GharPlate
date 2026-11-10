@@ -5,15 +5,15 @@ Revises: 0004_real_auth_and_assistant_persistence
 Create Date: 2026-11-07 20:00:00
 """
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 from alembic import op
 import sqlalchemy as sa
 
 
 revision: str = "0005_gharplate_v3_ecosystem"
-down_revision: Union[str, None] = "0004_real_auth_and_assistant_persistence"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "0004_real_auth_and_assistant_persistence"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

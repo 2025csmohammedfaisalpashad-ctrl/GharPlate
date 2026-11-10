@@ -32,7 +32,6 @@ from app.models.entities import (
     MessMenuRecord,
     PantryItem,
     Recipe,
-    RecipeIngredient,
 )
 from app.rules.guidance_engine import evaluate_food_guidance
 from app.schemas.api_schemas import (

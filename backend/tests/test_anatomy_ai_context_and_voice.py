@@ -308,7 +308,10 @@ def test_part_b4_and_c_ollama_model_evaluation_and_voice_endpoints():
     assert v_status.status_code == 200
     vs_data = v_status.json()
     assert vs_data["voice_enabled"] is True
-    lang_codes = {l["code"] for l in vs_data["supported_languages"]}
+    lang_codes = {
+    language["code"]
+    for language in vs_data["supported_languages"]
+    }
     assert {"en-IN", "hi-IN", "kn-IN"}.issubset(lang_codes)
     assert "confirmation" in vs_data["confirmation_policy"].lower()
 
