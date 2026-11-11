@@ -24,6 +24,7 @@ from app.models.entities import (
     FitnessGoal,
     FoodAlias,
     FoodCategory,
+    FoodDiscoveryPreference,
     FoodItem,
     FoodItemTag,
     FoodNutrientValue,
@@ -32,6 +33,8 @@ from app.models.entities import (
     HabitDefinition,
     HealthCondition,
     HealthMeasurementTarget,
+    HealthReport,
+    HealthReportMeasurement,
     HydrationSetting,
     LocalFoodPrice,
     MemberAchievement,
@@ -45,10 +48,12 @@ from app.models.entities import (
     Recipe,
     RecipeIngredient,
     RecipeStep,
+    RestaurantSearchSession,
     SavedMealTemplate,
     ServingConversion,
     ShoppingList,
     ShoppingListItem,
+    SymptomReviewSession,
     TrainingScheduleEntry,
     UserAccount,
     UserSession,
@@ -58,6 +63,12 @@ from app.db.seed_catalog import (
     DATA_SOURCES_SEED,
     FOOD_CATEGORIES_SEED,
     NUTRIENT_DEFINITIONS_SEED,
+)
+from app.db.seed_expanded_nutrients_and_foods import (
+    EXISTING_FOODS_NUTRIENT_ENRICHMENT,
+    EXPANDED_DATA_SOURCES_SEED,
+    EXPANDED_FOOD_ITEMS_SEED,
+    EXPANDED_NUTRIENT_DEFINITIONS_SEED,
 )
 from app.db.seed_foods_part1 import FOOD_ITEMS_SEED
 from app.db.seed_foods_part2 import FOOD_ITEMS_SEED_PART2
@@ -216,6 +227,11 @@ def ensure_image_and_intelligence_columns(db: Session) -> None:
         BodyRegion,
         BodyRegionNutrient,
         BodyRegionFoodLink,
+        HealthReport,
+        HealthReportMeasurement,
+        SymptomReviewSession,
+        FoodDiscoveryPreference,
+        RestaurantSearchSession,
     ):
         tbl_cls.__table__.create(bind=bind, checkfirst=True)
 
@@ -253,6 +269,25 @@ def ensure_pineapple_cake_regression_record(
         .first()
     )
     if existing:
+        existing_nv_codes = {
+            nv.nutrient_code
+            for nv in db.query(FoodNutrientValue)
+            .filter(FoodNutrientValue.food_id == existing.id)
+            .all()
+        }
+        for nut_code in nutrients_by_code:
+            if nut_code not in existing_nv_codes:
+                db.add(
+                    FoodNutrientValue(
+                        food_id=existing.id,
+                        nutrient_code=nut_code,
+                        value=None,
+                        basis="100g",
+                        source_id=existing.source_id,
+                        confidence_status="not_measured",
+                    )
+                )
+        db.flush()
         ensure_baseline_local_provenance(db, existing)
         return existing
 
@@ -334,7 +369,7 @@ def ensure_pineapple_cake_regression_record(
             FoodNutrientValue(
                 food_id=cake.id,
                 nutrient_code=nut_code,
-                value=None,  # All 20 nutrients start as NULL
+                value=None,
                 basis="100g",
                 source_id=src.id,
                 confidence_status="not_measured",
@@ -350,12 +385,13 @@ def seed_database(db: Session, write_report: bool = True) -> dict[str, Any]:
     """
     Idempotent, reproducible data-ingestion pipeline.
     Validates records, populates database-driven image_url references, structured FoodTags,
+    expanded NutrientDefinitions (65 nutrients across 6 groups), expanded Indian food composition records,
     and explicit ConditionFoodMappings, preserves NULL for missing nutrients, and writes an import report.
     """
     ensure_image_and_intelligence_columns(db)
 
     sources_by_code: dict[str, DataSource] = {}
-    for src_data in DATA_SOURCES_SEED:
+    for src_data in DATA_SOURCES_SEED + EXPANDED_DATA_SOURCES_SEED:
         existing = db.query(DataSource).filter(DataSource.code == src_data["code"]).first()
         if not existing:
             existing = DataSource(**src_data)
@@ -364,17 +400,30 @@ def seed_database(db: Session, write_report: bool = True) -> dict[str, Any]:
         sources_by_code[src_data["code"]] = existing
 
     nutrients_by_code: dict[str, NutrientDefinition] = {}
+    combined_nutrients_seed: dict[str, dict[str, Any]] = {}
     for nut_data in NUTRIENT_DEFINITIONS_SEED:
+        combined_nutrients_seed[nut_data["code"]] = dict(nut_data)
+    for nut_data in EXPANDED_NUTRIENT_DEFINITIONS_SEED:
+        combined_nutrients_seed[nut_data["code"]] = dict(nut_data)
+
+    for nut_code, nut_data in combined_nutrients_seed.items():
         existing = (
             db.query(NutrientDefinition)
-            .filter(NutrientDefinition.code == nut_data["code"])
+            .filter(NutrientDefinition.code == nut_code)
             .first()
         )
         if not existing:
             existing = NutrientDefinition(**nut_data)
             db.add(existing)
             db.flush()
-        nutrients_by_code[nut_data["code"]] = existing
+        else:
+            existing.name = nut_data["name"]
+            existing.unit = nut_data["unit"]
+            existing.category = nut_data["category"]
+            existing.display_order = nut_data["display_order"]
+            if nut_data.get("description"):
+                existing.description = nut_data["description"]
+        nutrients_by_code[nut_code] = existing
 
     categories_by_slug: dict[str, FoodCategory] = {}
     for cat_data in FOOD_CATEGORIES_SEED:
@@ -398,12 +447,27 @@ def seed_database(db: Session, write_report: bool = True) -> dict[str, Any]:
             db.flush()
         tags_by_code[tag_data["code"]] = existing_tag
 
-    all_foods_seed = (
+    base_foods_seed = (
         FOOD_ITEMS_SEED
         + FOOD_ITEMS_SEED_PART2
         + FOOD_ITEMS_SEED_PART3
         + FOOD_ITEMS_SEED_PART4
     )
+    all_foods_seed: list[dict[str, Any]] = []
+    seen_seed_slugs: set[str] = set()
+    for f_entry in base_foods_seed + EXPANDED_FOOD_ITEMS_SEED:
+        s_slug = f_entry["slug"]
+        if s_slug in seen_seed_slugs:
+            continue
+        seen_seed_slugs.add(s_slug)
+        merged_entry = dict(f_entry)
+        merged_nuts = dict(f_entry.get("nutrients") or {})
+        cleaned_nuts = {k.strip(): v for k, v in merged_nuts.items()}
+        enrichment = EXISTING_FOODS_NUTRIENT_ENRICHMENT.get(s_slug) or {}
+        for e_k, e_v in enrichment.items():
+            cleaned_nuts[e_k.strip()] = e_v
+        merged_entry["nutrients"] = cleaned_nuts
+        all_foods_seed.append(merged_entry)
 
     imported_foods_count = 0
 
@@ -413,14 +477,47 @@ def seed_database(db: Session, write_report: bool = True) -> dict[str, Any]:
         existing_food = db.query(FoodItem).filter(FoodItem.slug == food_data["slug"]).first()
         is_pkg = food_data.get("is_packaged", False)
         resolved_img = (
-            FOOD_IMAGE_URLS.get(food_data["slug"])
-            if is_pkg
-            else resolve_food_image_url(food_data["slug"], food_data["category_slug"])
+            food_data.get("image_url")
+            or (
+                FOOD_IMAGE_URLS.get(food_data["slug"])
+                if is_pkg
+                else resolve_food_image_url(food_data["slug"], food_data["category_slug"])
+            )
         )
         if existing_food:
             if not existing_food.image_url and resolved_img:
                 existing_food.image_url = resolved_img
             foods_by_slug[existing_food.slug] = existing_food
+            existing_nv_by_code = {
+                nv.nutrient_code: nv
+                for nv in db.query(FoodNutrientValue)
+                .filter(FoodNutrientValue.food_id == existing_food.id)
+                .all()
+            }
+            nut_map = food_data.get("nutrients", {})
+            for nut_code in nutrients_by_code:
+                val = nut_map.get(nut_code, None)
+                if nut_code not in existing_nv_by_code:
+                    conf_status = (
+                        "not_measured"
+                        if val is None
+                        else ("label_declared" if existing_food.is_packaged else "verified_ifct")
+                    )
+                    db.add(
+                        FoodNutrientValue(
+                            food_id=existing_food.id,
+                            nutrient_code=nut_code,
+                            value=float(val) if val is not None else None,
+                            basis=existing_food.default_basis,
+                            source_id=existing_food.source_id,
+                            confidence_status=conf_status,
+                        )
+                    )
+                elif existing_nv_by_code[nut_code].value is None and val is not None:
+                    existing_nv_by_code[nut_code].value = float(val)
+                    existing_nv_by_code[nut_code].confidence_status = (
+                        "label_declared" if existing_food.is_packaged else "verified_ifct"
+                    )
         else:
             category = categories_by_slug[food_data["category_slug"]]
             source = sources_by_code[food_data["source_code"]]
@@ -492,7 +589,7 @@ def seed_database(db: Session, write_report: bool = True) -> dict[str, Any]:
                             )
                         )
 
-            servings_list = food_data.get("servings", [])
+            servings_list = list(food_data.get("servings", []))
             has_100 = any(s["unit_name"] in ("100g", "100ml") for s in servings_list)
             if not has_100:
                 servings_list.insert(
@@ -730,8 +827,8 @@ def seed_database(db: Session, write_report: bool = True) -> dict[str, Any]:
             "instructions_notes": "Boil and squeeze soya chunks, lightly pan-sear with paneer cubes, tomato, onion, and spinach, and serve over steamed brown rice with curd.",
             "ingredients": [
                 ("soya-chunks-textured-veg-protein", 1.0, "100g", 100.0),
-                ("paneer-cottage-cheese-cow", 1.0, "100g", 100.0),
-                ("rice-brown-raw", 1.0, "100g", 100.0),
+                ("paneer-cottage-cheese", 1.0, "100g", 100.0),
+                ("brown-rice", 1.0, "100g", 100.0),
                 ("spinach-palak", 1.0, "100g", 100.0),
                 ("tomato-ripe", 1.0, "standard_serving", 85.0),
             ],
@@ -750,7 +847,7 @@ def seed_database(db: Session, write_report: bool = True) -> dict[str, Any]:
             "instructions_notes": "Pressure-cook washed moong dal, rice, and diced carrots with turmeric and cumin until soft; serve warm with fresh curd.",
             "ingredients": [
                 ("khichdi-moong-dal-rice", 2.0, "standard_serving", 400.0),
-                ("curd-dahi-cow-milk", 1.0, "katori", 150.0),
+                ("curd-dahi-whole-milk", 1.0, "katori", 150.0),
                 ("carrot-orange", 1.0, "100g", 100.0),
             ],
         },
@@ -762,14 +859,14 @@ def seed_database(db: Session, write_report: bool = True) -> dict[str, Any]:
             "prep_time_minutes": 12,
             "cook_time_minutes": 15,
             "estimated_cost_inr": 42.0,
-            "image_url": "/images/foods/pulses-legumes/green-gram-whole-moong.webp",
+            "image_url": "/images/foods/pulses-legumes/moong-dal-green-gram.webp",
             "dietary_tags": ["vegetarian", "vegan", "high_protein", "high_fibre", "hostel_friendly"],
             "suitable_goals": ["build_muscle", "lose_body_fat", "improve_endurance", "improve_general_fitness"],
             "instructions_notes": "Toss steamed sprouted moong and boiled chickpeas with roasted peanuts, chopped onion, tomato, and lemon juice.",
             "ingredients": [
                 ("green-gram-whole-moong", 1.0, "100g", 100.0),
-                ("chickpea-kabuli-chana", 1.0, "standard_serving", 60.0),
-                ("groundnut-peanut-raw", 1.0, "standard_serving", 30.0),
+                ("chickpeas-kabuli-chana", 1.0, "standard_serving", 60.0),
+                ("peanuts-groundnut", 1.0, "standard_serving", 30.0),
                 ("tomato-ripe", 1.0, "standard_serving", 85.0),
                 ("onion-big", 1.0, "standard_serving", 80.0),
             ],
@@ -788,7 +885,7 @@ def seed_database(db: Session, write_report: bool = True) -> dict[str, Any]:
             "instructions_notes": "Serve warm steamed rice-lentil idlis with vegetable toor dal sambar and two hard-boiled poultry eggs.",
             "ingredients": [
                 ("idli-steamed-rice-lentil", 2.0, "standard_serving", 240.0),
-                ("sambar-lentil-vegetable-stew", 1.0, "katori", 150.0),
+                ("sambar-vegetable-lentil-stew", 1.0, "katori", 150.0),
                 ("egg-poultry-whole-boiled", 2.0, "standard_serving", 100.0),
             ],
         },
@@ -866,6 +963,7 @@ def seed_database(db: Session, write_report: bool = True) -> dict[str, Any]:
         "generated_at": datetime.now(UTC).isoformat(),
         "total_data_sources": db.query(DataSource).count(),
         "total_food_categories": db.query(FoodCategory).count(),
+        "total_nutrient_definitions": db.query(NutrientDefinition).count(),
         "total_food_items": db.query(FoodItem).count(),
         "newly_imported_foods": imported_foods_count,
         "total_aliases": db.query(FoodAlias).count(),
@@ -892,8 +990,9 @@ def seed_database(db: Session, write_report: bool = True) -> dict[str, Any]:
             with open(processed_dir / "catalog_manifest.json", "w", encoding="utf-8") as f:
                 json.dump(
                     {
-                        "sources": [s["code"] for s in DATA_SOURCES_SEED],
+                        "sources": [s["code"] for s in DATA_SOURCES_SEED + EXPANDED_DATA_SOURCES_SEED],
                         "categories": [c["slug"] for c in FOOD_CATEGORIES_SEED],
+                        "nutrient_count": report["total_nutrient_definitions"],
                         "food_count": report["total_food_items"],
                         "condition_count": report["total_health_conditions"],
                         "reviewed_condition_food_mappings": total_mappings,

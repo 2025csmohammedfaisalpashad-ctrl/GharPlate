@@ -2362,6 +2362,17 @@ export const FoodRecognitionPage: React.FC = () => {
                         <span>Ask GharPlate about this food</span>
                       </button>
 
+                      <Link
+                        to={`/food-nearby?dish=${encodeURIComponent(
+                          activeCandidate?.food_name || 'Masala Dosa'
+                        )}`}
+                        data-testid="find-analysed-food-nearby-btn"
+                        className="w-full flex items-center justify-center gap-2 rounded-2xl border border-emerald-800/25 bg-[#e8f2e9] px-4 py-2.5 text-xs font-extrabold text-[#064d3c] hover:bg-emerald-100 transition"
+                      >
+                        <span>📍</span>
+                        <span>Find This Food Nearby →</span>
+                      </Link>
+
                       <div className="flex items-center gap-2">
                         <select
                           aria-label="Select Meal Category"

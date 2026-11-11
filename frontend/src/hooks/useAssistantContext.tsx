@@ -18,6 +18,9 @@ export interface ActiveAssistantContextStore {
   selected_recipe?: Record<string, any> | string | null;
   selected_product?: Record<string, any> | string | null;
   food_image_analysis?: Record<string, any> | null;
+  health_report_context?: Record<string, any> | null;
+  symptom_review_context?: Record<string, any> | null;
+  food_discovery_context?: Record<string, any> | null;
   food_slug?: string | null;
   barcode?: string | null;
   condition_code?: string | null;
@@ -99,6 +102,9 @@ export function deriveStructuredPageContext(
   const condMatch = pathname.match(/^\/conditions\/([^/]+)/);
   const recipeMatch = pathname.match(/^\/recipes\/([^/]+)/);
   const isRecognitionPage = pathname.startsWith('/recognition');
+  const isHealthReportsPage = pathname.startsWith('/health/reports');
+  const isSymptomReviewPage = pathname.startsWith('/health/symptoms');
+  const isFoodNearbyPage = pathname.startsWith('/food-nearby');
   const isBodyExplorer = pathname.startsWith('/explore/body-nutrition');
   const isBarcodePage = pathname.startsWith('/barcode');
   const isTrackerPage = pathname.startsWith('/fitness/tracker');
@@ -111,6 +117,21 @@ export function deriveStructuredPageContext(
 
   if (isRecognitionPage) {
     pageType = 'food_image_analysis';
+    if (activePub.selected_entity) {
+      selectedEntity = activePub.selected_entity;
+    }
+  } else if (isHealthReportsPage) {
+    pageType = 'health_report';
+    if (activePub.selected_entity) {
+      selectedEntity = activePub.selected_entity;
+    }
+  } else if (isSymptomReviewPage) {
+    pageType = 'symptom_review';
+    if (activePub.selected_entity) {
+      selectedEntity = activePub.selected_entity;
+    }
+  } else if (isFoodNearbyPage) {
+    pageType = 'food_discovery';
     if (activePub.selected_entity) {
       selectedEntity = activePub.selected_entity;
     }
@@ -160,7 +181,6 @@ export function deriveStructuredPageContext(
   } else if (isMemberPage) {
     pageType = 'household_member';
   } else {
-    // Navigated to an unrelated general page (e.g., Home `/`): clear stale entity selection
     selectedEntity = null;
   }
 
@@ -210,6 +230,18 @@ export function deriveStructuredPageContext(
     food_image_analysis:
       isRecognitionPage && activePub.food_image_analysis
         ? activePub.food_image_analysis
+        : null,
+    health_report_context:
+      (isHealthReportsPage || isSymptomReviewPage) && activePub.health_report_context
+        ? activePub.health_report_context
+        : null,
+    symptom_review_context:
+      (isHealthReportsPage || isSymptomReviewPage) && activePub.symptom_review_context
+        ? activePub.symptom_review_context
+        : null,
+    food_discovery_context:
+      isFoodNearbyPage && activePub.food_discovery_context
+        ? activePub.food_discovery_context
         : null,
   };
 }

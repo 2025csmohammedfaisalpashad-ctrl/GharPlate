@@ -802,7 +802,7 @@ class MealSuggestionResponse(BaseModel):
 class AssistantSelectedEntity(BaseModel):
     type: str = Field(
         default="none",
-        description="Entity type: food, food_image_analysis, packaged_product, barcode_result, recipe, body_region, condition, member, goal, tracker, health_measurement, none",
+        description="Entity type: food, food_image_analysis, packaged_product, barcode_result, recipe, body_region, condition, member, goal, tracker, health_measurement, health_report, symptom_review, food_discovery, none",
     )
     id: str | None = None
     name: str | None = None
@@ -828,7 +828,7 @@ class AssistantPageContext(BaseModel):
     # Structured active-context contract (Part B Section 7)
     page_type: str | None = Field(
         default=None,
-        description="food_detail, food_image_analysis, packaged_product, barcode_result, recipe_detail, body_region, condition_detail, household_member, fitness_goal, daily_tracker, health_measurement, general",
+        description="food_detail, food_image_analysis, packaged_product, barcode_result, recipe_detail, body_region, condition_detail, household_member, fitness_goal, daily_tracker, health_measurement, health_report, symptom_review, food_discovery, general",
     )
     route: str | None = None
     selected_entity: AssistantSelectedEntity | None = None
@@ -838,6 +838,9 @@ class AssistantPageContext(BaseModel):
     selected_recipe: dict[str, Any] | str | None = None
     selected_product: dict[str, Any] | str | None = None
     food_image_analysis: dict[str, Any] | None = None
+    health_report_context: dict[str, Any] | None = None
+    symptom_review_context: dict[str, Any] | None = None
+    food_discovery_context: dict[str, Any] | None = None
 
 
 class AssistantChatMessage(BaseModel):

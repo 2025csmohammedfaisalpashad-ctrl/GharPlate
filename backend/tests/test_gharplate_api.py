@@ -687,3 +687,521 @@ def test_16_multimodal_food_photo_analysis_all_11_scenarios_and_contextual_ai(mo
     reply_log = r_chat_log.json()["reply"]
     assert "Ready to log" in reply_log or "Confirmation Preview" in reply_log
 
+
+def test_health_report_upload_validation_extraction_confirmation_and_kidney_safety():
+    """
+    Section 35: Medical Report Upload, Validation, Structured Extraction, Confirmation Gate,
+    Lab-to-Plate Food Mapping, and Kidney-Marker Safety Guardrail.
+    """
+    # 1. Unsupported / executable file must be rejected safely
+    bad_exe = ("malware.exe", b"MZ\x90\x00\x03\x00\x00\x00", "application/octet-stream")
+    r_bad = client.post("/api/v1/health/reports/extract", files={"file": bad_exe})
+    assert r_bad.status_code == 400
+    assert any(w in r_bad.json()["detail"] for w in ("Unsupported", "format", "Executable"))
+
+    # 2. Corrupted PDF header must be rejected safely
+    corrupt_pdf = ("corrupted.pdf", b"NOT_A_PDF_HEADER_12345", "application/pdf")
+    r_corrupt = client.post("/api/v1/health/reports/extract", files={"file": corrupt_pdf})
+    assert r_corrupt.status_code == 400
+    assert "corrupted" in r_corrupt.json()["detail"].lower() or "signature" in r_corrupt.json()["detail"].lower()
+
+    # 3. Valid PDF with embedded text stream extracts structured test results without confusing reference intervals
+    pdf_bytes = (
+        b"%PDF-1.4\n1 0 obj\n<< /Type /Page >>\nendobj\nstream\n"
+        b"(Haemoglobin: 10.6 g/dL (12.0 - 16.0)) Tj\n"
+        b"(HbA1c: 6.3 % (4.0 - 5.6)) Tj\n"
+        b"(Vitamin B12: 155 pg/mL (200 - 900)) Tj\n"
+        b"(LDL Cholesterol: 142 mg/dL (0 - 100)) Tj\n"
+        b"endstream\n%%EOF"
+    )
+    r_pdf = client.post(
+        "/api/v1/health/reports/extract",
+        files={"file": ("lab_report.pdf", pdf_bytes, "application/pdf")},
+        data={"report_title": "Test PDF Lab Panel", "report_type": "comprehensive_blood_panel"},
+    )
+    assert r_pdf.status_code == 200
+    ext_data = r_pdf.json()
+    assert ext_data["requires_user_confirmation"] is True
+    extracted_codes = {m["canonical_code"]: m for m in ext_data["extracted_measurements"]}
+    assert "haemoglobin" in extracted_codes
+    assert extracted_codes["haemoglobin"]["measured_value"] == 10.6
+    assert extracted_codes["haemoglobin"]["reference_low"] == 12.0
+    assert extracted_codes["haemoglobin"]["reference_high"] == 16.0
+    assert extracted_codes["haemoglobin"]["status_flag"] == "low"
+    assert "hba1c" in extracted_codes
+    assert extracted_codes["hba1c"]["measured_value"] == 6.3
+    assert "vitamin_b12" in extracted_codes
+    assert extracted_codes["vitamin_b12"]["measured_value"] == 155.0
+
+    # 4. Attempting to save without user_confirmed=True must fail
+    r_unconfirmed = client.post(
+        "/api/v1/health/reports/confirm",
+        json={
+            "user_confirmed": False,
+            "report_title": "Should Fail",
+            "measurements": ext_data["extracted_measurements"],
+        },
+    )
+    assert r_unconfirmed.status_code == 400
+
+    # 5. Confirming report saves it and generates Lab-to-Plate Indian food recommendations
+    r_confirm = client.post(
+        "/api/v1/health/reports/confirm",
+        json={
+            "user_confirmed": True,
+            "report_title": "Confirmed PDF Lab Panel",
+            "report_type": "comprehensive_blood_panel",
+            "report_date": "2026-04-10",
+            "measurements": ext_data["extracted_measurements"],
+        },
+    )
+    assert r_confirm.status_code == 200
+    saved_rep = r_confirm.json()
+    assert saved_rep["user_confirmed"] is True
+    assert saved_rep["measurement_count"] >= 4
+    assert len(saved_rep["lab_to_plate"]["marker_food_cards"]) >= 2
+
+    # 6. Kidney-Marker Safety Guardrail: abnormal eGFR / high creatinine / high potassium must trigger renal safety alert and block high-potassium food suggestions
+    r_kidney = client.post(
+        "/api/v1/health/reports/confirm",
+        json={
+            "user_confirmed": True,
+            "report_title": "Renal Function Check",
+            "report_type": "kidney_renal",
+            "report_date": "2026-04-12",
+            "measurements": [
+                {
+                    "canonical_code": "serum_creatinine",
+                    "panel_code": "kidney_renal",
+                    "test_name": "Serum Creatinine",
+                    "measured_value": 2.4,
+                    "unit": "mg/dL",
+                    "reference_low": 0.6,
+                    "reference_high": 1.2,
+                },
+                {
+                    "canonical_code": "egfr",
+                    "panel_code": "kidney_renal",
+                    "test_name": "eGFR",
+                    "measured_value": 42.0,
+                    "unit": "mL/min/1.73m2",
+                    "reference_low": 90.0,
+                    "reference_high": 120.0,
+                },
+                {
+                    "canonical_code": "serum_potassium",
+                    "panel_code": "kidney_renal",
+                    "test_name": "Serum Potassium",
+                    "measured_value": 5.8,
+                    "unit": "mmol/L",
+                    "reference_low": 3.5,
+                    "reference_high": 5.1,
+                },
+            ],
+        },
+    )
+    assert r_kidney.status_code == 200
+    kidney_rep = r_kidney.json()
+    assert kidney_rep["lab_to_plate"]["kidney_safety_triggered"] is True
+    assert "Kidney & Electrolyte Safety Notice" in kidney_rep["lab_to_plate"]["kidney_safety_notice"]
+
+    # 7. Trends endpoint groups strictly by canonical_code AND unit
+    r_trends = client.get("/api/v1/health/reports/trends")
+    assert r_trends.status_code == 200
+    assert r_trends.json()["total_series"] >= 4
+
+    # 8. Visual formatting (bold/red PDF font, H/L flags, arrows ↑/↓, asterisks *),
+    #    conflicting indicators, OCR decimal mistakes, missing reference intervals,
+    #    cautious non-diagnostic concerns, and Ask GharPlate report Q&A
+    multi_page_visual_pdf = (
+        b"%PDF-1.4\n"
+        b"1 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>\nendobj\n"
+        b"2 0 obj\n<< /Type /Page >>\nendobj\nstream\n"
+        b"BT\n/F1_Bold 11 Tf\n0.85 0.10 0.10 rg\n(Haemoglobin: 10.4 g/dL L (12.0 - 16.0)) Tj\nET\n"
+        b"BT\n0.0 0.0 0.0 rg\n(HbA1c: 6.4 % \xe2\x86\x91 (4.0 - 5.6)) Tj\nET\n"
+        b"BT\n(Total Cholesterol: 218 mg/dL * (125 - 200)) Tj\nET\n"
+        b"endstream\n"
+        b"3 0 obj\n<< /Type /Page >>\nendobj\nstream\n"
+        b"BT\n(WBC Count: 7200 /cumm L (4000 - 11000)) Tj\nET\n"
+        b"BT\n(Serum Creatinine: 12 mg/dL (0.6 - 1.2)) Tj\nET\n"
+        b"BT\n(TSH: 2.8 mIU/L) Tj\nET\n"
+        b"endstream\n%%EOF"
+    )
+    r_vis = client.post(
+        "/api/v1/health/reports/extract",
+        files={"file": ("visual_multipage.pdf", multi_page_visual_pdf, "application/pdf")},
+    )
+    assert r_vis.status_code == 200
+    vis_data = r_vis.json()
+    vis_by_code = {m["canonical_code"]: m for m in vis_data["extracted_measurements"]}
+
+    # Bold + red text + L flag on Haemoglobin (page 1)
+    assert vis_by_code["haemoglobin"]["range_status"] == "below_reference"
+    assert vis_by_code["haemoglobin"]["status_label"] == "Below reference interval"
+    assert "bold_result" in vis_by_code["haemoglobin"]["visual_indicators"]
+    assert "red_text" in vis_by_code["haemoglobin"]["visual_indicators"]
+    assert vis_by_code["haemoglobin"]["page_number"] == 1
+
+    # Up-arrow flag on HbA1c
+    assert vis_by_code["hba1c"]["range_status"] == "above_reference"
+    assert "up_arrow" in vis_by_code["hba1c"]["visual_indicators"]
+
+    # Asterisk flag on Total Cholesterol
+    assert vis_by_code["total_cholesterol"]["range_status"] == "above_reference"
+    assert "asterisk_flag" in vis_by_code["total_cholesterol"]["visual_indicators"]
+
+    # Conflicting indicator (WBC 7200 is inside 4000 - 11000, but flagged 'L') -> Requires manual review
+    assert vis_by_code["wbc_count"]["range_status"] == "requires_manual_review"
+    assert vis_by_code["wbc_count"]["status_label"] == "Requires manual review"
+    assert vis_by_code["wbc_count"]["requires_manual_review"] is True
+    assert vis_by_code["wbc_count"]["page_number"] == 2
+
+    # OCR decimal mistake (Serum Creatinine 12 mg/dL vs 0.6 - 1.2) -> Requires manual review + proposed_correction 1.2
+    assert vis_by_code["serum_creatinine"]["range_status"] == "requires_manual_review"
+    assert vis_by_code["serum_creatinine"]["proposed_correction"] == 1.2
+
+    # Missing reference interval (TSH 2.8 mIU/L with no printed interval) -> Reference interval unavailable (never invented)
+    assert vis_by_code["tsh"]["range_status"] == "reference_unavailable"
+    assert vis_by_code["tsh"]["status_label"] == "Reference interval unavailable"
+    assert vis_by_code["tsh"]["reference_min"] is None and vis_by_code["tsh"]["reference_max"] is None
+
+    # Low haemoglobin alone uses cautious non-diagnostic wording
+    concerns_vis = {c["concern_code"]: c for c in vis_data["possible_nutritional_concerns"]}
+    assert "low_haemoglobin_evaluation" in concerns_vis
+    assert (
+        "Your report shows a low haemoglobin result. This may have several causes and should be assessed with the full blood count and other relevant tests"
+        in concerns_vis["low_haemoglobin_evaluation"]["explanation"]
+    )
+
+    # Ask GharPlate about confirmed report context
+    r_rep_chat = client.post(
+        "/api/v1/assistant/chat",
+        json={
+            "message": "Which of my results are below range, which are above range, and what should I ask my doctor?",
+            "mode": "database_only",
+            "context": {
+                "page_type": "health_report",
+                "route": "/health/reports",
+                "health_report_context": saved_rep,
+            },
+        },
+    )
+    assert r_rep_chat.status_code == 200
+    rep_reply = r_rep_chat.json()["reply"]
+    assert "Below Reference Interval" in rep_reply
+    assert "Haemoglobin" in rep_reply
+    assert "Above Reference Interval" in rep_reply
+    assert "LDL Cholesterol" in rep_reply
+    assert "Questions to Ask Your Doctor" in rep_reply
+
+
+def test_ai_symptom_review_and_emergency_red_flag_escalation():
+    """
+    Section 36: AI Symptom Review & Care Guidance Tests.
+    Verifies non-diagnostic educational guidance for routine symptoms and immediate red-flag
+    emergency escalation (112/108) that halts normal food recommendations.
+    """
+    # 1. Routine non-emergency symptoms (fatigue + afternoon dizziness)
+    r_normal = client.post(
+        "/api/v1/health/symptom-review",
+        json={
+            "symptom_description": "I have been feeling tired and dizzy in the afternoon for the past week.",
+            "onset": "Gradual",
+            "duration": "1 week",
+            "severity": "mild",
+            "include_health_records_consent": True,
+        },
+    )
+    assert r_normal.status_code == 200
+    norm_data = r_normal.json()
+    assert norm_data["red_flag_detected"] is False
+    assert len(norm_data["follow_up_questions"]) <= 2
+    assert len(norm_data["supportive_indian_meals_and_hydration"]) >= 1
+    assert "reported_symptoms" in norm_data
+    assert "confirmed_health_records" in norm_data
+    assert "diagnos" in norm_data["medical_disclaimer"].lower()
+
+    # 2. Emergency red-flag symptoms (severe chest pain + shortness of breath)
+    r_emerg = client.post(
+        "/api/v1/health/symptom-review",
+        json={
+            "symptom_description": "I have severe chest pain spreading to my left arm and shortness of breath.",
+            "severity": "severe",
+        },
+    )
+    assert r_emerg.status_code == 200
+    emerg_data = r_emerg.json()
+    assert emerg_data["red_flag_detected"] is True
+    assert emerg_data["urgency_level"] == "emergency_immediate"
+    assert "112" in emerg_data["emergency_banner"]["headline"] or "108" in emerg_data["emergency_banner"]["headline"]
+    # Normal meal suggestions MUST be halted during a red-flag emergency
+    assert emerg_data["supportive_indian_meals_and_hydration"] == []
+
+
+def test_smart_nearby_food_discovery_and_provider_integrations():
+    """
+    Sections 37 & 38: Smart Nearby Food Discovery, Dietary/Allergy Filtering,
+    Google Maps URL Fallback, Swiggy MCP Confirmation Gate, and Zomato POS Restriction Status.
+    """
+    # 1. Provider status summary works without paid API keys
+    r_prov = client.get("/api/v1/food-discovery/providers")
+    assert r_prov.status_code == 200
+    prov_data = r_prov.json()
+    prov_codes = {p["code"]: p for p in prov_data["providers"]}
+    assert prov_codes["google_maps_url_fallback"]["status"] == "active_free"
+    assert "zomato_partner" in prov_codes
+
+    # 2. Search nearby for "Masala Dosa" in Mysuru within 5 km (Pure Vegetarian filter)
+    r_search = client.post(
+        "/api/v1/food-discovery/search",
+        json={
+            "dish_query": "Masala Dosa",
+            "city": "Mysuru",
+            "radius_km": 5.0,
+            "dietary_filter": "pure_vegetarian",
+        },
+    )
+    assert r_search.status_code == 200
+    s_data = r_search.json()
+    assert s_data["matched_gharplate_dish"]["matched_in_database"] is True
+    assert s_data["matched_gharplate_dish"]["food_slug"] in ("masala-dosa", "masala-dosa-potato-filled")
+    assert (
+        s_data["member_context"]["allergy_cross_contact_warning"]
+        == "Please confirm ingredients and cross-contact risks directly with the restaurant."
+    )
+    assert s_data["total_results"] >= 1
+    for rest in s_data["restaurants"]:
+        assert rest["dietary_classification"] == "pure_vegetarian"
+        assert rest["distance_km"] <= 5.0
+        assert rest["coordinates_available"] is True
+        assert rest["latitude"] is not None and rest["longitude"] is not None
+        assert "google.com/maps/search" in rest["maps_links"]["google_maps_place_url"]
+        assert "google.com/maps/dir" in rest["maps_links"]["google_maps_directions_url"]
+        assert ("open" + "streetmap.org") in rest["maps_links"]["openstreetmap_place_url"]
+        assert "swiggy.com" in rest["provider_integrations"]["swiggy"]["search_url"]
+        assert "zomato.com" in rest["provider_integrations"]["zomato"]["search_url"]
+
+    # 2b. OpenStreetMap Nominatim & Gazetteer geocode endpoint resolves Indian neighbourhoods without paid keys
+    r_geo = client.get("/api/v1/food-discovery/geocode", params={"q": "Kuvempunagar, Mysuru"})
+    assert r_geo.status_code == 200
+    geo_data = r_geo.json()
+    assert geo_data["found"] is True
+    assert abs(geo_data["latitude"] - 12.2856) < 0.05
+    assert abs(geo_data["longitude"] - 76.6197) < 0.05
+    assert "Mysuru" in geo_data["city"]
+
+    # 3. Swiggy Builders Club MCP preview enforces user confirmation gate
+    r_mcp_unconf = client.post(
+        "/api/v1/food-discovery/swiggy-mcp/preview",
+        json={
+            "action_type": "prepare_cart",
+            "restaurant_name": "Gayathri Tiffin Room",
+            "dish_name": "Masala Dosa",
+            "city": "Mysuru",
+            "quantity": 2,
+            "estimated_price_inr": 75,
+            "user_confirmed": False,
+        },
+    )
+    assert r_mcp_unconf.status_code == 200
+    mcp_u = r_mcp_unconf.json()
+    assert mcp_u["requires_user_confirmation"] is True
+    assert mcp_u["execution_status"] == "awaiting_user_confirmation"
+
+    r_mcp_conf = client.post(
+        "/api/v1/food-discovery/swiggy-mcp/preview",
+        json={
+            "action_type": "prepare_cart",
+            "restaurant_name": "Gayathri Tiffin Room",
+            "dish_name": "Masala Dosa",
+            "city": "Mysuru",
+            "quantity": 2,
+            "estimated_price_inr": 75,
+            "user_confirmed": True,
+        },
+    )
+    assert r_mcp_conf.status_code == 200
+    mcp_c = r_mcp_conf.json()
+    assert mcp_c["requires_user_confirmation"] is False
+    assert mcp_c["execution_status"] == "cart_preview_confirmed_handoff_ready"
+    assert "swiggy.com" in mcp_c["external_handoff_url"]
+
+
+
+
+def test_blood_report_image_and_scanned_pdf_20_marker_extraction():
+    """
+    Verifies all 13 mandatory requirements for blood report image/PDF OCR & table parsing:
+    1. PNG upload of the 20-marker multi-section blood report extracts all 20 structured rows.
+    2. JPG upload extracts all 20 structured rows.
+    3. Text-based PDF extraction works.
+    4. Scanned PDF OCR works.
+    5. Multiple report sections (CBC, Iron, Vitamins, Thyroid, Lipid, Glucose) are recognised.
+    6. Values remain associated with the correct test.
+    7. Decimal points are preserved.
+    8. Units are preserved.
+    9. Reference intervals are preserved.
+    10. Abnormal flags are detected correctly.
+    11. Unreadable rows require manual review.
+    12. Completely unreadable file produces a clear error rather than a fake successful 0-row result.
+    13. Confirming the extracted report retrieves verified Indian food recommendations.
+    """
+    from PIL import ImageDraw, ImageFont
+
+    font_path = "/System/Library/Fonts/Helvetica.ttc"
+    try:
+        font = ImageFont.truetype(font_path, 22)
+    except Exception:
+        font = ImageFont.load_default()
+
+    sample_lines = [
+        "APOLLO / METROPOLIS CLINICAL DIAGNOSTICS",
+        "Report Date: 2026-04-12",
+        "COMPLETE BLOOD COUNT (CBC)",
+        "Haemoglobin              10.8      g/dL           12.0 - 16.0    Low",
+        "WBC Count                6800      /cumm          4000 - 11000   Normal",
+        "RBC Count                4.4       million/cumm   4.0 - 5.2      Normal",
+        "Platelets                2.6       lakh/cumm      1.5 - 4.5      Normal",
+        "MCV                      77.5      fL             80.0 - 100.0   Low",
+        "MCH                      25.8      pg             27.0 - 32.0    Low",
+        "IRON STUDIES",
+        "Serum Ferritin           12.4      ng/mL          15.0 - 150.0   Low",
+        "Serum Iron               48        ug/dL          60 - 170       Low",
+        "VITAMINS & THYROID",
+        "Vitamin B12              168       pg/mL          200 - 900      Low",
+        "Vitamin D (25-OH)        16.5      ng/mL          30.0 - 100.0   Low",
+        "Folate                   8.4       ng/mL          4.6 - 18.7     Normal",
+        "TSH                      3.1       mIU/L          0.45 - 4.5     Normal",
+        "T3                       3.0       pg/mL          2.3 - 4.2      Normal",
+        "T4                       1.2       ng/dL          0.8 - 1.8      Normal",
+        "LIPID PROFILE",
+        "Total Cholesterol        212       mg/dL          125 - 200      High",
+        "LDL Cholesterol          134       mg/dL          0 - 100        High",
+        "HDL Cholesterol          44        mg/dL          40 - 60        Normal",
+        "Triglycerides            178       mg/dL          40 - 150       High",
+        "GLUCOSE & HBA1C",
+        "Fasting Glucose          114       mg/dL          70 - 99        High",
+        "HbA1c                    6.1       %              4.0 - 5.6      High",
+    ]
+
+    img = Image.new("RGB", (1300, 1180), color=(255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    y = 24
+    for line in sample_lines:
+        draw.text((36, y), line, fill=(15, 23, 42), font=font)
+        y += 38
+
+    expected_values = {
+        "haemoglobin": (10.8, 12.0, 16.0, "low"),
+        "wbc_count": (6800.0, 4000.0, 11000.0, "within_reference"),
+        "rbc_count": (4.4, 4.0, 5.2, "within_reference"),
+        "platelet_count": (2.6, 1.5, 4.5, "within_reference"),
+        "mcv": (77.5, 80.0, 100.0, "low"),
+        "mch": (25.8, 27.0, 32.0, "low"),
+        "serum_ferritin": (12.4, 15.0, 150.0, "low"),
+        "serum_iron": (48.0, 60.0, 170.0, "low"),
+        "vitamin_b12": (168.0, 200.0, 900.0, "low"),
+        "vitamin_d_25oh": (16.5, 30.0, 100.0, "low"),
+        "serum_folate": (8.4, 4.6, 18.7, "within_reference"),
+        "tsh": (3.1, 0.45, 4.5, "within_reference"),
+        "t3": (3.0, 2.3, 4.2, "within_reference"),
+        "t4": (1.2, 0.8, 1.8, "within_reference"),
+        "total_cholesterol": (212.0, 125.0, 200.0, "high"),
+        "ldl_cholesterol": (134.0, 0.0, 100.0, "high"),
+        "hdl_cholesterol": (44.0, 40.0, 60.0, "within_reference"),
+        "triglycerides": (178.0, 40.0, 150.0, "high"),
+        "fasting_blood_glucose": (114.0, 70.0, 99.0, "high"),
+        "hba1c": (6.1, 4.0, 5.6, "high"),
+    }
+
+    # 1. PNG Upload
+    png_buf = io.BytesIO()
+    img.save(png_buf, format="PNG")
+    r_png = client.post(
+        "/api/v1/health/reports/extract",
+        files={"file": ("sample_blood_report.png", png_buf.getvalue(), "image/png")},
+        data={"report_title": "PNG Multi-Section Blood Report"},
+    )
+    assert r_png.status_code == 200
+    png_json = r_png.json()
+    assert png_json["extracted_count"] == 20
+    assert png_json["extraction_diagnostics"]["valid_structured_rows"] == 20
+    assert png_json["extraction_diagnostics"]["final_api_status"] == "confirmation_required"
+    png_rows = {m["canonical_code"]: m for m in png_json["extracted_measurements"]}
+    for code, (exp_val, exp_low, exp_high, exp_flag) in expected_values.items():
+        assert code in png_rows, f"Missing {code} in PNG extraction"
+        row = png_rows[code]
+        assert row["measured_value"] == exp_val
+        assert row["reference_low"] == exp_low
+        assert row["reference_high"] == exp_high
+        assert row["status_flag"] == exp_flag
+        assert row["unit"], f"Missing unit for {code}"
+
+    # 2. JPG Upload
+    jpg_buf = io.BytesIO()
+    img.save(jpg_buf, format="JPEG", quality=95)
+    r_jpg = client.post(
+        "/api/v1/health/reports/extract",
+        files={"file": ("sample_blood_report.jpg", jpg_buf.getvalue(), "image/jpeg")},
+        data={"report_title": "JPG Multi-Section Blood Report"},
+    )
+    assert r_jpg.status_code == 200
+    assert r_jpg.json()["extracted_count"] == 20
+
+    # 4. Scanned PDF Upload (PDF containing embedded JPEG stream, no selectable text)
+    scanned_pdf_bytes = (
+        b"%PDF-1.4\n1 0 obj\n<< /Type /XObject /Subtype /Image /Filter /DCTDecode >>\nstream\n"
+        + jpg_buf.getvalue()
+        + b"\nendstream\nendobj\n%%EOF"
+    )
+    r_scanned_pdf = client.post(
+        "/api/v1/health/reports/extract",
+        files={"file": ("scanned_blood_report.pdf", scanned_pdf_bytes, "application/pdf")},
+        data={"report_title": "Scanned PDF Blood Report"},
+    )
+    assert r_scanned_pdf.status_code == 200
+    assert r_scanned_pdf.json()["extracted_count"] == 20
+
+    # 11. Unreadable row value requires manual review without confusing reference interval with result
+    r_unread_row = client.post(
+        "/api/v1/health/reports/extract-text",
+        json={
+            "raw_report_text": "Haemoglobin: -- g/dL (12.0 - 16.0)\nHbA1c: 6.1 % (4.0 - 5.6)",
+            "report_title": "Partial Unreadable Row Test",
+        },
+    )
+    assert r_unread_row.status_code == 200
+    ur_rows = {m["canonical_code"]: m for m in r_unread_row.json()["extracted_measurements"]}
+    assert ur_rows["haemoglobin"]["measured_value"] is None
+    assert ur_rows["haemoglobin"]["requires_manual_review"] is True
+    assert ur_rows["haemoglobin"]["reference_low"] == 12.0
+    assert ur_rows["haemoglobin"]["reference_high"] == 16.0
+
+    # 12. Completely unreadable blank image returns extraction_failed and clear error message
+    blank_png = create_in_memory_png(color=(255, 255, 255), size=(300, 200))
+    r_blank = client.post(
+        "/api/v1/health/reports/extract",
+        files={"file": ("blank.png", blank_png, "image/png")},
+    )
+    assert r_blank.status_code == 200
+    blank_json = r_blank.json()
+    assert blank_json["extracted_count"] == 0
+    assert blank_json["extraction_diagnostics"]["final_api_status"] == "extraction_failed"
+    assert blank_json["extraction_error_message"] is not None
+
+    # 13. Confirming extracted 20-marker report retrieves verified GharPlate food recommendations
+    r_conf_20 = client.post(
+        "/api/v1/health/reports/confirm",
+        json={
+            "user_confirmed": True,
+            "report_title": "Confirmed 20-Marker PNG Report",
+            "report_type": "comprehensive_blood_panel",
+            "report_date": "2026-04-12",
+            "measurements": png_json["extracted_measurements"],
+        },
+    )
+    assert r_conf_20.status_code == 200
+    conf_20_data = r_conf_20.json()
+    assert conf_20_data["measurement_count"] == 20
+    assert conf_20_data["results_requiring_attention"] == 12
+    assert len(conf_20_data["lab_to_plate"]["marker_food_cards"]) >= 4

@@ -15,7 +15,7 @@ FastAPI Router for GharPlate 3.0 Ecosystem (Modules A through N):
 
 from datetime import datetime, timedelta, UTC
 from typing import Annotated, Any
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.security import (
@@ -2300,4 +2300,496 @@ def get_body_nutrition_region_detail_endpoint(
             detail=f"Body region '{region_code}' not found.",
         )
     return detail
+
+
+# ==========================================
+# PART A — HEALTH REPORT INTELLIGENCE & LAB-TO-PLATE ENDPOINTS
+# ==========================================
+@ecosystem_router.post("/health/reports/extract", tags=["Health Report Intelligence"])
+async def extract_health_report_upload_endpoint(
+    file: Annotated[UploadFile, File(...)],
+    current_user: CurrentUser,
+    db: DbSession,
+    member_id: Annotated[int | None, Form()] = None,
+    hint_text: Annotated[str | None, Form()] = None,
+    report_title: Annotated[str | None, Form()] = None,
+    report_type: Annotated[str | None, Form()] = None,
+):
+    from app.services.health_report_symptom_service import (
+        extract_health_report_from_upload,
+    )
+
+    _hh, _member = _resolve_owned_member(db, current_user, member_id=member_id)
+    raw_bytes = await file.read()
+    try:
+        res = extract_health_report_from_upload(
+            file_bytes=raw_bytes,
+            filename=file.filename,
+            content_type=file.content_type,
+            hint_text=hint_text,
+            report_title=report_title,
+        )
+        if report_type:
+            res["report_type"] = report_type
+        return res
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    finally:
+        await file.close()
+
+
+@ecosystem_router.post("/health/reports/extract-text", tags=["Health Report Intelligence"])
+def extract_health_report_text_endpoint(
+    payload: dict[str, Any],
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    from app.services.health_report_symptom_service import (
+        MEDICAL_REPORT_DISCLAIMER,
+        PRIVACY_EPHEMERAL_UPLOAD_NOTICE,
+        parse_laboratory_report_text,
+    )
+
+    m_id = payload.get("member_id")
+    _hh, _member = _resolve_owned_member(
+        db, current_user, member_id=int(m_id) if m_id is not None else None
+    )
+    raw_text = str(
+        payload.get("raw_report_text")
+        or payload.get("raw_text")
+        or payload.get("text")
+        or ""
+    ).strip()
+    if not raw_text:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Please provide 'raw_report_text' or 'raw_text' from your laboratory report.",
+        )
+    parsed = parse_laboratory_report_text(raw_text)
+    warnings = list(parsed.get("uncertainty_notes") or [])
+    p_diag = parsed.get("parser_diagnostics") or {}
+    measurements = parsed["measurements"]
+    has_rows = len(measurements) > 0
+    return {
+        "extraction_id": "hr-text-preview",
+        "extraction_status": "success" if has_rows else "no_structured_tests_found",
+        "extraction_error_message": None
+        if has_rows
+        else "No recognisable laboratory test rows could be matched from the provided text. Please check the format or add rows manually.",
+        "extraction_engine": "structured_text_parser",
+        "extraction_method": "structured_text_parser",
+        "extraction_diagnostics": {
+            "file_type": "text",
+            "mime_type": "text/plain",
+            "file_size_bytes": len(raw_text.encode("utf-8")),
+            "ocr_engine_used": "structured_text_parser",
+            "ocr_success": True,
+            "pages_or_images_processed": 1,
+            "text_extracted": True,
+            "candidate_rows_detected": int(p_diag.get("candidate_rows_detected", 0)),
+            "valid_structured_rows": int(p_diag.get("valid_structured_rows", 0)),
+            "rejected_rows_count": int(p_diag.get("rejected_rows_count", 0)),
+            "rejection_reasons": list(p_diag.get("rejection_reasons") or [])[:15],
+            "final_api_status": "success" if has_rows else "extraction_failed",
+        },
+        "report_title": payload.get("report_title") or parsed["report_title"],
+        "laboratory_name": payload.get("laboratory_name") or parsed["laboratory_name"],
+        "report_date": payload.get("report_date") or parsed["report_date"],
+        "specimen_type": parsed["specimen_type"],
+        "extracted_count": len(measurements),
+        "measurements": measurements,
+        "extracted_measurements": measurements,
+        "report_summary": parsed["report_summary"],
+        "possible_nutritional_concerns": parsed["report_summary"]["possible_nutritional_concerns"],
+        "raw_extracted_text": raw_text[:4000],
+        "validation_warnings": warnings,
+        "uncertainty_notes": warnings,
+        "requires_user_confirmation": True,
+        "saved_to_database": False,
+        "privacy_notice": PRIVACY_EPHEMERAL_UPLOAD_NOTICE,
+        "medical_disclaimer": MEDICAL_REPORT_DISCLAIMER,
+    }
+
+
+@ecosystem_router.post("/health/reports/confirm", tags=["Health Report Intelligence"])
+def confirm_health_report_endpoint(
+    payload: dict[str, Any],
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    from app.services.health_report_symptom_service import (
+        confirm_and_save_health_report,
+    )
+
+    m_id = payload.get("member_id")
+    hh, member = _resolve_owned_member(
+        db, current_user, member_id=int(m_id) if m_id is not None else None
+    )
+    try:
+        return confirm_and_save_health_report(db, hh, member, payload)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+
+
+@ecosystem_router.get("/health/reports", tags=["Health Report Intelligence"])
+def list_health_reports_endpoint(
+    db: DbSession,
+    current_user: CurrentUser,
+    member_id: Annotated[int | None, Query()] = None,
+):
+    from app.services.health_report_symptom_service import list_health_reports
+
+    hh, member = _resolve_owned_member(db, current_user, member_id=member_id)
+    return list_health_reports(db, hh, member)
+
+
+@ecosystem_router.get("/health/reports/trends", tags=["Health Report Intelligence"])
+def get_health_report_trends_endpoint(
+    db: DbSession,
+    current_user: CurrentUser,
+    member_id: Annotated[int | None, Query()] = None,
+    canonical_code: Annotated[str | None, Query()] = None,
+):
+    from app.services.health_report_symptom_service import get_health_report_trends
+
+    hh, member = _resolve_owned_member(db, current_user, member_id=member_id)
+    return get_health_report_trends(db, hh, member, canonical_code=canonical_code)
+
+
+@ecosystem_router.get("/health/reports/{report_id}", tags=["Health Report Intelligence"])
+def get_health_report_detail_endpoint(
+    report_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    from app.models.entities import HealthReport
+    from app.services.health_report_symptom_service import serialize_health_report
+
+    hh = ensure_user_owned_household(db, current_user)
+    report = (
+        db.query(HealthReport)
+        .options(joinedload(HealthReport.measurements))
+        .filter(
+            HealthReport.id == report_id,
+            HealthReport.household_id == hh.id,
+        )
+        .first()
+    )
+    if not report:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Health report not found."
+        )
+    return serialize_health_report(report)
+
+
+@ecosystem_router.delete("/health/reports/{report_id}", tags=["Health Report Intelligence"])
+def delete_health_report_endpoint(
+    report_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    from app.models.entities import HealthReport
+
+    hh = ensure_user_owned_household(db, current_user)
+    report = (
+        db.query(HealthReport)
+        .filter(
+            HealthReport.id == report_id,
+            HealthReport.household_id == hh.id,
+        )
+        .first()
+    )
+    if not report:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Health report not found."
+        )
+    db.delete(report)
+    db.commit()
+    return {"deleted": True, "report_id": report_id}
+
+
+# ==========================================
+# PART B — AI SYMPTOM REVIEW & CARE GUIDANCE ENDPOINTS
+# ==========================================
+@ecosystem_router.post("/health/symptom-review", tags=["AI Symptom Review"])
+def evaluate_symptom_review_endpoint(
+    payload: dict[str, Any],
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    from app.services.health_report_symptom_service import evaluate_symptom_review
+
+    m_id = payload.get("member_id")
+    hh, member = _resolve_owned_member(
+        db, current_user, member_id=int(m_id) if m_id is not None else None
+    )
+    try:
+        return evaluate_symptom_review(db, hh, member, payload)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+
+
+@ecosystem_router.get("/health/symptom-review/history", tags=["AI Symptom Review"])
+def get_symptom_review_history_endpoint(
+    db: DbSession,
+    current_user: CurrentUser,
+    member_id: Annotated[int | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=50)] = 15,
+):
+    from app.services.health_report_symptom_service import (
+        list_symptom_review_history,
+    )
+
+    hh, member = _resolve_owned_member(db, current_user, member_id=member_id)
+    return list_symptom_review_history(db, hh, member, limit=limit)
+
+
+# ==========================================
+# PARTS C, D, E, F — SMART NEARBY FOOD DISCOVERY, MAPS & PROVIDER ADAPTERS
+# ==========================================
+@ecosystem_router.get("/food-discovery/providers", tags=["Smart Food Discovery"])
+def get_food_discovery_providers_endpoint(_current_user: CurrentUser):
+    from app.services.food_discovery_service import get_provider_status_summary
+
+    return get_provider_status_summary()
+
+
+@ecosystem_router.get("/food-discovery/geocode", tags=["Smart Food Discovery"])
+def geocode_food_discovery_location_endpoint(
+    _current_user: CurrentUser,
+    q: Annotated[str, Query(description="City, locality, or neighbourhood e.g. Vijayanagar, Mysuru")] = "Mysuru",
+):
+    from app.services.food_discovery_service import geocode_location_nominatim
+
+    return geocode_location_nominatim(q, allow_live_network=True)
+
+
+
+@ecosystem_router.get("/food-discovery/preferences", tags=["Smart Food Discovery"])
+def get_food_discovery_preferences_endpoint(
+    db: DbSession,
+    current_user: CurrentUser,
+    member_id: Annotated[int | None, Query()] = None,
+):
+    from app.services.food_discovery_service import (
+        get_or_update_food_discovery_preferences,
+    )
+
+    hh, member = _resolve_owned_member(db, current_user, member_id=member_id)
+    return get_or_update_food_discovery_preferences(db, hh, member)
+
+
+@ecosystem_router.put("/food-discovery/preferences", tags=["Smart Food Discovery"])
+def update_food_discovery_preferences_endpoint(
+    payload: dict[str, Any],
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    from app.services.food_discovery_service import (
+        get_or_update_food_discovery_preferences,
+    )
+
+    m_id = payload.get("member_id")
+    hh, member = _resolve_owned_member(
+        db, current_user, member_id=int(m_id) if m_id is not None else None
+    )
+    return get_or_update_food_discovery_preferences(db, hh, member, payload=payload)
+
+
+@ecosystem_router.post("/food-discovery/search", tags=["Smart Food Discovery"])
+def search_nearby_food_post_endpoint(
+    payload: dict[str, Any],
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    from app.services.food_discovery_service import (
+        search_nearby_food_and_restaurants,
+    )
+
+    m_id = payload.get("member_id")
+    hh, member = _resolve_owned_member(
+        db, current_user, member_id=int(m_id) if m_id is not None else None
+    )
+    return search_nearby_food_and_restaurants(db, hh, member, payload)
+
+
+@ecosystem_router.get("/food-discovery/search", tags=["Smart Food Discovery"])
+def search_nearby_food_get_endpoint(
+    db: DbSession,
+    current_user: CurrentUser,
+    dish_query: Annotated[str, Query()] = "Masala Dosa",
+    city: Annotated[str | None, Query()] = None,
+    area: Annotated[str | None, Query()] = None,
+    pincode: Annotated[str | None, Query()] = None,
+    latitude: Annotated[float | None, Query()] = None,
+    longitude: Annotated[float | None, Query()] = None,
+    radius_km: Annotated[float, Query(ge=1.0, le=50.0)] = 5.0,
+    dietary_filter: Annotated[str | None, Query()] = None,
+    sort_by: Annotated[str, Query()] = "relevance",
+    member_id: Annotated[int | None, Query()] = None,
+):
+    from app.services.food_discovery_service import (
+        search_nearby_food_and_restaurants,
+    )
+
+    hh, member = _resolve_owned_member(db, current_user, member_id=member_id)
+    return search_nearby_food_and_restaurants(
+        db,
+        hh,
+        member,
+        {
+            "dish_query": dish_query,
+            "city": city,
+            "area": area,
+            "pincode": pincode,
+            "latitude": latitude,
+            "longitude": longitude,
+            "radius_km": radius_km,
+            "dietary_filter": dietary_filter,
+            "sort_by": sort_by,
+        },
+    )
+
+
+@ecosystem_router.post("/food-discovery/swiggy-mcp/preview", tags=["Smart Food Discovery"])
+def prepare_swiggy_mcp_preview_endpoint(
+    payload: dict[str, Any],
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    from app.services.food_discovery_service import (
+        prepare_swiggy_mcp_action_preview,
+    )
+
+    m_id = payload.get("member_id")
+    hh, member = _resolve_owned_member(
+        db, current_user, member_id=int(m_id) if m_id is not None else None
+    )
+    return prepare_swiggy_mcp_action_preview(db, hh, member, payload)
+
+
+@ecosystem_router.post("/food-discovery/log-meal", tags=["Smart Food Discovery"])
+def log_restaurant_meal_endpoint(
+    payload: dict[str, Any],
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    from app.services.food_discovery_service import log_restaurant_meal_to_diary
+
+    m_id = payload.get("member_id")
+    hh, member = _resolve_owned_member(
+        db, current_user, member_id=int(m_id) if m_id is not None else None
+    )
+    try:
+        return log_restaurant_meal_to_diary(db, hh, member, payload)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+
+
+# ==========================================
+# NUTRIENT EXPLORER & EXPANDED INDIAN FOOD COMPOSITION ENGINE
+# ==========================================
+@ecosystem_router.get("/nutrients/catalog", tags=["Nutrient Explorer"])
+def get_nutrients_explorer_catalog_endpoint(
+    db: DbSession,
+    q: Annotated[
+        str | None,
+        Query(description="Search nutrient by name, code, or alias (e.g., Vitamin D, B12, Iron, Folate)"),
+    ] = None,
+    group: Annotated[
+        str | None,
+        Query(description="Filter by nutrient group (vitamins, minerals, protein_amino, carbs_fibre, fats_fatty_acids, other_components)"),
+    ] = None,
+):
+    from app.services.nutrient_food_search_service import list_nutrients_catalog
+
+    return list_nutrients_catalog(db, search_query=q, group_code=group)
+
+
+@ecosystem_router.get("/nutrients/search", tags=["Nutrient Explorer"])
+def search_foods_by_nutrient_endpoint(
+    db: DbSession,
+    q: Annotated[
+        str,
+        Query(description="Nutrient name, code, or alias (e.g., Vitamin D, Iron, Vitamin B12, Protein, Calcium, Folate)"),
+    ] = "iron_mg",
+    dietary_preference: Annotated[
+        str | None,
+        Query(description="all | vegetarian | vegan | eggetarian | non_vegetarian"),
+    ] = "all",
+    food_form: Annotated[
+        str | None,
+        Query(description="all | raw | cooked | prepared_dish | fortified | natural | packaged"),
+    ] = "all",
+    category_slug: Annotated[
+        str | None,
+        Query(description="Optional food category slug filter"),
+    ] = None,
+    sort_by: Annotated[
+        str,
+        Query(description="per_100g_desc | per_serving_desc | density_per_100kcal_desc | name_asc"),
+    ] = "per_100g_desc",
+    limit: Annotated[int, Query(ge=1, le=200)] = 80,
+):
+    from app.services.nutrient_food_search_service import search_foods_by_nutrient
+
+    return search_foods_by_nutrient(
+        db,
+        nutrient_query=q,
+        dietary_preference=dietary_preference,
+        food_form=food_form,
+        category_slug=category_slug,
+        sort_by=sort_by,
+        limit=limit,
+    )
+
+
+@ecosystem_router.get("/nutrients/import-summary", tags=["Nutrient Explorer"])
+def get_nutrient_database_import_summary_endpoint(
+    db: DbSession,
+):
+    from app.services.nutrient_food_search_service import (
+        get_database_import_and_coverage_summary,
+    )
+
+    return get_database_import_and_coverage_summary(db)
+
+
+@ecosystem_router.get("/nutrients/{nutrient_code}/foods", tags=["Nutrient Explorer"])
+def get_foods_for_nutrient_code_endpoint(
+    nutrient_code: str,
+    db: DbSession,
+    dietary_preference: Annotated[str | None, Query()] = "all",
+    food_form: Annotated[str | None, Query()] = "all",
+    category_slug: Annotated[str | None, Query()] = None,
+    sort_by: Annotated[str, Query()] = "per_100g_desc",
+    limit: Annotated[int, Query(ge=1, le=200)] = 80,
+):
+    from app.services.nutrient_food_search_service import search_foods_by_nutrient
+
+    res = search_foods_by_nutrient(
+        db,
+        nutrient_query=nutrient_code,
+        dietary_preference=dietary_preference,
+        food_form=food_form,
+        category_slug=category_slug,
+        sort_by=sort_by,
+        limit=limit,
+    )
+    if not res.get("matched"):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=res.get("message") or f"Nutrient '{nutrient_code}' not found.",
+        )
+    return res
+
+
 

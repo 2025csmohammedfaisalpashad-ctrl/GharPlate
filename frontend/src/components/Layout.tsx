@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthGate } from '../App';
 import {
@@ -54,11 +54,25 @@ export const NAV_GROUPS: NavGroup[] = [
         matchPrefixes: ['/foods'],
       },
       {
+        label: 'Nutrient Explorer',
+        to: '/nutrient-explorer',
+        desc: 'Search & discover Indian foods by vitamins, minerals, proteins & nutrients',
+        icon: '🧬',
+        matchPrefixes: ['/nutrient-explorer'],
+      },
+      {
         label: 'Body & Nutrition',
         to: '/explore/body-nutrition',
         desc: 'Interactive 3D human body & organ nutrition explorer',
         icon: '🧬',
         matchPrefixes: ['/explore/body-nutrition'],
+      },
+      {
+        label: 'Find Food Nearby',
+        to: '/food-nearby',
+        desc: 'Find restaurants near you serving your desired Indian dish',
+        icon: '📍',
+        matchPrefixes: ['/food-nearby'],
       },
     ],
   },
@@ -73,6 +87,20 @@ export const NAV_GROUPS: NavGroup[] = [
         desc: 'Family members, conditions & allergies',
         icon: '🏡',
         matchPrefixes: ['/household'],
+      },
+      {
+        label: 'Health Reports',
+        to: '/health/reports',
+        desc: 'Upload lab reports (PDF/Image), review values & Lab-to-Plate foods',
+        icon: '🧪',
+        matchPrefixes: ['/health/reports'],
+      },
+      {
+        label: 'Symptom Review',
+        to: '/health/symptoms',
+        desc: 'AI Symptom Review & Care Guidance with emergency red-flag safety',
+        icon: '🩺',
+        matchPrefixes: ['/health/symptoms'],
       },
       {
         label: 'Health Measurements',
@@ -222,8 +250,31 @@ export const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
-const SIDEBAR_STORAGE_KEY = 'gharplate_sidebar_collapsed';
-const SIDEBAR_GROUP_KEY = 'gharplate_sidebar_active_group';
+export const SIDEBAR_STORAGE_KEY = 'gharplate_sidebar_collapsed';
+export const SIDEBAR_GROUP_KEY = 'gharplate_sidebar_active_group';
+export const SIDEBAR_WIDTH_STORAGE_KEY = 'gharplate_sidebar_width';
+export const SIDEBAR_MIN_WIDTH = 190;
+export const SIDEBAR_DEFAULT_WIDTH = 240;
+export const SIDEBAR_MAX_WIDTH = 360;
+
+export function clampSidebarWidth(width: number): number {
+  if (!Number.isFinite(width)) return SIDEBAR_DEFAULT_WIDTH;
+  return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
+}
+
+export function readStoredSidebarWidth(): number {
+  try {
+    const raw = localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY);
+    if (!raw) return SIDEBAR_DEFAULT_WIDTH;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed < SIDEBAR_MIN_WIDTH || parsed > SIDEBAR_MAX_WIDTH) {
+      return SIDEBAR_DEFAULT_WIDTH;
+    }
+    return Math.round(parsed);
+  } catch {
+    return SIDEBAR_DEFAULT_WIDTH;
+  }
+}
 
 const QUICK_ADD_ITEMS = [
   {
@@ -232,6 +283,20 @@ const QUICK_ADD_ITEMS = [
     sub: 'Search, natural language or scan',
     to: '/fitness/tracker?quick=log-food',
     icon: '📒',
+  },
+  {
+    id: 'upload-report',
+    label: 'Upload Health Report',
+    sub: 'Lab PDF or image report analysis',
+    to: '/health/reports',
+    icon: '🧪',
+  },
+  {
+    id: 'find-food-nearby',
+    label: 'Find Food Nearby',
+    sub: 'Dish-first nearby restaurant discovery',
+    to: '/food-nearby',
+    icon: '📍',
   },
   {
     id: 'add-water',
@@ -299,6 +364,8 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
   const quickAddRef = useRef<HTMLDivElement | null>(null);
+  const sidebarAsideRef = useRef<HTMLElement | null>(null);
+  const mainWorkspaceRef = useRef<HTMLDivElement | null>(null);
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
     try {
@@ -307,6 +374,73 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
       return false;
     }
   });
+
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => readStoredSidebarWidth());
+  const [isResizingSidebar, setIsResizingSidebar] = useState(false);
+
+  const applyAndSaveSidebarWidth = useCallback((nextWidth: number) => {
+    const clamped = clampSidebarWidth(nextWidth);
+    setSidebarWidth(clamped);
+    try {
+      localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(clamped));
+    } catch {
+      // ignore storage errors
+    }
+    try {
+      window.dispatchEvent(new Event('resize'));
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const startSidebarResize = useCallback(
+    (startX: number) => {
+      if (sidebarCollapsed) return;
+      const initialWidth = sidebarAsideRef.current?.getBoundingClientRect().width || sidebarWidth;
+      const sidebarLeft = sidebarAsideRef.current?.getBoundingClientRect().left ?? 0;
+
+      setIsResizingSidebar(true);
+      const prevCursor = document.body.style.cursor;
+      const prevUserSelect = document.body.style.userSelect;
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+
+      const computeFromClientX = (clientX: number) => {
+        const delta = clientX - startX;
+        const candidate =
+          sidebarLeft === 0 && initialWidth > 0 ? initialWidth + delta : clientX - sidebarLeft;
+        applyAndSaveSidebarWidth(candidate);
+      };
+
+      const handleMouseMove = (ev: MouseEvent) => {
+        ev.preventDefault();
+        computeFromClientX(ev.clientX);
+      };
+
+      const handlePointerMove = (ev: PointerEvent) => {
+        ev.preventDefault();
+        computeFromClientX(ev.clientX);
+      };
+
+      const stopResize = () => {
+        setIsResizingSidebar(false);
+        document.body.style.cursor = prevCursor;
+        document.body.style.userSelect = prevUserSelect;
+        window.removeEventListener('mousemove', handleMouseMove);
+        window.removeEventListener('mouseup', stopResize);
+        window.removeEventListener('pointermove', handlePointerMove);
+        window.removeEventListener('pointerup', stopResize);
+        window.removeEventListener('pointercancel', stopResize);
+      };
+
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', stopResize);
+      window.addEventListener('pointermove', handlePointerMove);
+      window.addEventListener('pointerup', stopResize);
+      window.addEventListener('pointercancel', stopResize);
+    },
+    [applyAndSaveSidebarWidth, sidebarCollapsed, sidebarWidth]
+  );
 
   // Only the active navigation group expands automatically by default
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => {
@@ -337,6 +471,13 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
       } catch {
         // ignore
       }
+      setTimeout(() => {
+        try {
+          window.dispatchEvent(new Event('resize'));
+        } catch {
+          // ignore
+        }
+      }, 50);
       return next;
     });
   };
@@ -381,6 +522,9 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     });
     setQuickAddOpen(false);
     setMobileDrawerOpen(false);
+    if (mainWorkspaceRef.current && typeof mainWorkspaceRef.current.scrollTo === 'function') {
+      mainWorkspaceRef.current.scrollTo({ top: 0, behavior: 'auto' });
+    }
   }, [location.pathname, location.search]);
 
   // Close Quick Add menu on outside click or Escape
@@ -402,8 +546,22 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     };
   }, [quickAddOpen]);
 
+  // Part G.23 — Cursor-Responsive Subtle Light-Green Glow in Main Content Workspace
+  const handleWorkspacePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const el = mainWorkspaceRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const x = Math.round(e.clientX - rect.left);
+    const y = Math.round(e.clientY - rect.top);
+    el.style.setProperty('--cursor-x', `${x}px`);
+    el.style.setProperty('--cursor-y', `${y}px`);
+  };
+
   return (
-    <div className="relative min-h-screen flex flex-col bg-[#f1f6f1] text-[#172b23] pb-16 lg:pb-0 overflow-x-hidden">
+    <div
+      data-testid="gharplate-app-shell"
+      className="relative min-h-screen lg:h-screen flex flex-col bg-[#f1f6f1] text-[#172b23] pb-16 lg:pb-0 overflow-x-hidden lg:overflow-hidden"
+    >
       {/* Subtle Ambient Light-Green Botanical Backdrop Orbs & Curves (Pointer-Events None, Respects Reduced Motion) */}
       <div
         aria-hidden="true"
@@ -432,7 +590,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
       </div>
 
       {/* Top Header — Glossy Botanical Surface, Compact Brand, Unified + Quick Add Menu, Member Switcher */}
-      <header className="sticky top-0 z-40 border-b border-emerald-900/10 bg-white/85 backdrop-blur-xl shadow-[0_4px_20px_-4px_rgba(8,113,83,0.06)]">
+      <header className="sticky top-0 z-40 shrink-0 border-b border-emerald-900/10 bg-white/85 backdrop-blur-xl shadow-[0_4px_20px_-4px_rgba(8,113,83,0.06)]">
         <div className="flex items-center justify-between gap-3 px-4 py-2.5 sm:px-6 lg:px-8">
           {/* Left: Mobile Drawer Button, Desktop Sidebar Toggle & Brand Mark */}
           <div className="flex items-center gap-2.5">
@@ -453,7 +611,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               aria-label={sidebarCollapsed ? 'Expand Left Sidebar' : 'Collapse Left Sidebar'}
               aria-expanded={!sidebarCollapsed}
               title={sidebarCollapsed ? 'Expand navigation sidebar' : 'Collapse navigation sidebar'}
-              className="hidden lg:inline-flex items-center justify-center rounded-xl border border-emerald-900/15 bg-[#e8f2e9]/80 px-2.5 py-1.5 text-xs font-bold text-emerald-950 hover:bg-emerald-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700 transition"
+              className="hidden lg:inline-flex items-center justify-center rounded-xl border border-emerald-900/15 bg-[#064E3B] px-2.5 py-1.5 text-xs font-bold text-[#E8FFF4] hover:bg-[#087A5B] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700 transition"
             >
               {sidebarCollapsed ? '»' : '«'}
             </button>
@@ -569,12 +727,12 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
           </div>
         </div>
 
-        {/* Mobile Slide-Out Navigation Drawer — Short & Expandable */}
+        {/* Mobile Slide-Out Navigation Drawer — Dark-Emerald Theme */}
         {mobileDrawerOpen && (
           <nav
             aria-label="Mobile Navigation Drawer"
             data-testid="mobile-navigation-drawer"
-            className="border-t border-emerald-900/10 bg-white/95 backdrop-blur-xl px-4 py-3 lg:hidden max-h-[80vh] overflow-y-auto space-y-1.5 shadow-lg"
+            className="border-t border-emerald-300/20 bg-[#064E3B] text-[#E8FFF4] px-4 py-3 lg:hidden max-h-[80vh] overflow-y-auto space-y-1.5 shadow-xl"
           >
             {NAV_GROUPS.map((group) => {
               const isExpanded = expandedGroups[group.id] ?? false;
@@ -585,7 +743,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               return (
                 <div
                   key={`mobile-group-${group.id}`}
-                  className="rounded-xl border border-emerald-900/10 bg-[#f1f6f1]/70 p-1.5"
+                  className="rounded-xl border border-emerald-200/15 bg-[#075B45]/85 p-1.5"
                 >
                   <button
                     type="button"
@@ -595,7 +753,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                         : toggleGroupExpanded(group.id)
                     }
                     className={`w-full flex items-center justify-between px-2.5 py-1.5 text-xs font-bold rounded-lg ${
-                      hasActiveChild ? 'text-[#087153]' : 'text-[#172b23]'
+                      hasActiveChild ? 'text-emerald-200' : 'text-[#E8FFF4]'
                     }`}
                   >
                     <span className="flex items-center gap-2">
@@ -603,7 +761,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                       <span>{group.label}</span>
                     </span>
                     {group.items.length > 1 && (
-                      <span className="text-[10px] text-stone-400">
+                      <span className="text-[10px] text-[#A7D9C0]">
                         {isExpanded ? '▾' : '▸'}
                       </span>
                     )}
@@ -621,8 +779,8 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                             onClick={() => setMobileDrawerOpen(false)}
                             className={`flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs font-semibold ${
                               active
-                                ? 'bg-[#087153] text-white'
-                                : 'text-[#172b23] hover:bg-[#e8f2e9]'
+                                ? 'gp-sidebar-item-active'
+                                : 'gp-sidebar-item-idle'
                             }`}
                           >
                             <span className="text-sm">{item.icon}</span>
@@ -636,7 +794,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               );
             })}
 
-            <div className="pt-1 border-t border-emerald-900/15">
+            <div className="pt-1 border-t border-emerald-200/15">
               <button
                 type="button"
                 data-testid="mobile-sidebar-ask-gharplate-btn"
@@ -659,128 +817,143 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
         )}
       </header>
 
-      {/* Desktop Persistent Left Sidebar + Full-Width Main Content Workspace */}
-      <div className="relative z-10 flex flex-1 min-w-0">
+      {/* Desktop Fixed Dark-Emerald Left Sidebar + Independent Scrollable Main Content Workspace */}
+      <div className="relative z-10 flex flex-1 min-w-0 min-h-0 lg:overflow-hidden">
         <aside
+          ref={sidebarAsideRef}
           aria-label="Primary Sidebar Navigation"
           data-testid="desktop-left-sidebar"
-          className={`gp-sidebar-surface hidden lg:flex flex-col justify-between shrink-0 transition-all duration-200 motion-reduce:transition-none ${
-            sidebarCollapsed ? 'w-16' : 'w-60'
-          }`}
+          style={
+            sidebarCollapsed
+              ? undefined
+              : {
+                  width: `${sidebarWidth}px`,
+                  minWidth: `${sidebarWidth}px`,
+                  maxWidth: `${sidebarWidth}px`,
+                }
+          }
+          className={`gp-sidebar-surface relative hidden lg:flex flex-col justify-between shrink-0 lg:h-full lg:overflow-hidden ${
+            isResizingSidebar
+              ? ''
+              : 'transition-[width] duration-200 motion-reduce:transition-none'
+          } ${sidebarCollapsed ? 'w-16' : 'w-60'}`}
         >
-          <div className="sticky top-[57px] max-h-[calc(100vh-57px)] flex flex-col justify-between overflow-y-auto px-3 py-4 gap-4">
-            <div className="space-y-2">
-            {NAV_GROUPS.map((group) => {
-              const isExpanded = expandedGroups[group.id] ?? false;
-              const hasActiveChild = group.items.some((item) =>
-                isNavItemActive(item, location.pathname)
-              );
+          <div
+            data-testid="sidebar-scroll-container"
+            className="h-full max-h-full flex flex-col justify-between overflow-y-auto overflow-x-hidden px-3 py-4 gap-4"
+          >
+            <div className="space-y-2.5">
+              {NAV_GROUPS.map((group) => {
+                const isExpanded = expandedGroups[group.id] ?? false;
+                const hasActiveChild = group.items.some((item) =>
+                  isNavItemActive(item, location.pathname)
+                );
 
-              if (sidebarCollapsed) {
+                if (sidebarCollapsed) {
+                  return (
+                    <div
+                      key={group.id}
+                      data-testid={`sidebar-group-${group.id}`}
+                      className="flex justify-center"
+                    >
+                      <button
+                        type="button"
+                        data-testid={`nav-hub-${group.id}`}
+                        onClick={() => navigate(group.items[0].to)}
+                        title={`${group.label}: ${group.items.map((i) => i.label).join(', ')}`}
+                        aria-label={group.label}
+                        className={`flex h-10 w-10 items-center justify-center rounded-xl text-base transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 ${
+                          hasActiveChild
+                            ? 'bg-[#087A5B] text-white shadow-sm ring-1 ring-emerald-300/40'
+                            : 'text-[#A7D9C0] hover:bg-emerald-400/15 hover:text-white'
+                        }`}
+                      >
+                        <span aria-hidden="true">{group.icon}</span>
+                      </button>
+                    </div>
+                  );
+                }
+
                 return (
                   <div
                     key={group.id}
                     data-testid={`sidebar-group-${group.id}`}
-                    className="flex justify-center"
+                    className="space-y-1 rounded-xl bg-[#075B45]/55 p-1.5 border border-emerald-200/10"
                   >
-                    <button
-                      type="button"
-                      data-testid={`nav-hub-${group.id}`}
-                      onClick={() => navigate(group.items[0].to)}
-                      title={`${group.label}: ${group.items.map((i) => i.label).join(', ')}`}
-                      aria-label={group.label}
-                      className={`flex h-10 w-10 items-center justify-center rounded-xl text-base transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700 ${
-                        hasActiveChild
-                          ? 'bg-[#087153] text-white shadow-xs'
-                          : 'text-[#566960] hover:bg-[#e8f2e9] hover:text-[#172b23]'
-                      }`}
-                    >
-                      <span aria-hidden="true">{group.icon}</span>
-                    </button>
-                  </div>
-                );
-              }
-
-              return (
-                <div
-                  key={group.id}
-                  data-testid={`sidebar-group-${group.id}`}
-                  className="space-y-0.5"
-                >
-                  <div className="flex items-center justify-between px-2 py-1">
-                    <button
-                      type="button"
-                      data-testid={`nav-hub-${group.id}`}
-                      onClick={() =>
-                        group.items.length === 1
-                          ? navigate(group.items[0].to)
-                          : toggleGroupExpanded(group.id)
-                      }
-                      className={`flex items-center gap-2 text-[11px] font-extrabold uppercase tracking-wider transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700 rounded-md ${
-                        hasActiveChild
-                          ? 'text-[#087153]'
-                          : 'text-[#566960] hover:text-[#172b23]'
-                      }`}
-                    >
-                      <span className="text-sm" aria-hidden="true">
-                        {group.icon}
-                      </span>
-                      <span>{group.label}</span>
-                    </button>
-                    {group.items.length > 1 && (
+                    <div className="flex items-center justify-between px-2 py-1">
                       <button
                         type="button"
-                        data-testid={`sidebar-group-toggle-${group.id}`}
-                        onClick={() => toggleGroupExpanded(group.id)}
-                        aria-expanded={isExpanded}
-                        aria-label={`Toggle ${group.label} group`}
-                        className="rounded-md px-1.5 py-0.5 text-[10px] font-bold text-[#566960] hover:bg-[#e8f2e9] hover:text-[#172b23]"
+                        data-testid={`nav-hub-${group.id}`}
+                        onClick={() =>
+                          group.items.length === 1
+                            ? navigate(group.items[0].to)
+                            : toggleGroupExpanded(group.id)
+                        }
+                        className={`flex items-center gap-2 text-[11px] font-extrabold uppercase tracking-wider transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 rounded-md ${
+                          hasActiveChild
+                            ? 'text-emerald-200'
+                            : 'text-[#A7D9C0] hover:text-white'
+                        }`}
                       >
-                        {isExpanded ? '▾' : '▸'}
+                        <span className="text-sm" aria-hidden="true">
+                          {group.icon}
+                        </span>
+                        <span>{group.label}</span>
                       </button>
+                      {group.items.length > 1 && (
+                        <button
+                          type="button"
+                          data-testid={`sidebar-group-toggle-${group.id}`}
+                          onClick={() => toggleGroupExpanded(group.id)}
+                          aria-expanded={isExpanded}
+                          aria-label={`Toggle ${group.label} group`}
+                          className="rounded-md px-1.5 py-0.5 text-[10px] font-bold text-[#A7D9C0] hover:bg-emerald-400/15 hover:text-white"
+                        >
+                          {isExpanded ? '▾' : '▸'}
+                        </button>
+                      )}
+                    </div>
+
+                    {isExpanded && (
+                      <div className="space-y-0.5 pl-1">
+                        {group.items.map((item) => {
+                          const active = isNavItemActive(item, location.pathname);
+                          return (
+                            <NavLink
+                              key={`${group.id}-${item.to}`}
+                              to={item.to}
+                              end={Boolean(item.exact)}
+                              title={item.desc}
+                              className={() =>
+                                `group flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 ${
+                                  active
+                                    ? 'gp-sidebar-item-active'
+                                    : 'gp-sidebar-item-idle'
+                                }`
+                              }
+                            >
+                              <span className="text-sm shrink-0" aria-hidden="true">
+                                {item.icon}
+                              </span>
+                              <span className="truncate">{item.label}</span>
+                            </NavLink>
+                          );
+                        })}
+                      </div>
                     )}
                   </div>
-
-                  {isExpanded && (
-                    <div className="space-y-0.5 pl-1">
-                      {group.items.map((item) => {
-                        const active = isNavItemActive(item, location.pathname);
-                        return (
-                          <NavLink
-                            key={`${group.id}-${item.to}`}
-                            to={item.to}
-                            end={Boolean(item.exact)}
-                            title={item.desc}
-                            className={() =>
-                              `group flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700 ${
-                                active
-                                  ? 'bg-[#087153] text-white shadow-xs'
-                                  : 'text-[#172b23] hover:bg-[#e8f2e9]/90 hover:text-[#064d3c]'
-                              }`
-                            }
-                          >
-                            <span className="text-sm shrink-0" aria-hidden="true">
-                              {item.icon}
-                            </span>
-                            <span className="truncate">{item.label}</span>
-                          </NavLink>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+                );
+              })}
             </div>
 
             {/* Dedicated Ask GharPlate AI Assistant Entry in Main Left Sidebar */}
-            <div className="pt-3 border-t border-emerald-900/15">
+            <div className="pt-3 border-t border-emerald-200/20">
               {sidebarCollapsed ? (
                 <button
                   type="button"
                   data-testid="sidebar-ask-gharplate-btn"
                   onClick={() => openAssistantWorkspace()}
-                  title="Ask GharPlate AI — Open contextual food, recipe & anatomy assistant"
+                  title="Ask GharPlate AI — Open contextual food, report, symptom & restaurant assistant"
                   aria-label="Ask GharPlate AI"
                   className="gp-sidebar-ai-btn mx-auto flex h-10 w-10 items-center justify-center rounded-xl text-base text-white shadow-sm"
                 >
@@ -791,7 +964,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                   type="button"
                   data-testid="sidebar-ask-gharplate-btn"
                   onClick={() => openAssistantWorkspace()}
-                  title="Open Ask GharPlate AI Assistant with your current food, photo, recipe, or anatomy context"
+                  title="Open Ask GharPlate AI Assistant with your current food, health report, symptom, or nearby restaurant context"
                   className="gp-sidebar-ai-btn w-full flex flex-col gap-1 rounded-2xl p-3 text-left text-white shadow-md"
                 >
                   <div className="flex items-center justify-between gap-2">
@@ -803,19 +976,73 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                       AI Chat
                     </span>
                   </div>
-                  <p className="text-[11px] font-medium text-emerald-100/95 leading-snug">
+                  <p className="text-[11px] font-medium text-emerald-50/95 leading-snug">
                     {publishedAssistantCtx.selected_entity?.name
                       ? `Active: ${publishedAssistantCtx.selected_entity.name}`
-                      : 'Ask about any analysed food photo, dish, or nutrient'}
+                      : 'Ask about any food, lab report, symptom, or restaurant'}
                   </p>
                 </button>
               )}
             </div>
           </div>
+
+          {/* Subtle Right-Edge Horizontal Resize Handle (Desktop Only when Expanded) */}
+          {!sidebarCollapsed && (
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize left navigation sidebar"
+              aria-valuemin={SIDEBAR_MIN_WIDTH}
+              aria-valuemax={SIDEBAR_MAX_WIDTH}
+              aria-valuenow={sidebarWidth}
+              tabIndex={0}
+              data-testid="sidebar-resize-handle"
+              title="Drag to resize sidebar width"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                startSidebarResize(e.clientX);
+              }}
+              onPointerDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                startSidebarResize(e.clientX);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'ArrowRight') {
+                  e.preventDefault();
+                  applyAndSaveSidebarWidth(sidebarWidth + 12);
+                } else if (e.key === 'ArrowLeft') {
+                  e.preventDefault();
+                  applyAndSaveSidebarWidth(sidebarWidth - 12);
+                } else if (e.key === 'Home') {
+                  e.preventDefault();
+                  applyAndSaveSidebarWidth(SIDEBAR_MIN_WIDTH);
+                } else if (e.key === 'End') {
+                  e.preventDefault();
+                  applyAndSaveSidebarWidth(SIDEBAR_MAX_WIDTH);
+                }
+              }}
+              className="group/resize absolute top-0 right-0 bottom-0 z-30 w-2 cursor-col-resize select-none touch-none focus-visible:outline-none"
+            >
+              <div
+                className={`ml-auto h-full w-[2.5px] transition-colors duration-150 ${
+                  isResizingSidebar
+                    ? 'bg-emerald-300/90 shadow-[0_0_8px_rgba(52,211,153,0.65)]'
+                    : 'bg-transparent group-hover/resize:bg-emerald-300/60 group-focus-visible/resize:bg-emerald-300/80'
+                }`}
+              />
+            </div>
+          )}
         </aside>
 
-        {/* Main Content Area — Full-Width Max-W-7XL Container */}
-        <div className="gp-main-workspace flex-1 min-w-0 flex flex-col justify-between">
+        {/* Main Content Area — Independent Vertical Scroll Container with Cursor-Responsive Glow */}
+        <div
+          ref={mainWorkspaceRef}
+          data-testid="main-content-workspace"
+          onPointerMove={handleWorkspacePointerMove}
+          className="gp-main-workspace flex-1 min-w-0 min-h-0 lg:h-full lg:overflow-y-auto overflow-x-hidden flex flex-col justify-between"
+        >
           <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6 lg:px-8">
             {children}
             <div className="mt-10">
@@ -856,9 +1083,9 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
         {[
           { label: 'Home', to: '/', icon: '🏠' },
           { label: 'Explore', to: '/foods', icon: '🥗' },
-          { label: 'Anatomy', to: '/explore/body-nutrition', icon: '🧬' },
+          { label: 'Reports', to: '/health/reports', icon: '🧪' },
+          { label: 'Nearby', to: '/food-nearby', icon: '📍' },
           { label: 'Tracker', to: '/fitness/tracker', icon: '📒' },
-          { label: 'Habits', to: '/fitness/goals', icon: '🎯' },
         ].map((item) => (
           <NavLink
             key={item.to}

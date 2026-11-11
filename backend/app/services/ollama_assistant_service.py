@@ -162,6 +162,12 @@ ALLOWLISTED_TOOL_NAMES = [
     "update_habit_schedule",
     "get_daily_activity_timeline",
     "parse_food_log_message",
+    # Health Report Analysis, AI Symptom Review & Smart Food Discovery Tools
+    "get_health_reports",
+    "get_lab_measurement_trends",
+    "evaluate_symptom_guidance",
+    "search_nearby_restaurants_for_dish",
+    "prepare_restaurant_order_preview",
 ]
 
 OLLAMA_TOOLS_SCHEMA: list[dict[str, Any]] = [
@@ -1974,6 +1980,126 @@ def execute_allowlisted_tool(
             )
             return {"nutrient_code": nut_code, "foods": matched_foods}, trace, sources
 
+        # ==========================================
+        # HEALTH REPORT, SYMPTOM REVIEW & SMART FOOD DISCOVERY TOOLS
+        # ==========================================
+        if tool_name == "get_health_reports":
+            from app.services.health_report_symptom_service import list_health_reports
+
+            hh, member = _resolve_tool_hh_and_member()
+            if not hh or not member:
+                raise ValueError("Active household member required for health reports.")
+            reps = list_health_reports(db, hh, member)
+            trace = AssistantToolExecutionTrace(
+                tool_name=tool_name,
+                arguments={"member_id": member.id},
+                status="success",
+                summary=f"Retrieved {len(reps)} confirmed laboratory health report(s) for '{member.display_name}'.",
+                source_type="local_database",
+            )
+            return {"reports": reps}, trace, sources
+
+        if tool_name == "get_lab_measurement_trends":
+            from app.services.health_report_symptom_service import (
+                get_health_report_trends,
+            )
+
+            hh, member = _resolve_tool_hh_and_member()
+            if not hh or not member:
+                raise ValueError("Active household member required for lab trends.")
+            c_code = arguments.get("canonical_code")
+            trends = get_health_report_trends(db, hh, member, canonical_code=c_code)
+            trace = AssistantToolExecutionTrace(
+                tool_name=tool_name,
+                arguments={"member_id": member.id, "canonical_code": c_code},
+                status="success",
+                summary=f"Retrieved {trends['total_series']} unit-consistent laboratory trend series for '{member.display_name}'.",
+                source_type="local_database",
+            )
+            return trends, trace, sources
+
+        if tool_name == "evaluate_symptom_guidance":
+            from app.services.health_report_symptom_service import (
+                evaluate_symptom_review,
+            )
+
+            hh, member = _resolve_tool_hh_and_member()
+            if not hh or not member:
+                raise ValueError("Active household member required for symptom review.")
+            sym_res = evaluate_symptom_review(
+                db,
+                hh,
+                member,
+                {
+                    "symptom_description": arguments.get("symptom_description")
+                    or arguments.get("symptoms")
+                    or "",
+                    "onset": arguments.get("onset"),
+                    "duration": arguments.get("duration"),
+                    "severity": arguments.get("severity"),
+                    "include_health_records_consent": True,
+                },
+            )
+            trace = AssistantToolExecutionTrace(
+                tool_name=tool_name,
+                arguments={"red_flag_detected": sym_res["red_flag_detected"]},
+                status="success",
+                summary=(
+                    "Evaluated symptom review: RED-FLAG EMERGENCY DETECTED."
+                    if sym_res["red_flag_detected"]
+                    else f"Evaluated symptom review ({sym_res['urgency_level']})."
+                ),
+                source_type="guidance_engine",
+            )
+            return sym_res, trace, sources
+
+        if tool_name == "search_nearby_restaurants_for_dish":
+            from app.services.food_discovery_service import (
+                search_nearby_food_and_restaurants,
+            )
+
+            hh, member = _resolve_tool_hh_and_member()
+            if not hh or not member:
+                raise ValueError("Active household member required for food discovery.")
+            disc_res = search_nearby_food_and_restaurants(db, hh, member, arguments)
+            trace = AssistantToolExecutionTrace(
+                tool_name=tool_name,
+                arguments={
+                    "dish_query": disc_res["dish_query"],
+                    "city": disc_res["location_context"]["city"],
+                    "radius_km": disc_res["location_context"]["radius_km"],
+                },
+                status="success",
+                summary=(
+                    f"Found {disc_res['total_results']} nearby restaurant(s) for '{disc_res['dish_query']}' "
+                    f"within {disc_res['location_context']['radius_km']} km of {disc_res['location_context']['city']}."
+                ),
+                source_type="local_database",
+            )
+            return disc_res, trace, sources
+
+        if tool_name == "prepare_restaurant_order_preview":
+            from app.services.food_discovery_service import (
+                prepare_swiggy_mcp_action_preview,
+            )
+
+            hh, member = _resolve_tool_hh_and_member()
+            if not hh or not member:
+                raise ValueError("Active household member required for order preview.")
+            prev_res = prepare_swiggy_mcp_action_preview(db, hh, member, arguments)
+            trace = AssistantToolExecutionTrace(
+                tool_name=tool_name,
+                arguments={
+                    "restaurant_name": prev_res["restaurant_name"],
+                    "action_type": prev_res["action_type"],
+                    "user_confirmed": prev_res["user_confirmed"],
+                },
+                status="success",
+                summary=prev_res["status_message"],
+                source_type="external_provider",
+            )
+            return prev_res, trace, sources
+
     except Exception as exc:
         trace = AssistantToolExecutionTrace(
             tool_name=tool_name,
@@ -2850,6 +2976,40 @@ def _orchestrate_deterministic_tool_calls(
     if "mess" in msg_l or "canteen" in msg_l or "hostel" in msg_l:
         collected_data["mess_menus"] = _run("get_mess_menu", base_ctx_args)
 
+    # 4B. Health Report Analysis, AI Symptom Review & Smart Nearby Food Discovery Intent Routing
+    if ctx and getattr(ctx, "health_report_context", None) and isinstance(ctx.health_report_context, dict):
+        collected_data["active_health_report_context"] = ctx.health_report_context
+    if ctx and getattr(ctx, "symptom_review_context", None) and isinstance(ctx.symptom_review_context, dict):
+        collected_data["active_symptom_review_context"] = ctx.symptom_review_context
+    if ctx and getattr(ctx, "food_discovery_context", None) and isinstance(ctx.food_discovery_context, dict):
+        collected_data["active_food_discovery_context"] = ctx.food_discovery_context
+
+    if any(kw in msg_l for kw in ("lab report", "health report", "blood test", "hba1c", "haemoglobin", "hemoglobin", "ferritin", "vitamin b12", "vitamin d", "cholesterol", "triglyceride", "creatinine", "egfr", "tsh", "sgpt", "sgot", "cbc")):
+        collected_data["health_reports"] = _run("get_health_reports", base_ctx_args)
+        collected_data["lab_trends"] = _run("get_lab_measurement_trends", base_ctx_args)
+
+    if any(kw in msg_l for kw in ("symptom", "feeling tired", "fatigue", "dizziness", "lightheaded", "acidity", "bloating", "constipation", "muscle cramps", "sore throat", "chest pain", "shortness of breath", "can't breathe", "fainting")):
+        collected_data["symptom_guidance"] = _run(
+            "evaluate_symptom_guidance",
+            {**base_ctx_args, "symptom_description": msg},
+        )
+
+    if any(kw in msg_l for kw in ("near me", "nearby", "restaurant", "where can i get", "where to eat", "order ", "swiggy", "zomato", "within 5 km", "within 2 km", "within 10 km", "in mysuru", "in bengaluru")):
+        dish_q = (
+            (collected_data.get("food_details") or {}).get("name_en")
+            or (ctx.food_discovery_context.get("dish_query") if (ctx and isinstance(getattr(ctx, "food_discovery_context", None), dict)) else None)
+            or "Masala Dosa"
+        )
+        for dish_cand in ("masala dosa", "dosa", "idli", "ragi mudde", "palak paneer", "paneer", "biryani", "chicken", "khichdi", "chapati", "chole", "fish"):
+            if dish_cand in msg_l:
+                dish_q = dish_cand.title()
+                break
+        city_q = "Bengaluru" if ("bengaluru" in msg_l or "bangalore" in msg_l) else "Mysuru"
+        collected_data["nearby_food_discovery"] = _run(
+            "search_nearby_restaurants_for_dish",
+            {**base_ctx_args, "dish_query": dish_q, "city": city_q, "radius_km": 5.0},
+        )
+
     # 5. If mode is explicitly 'online_search', also invoke external web search adapter
     if mode == "online_search":
         web_q = (
@@ -3336,6 +3496,147 @@ def _synthesize_grounded_response(
                 f"- **Natural-Language Food Log Preview ({pf.get('meal_category')} at {pf.get('logged_time')} — awaiting confirmation):** "
                 + ", ".join(f"**{x['food_name']}** ({x['quantity']} × {x['unit_name']}, {x['energy_kcal']} kcal)" for x in p_items)
             )
+
+    # 6. Health Report Intelligence & Lab-to-Plate Synthesis
+    hr_ctx = collected_data.get("active_health_report_context")
+    hr_list = (collected_data.get("health_reports") or {}).get("reports") or []
+    target_rep = hr_ctx if isinstance(hr_ctx, dict) and hr_ctx.get("measurements") else (hr_list[0] if hr_list else None)
+    if target_rep:
+        lines.append(
+            f"**Confirmed Blood Report Analysis ({target_rep.get('report_title') or 'Lab Report'} — {target_rep.get('report_date') or 'Recent'}):** "
+            f"Reviewed **{target_rep.get('measurement_count') or len(target_rep.get('measurements') or [])}** measurement(s)."
+        )
+        ms = target_rep.get("measurements") or []
+        below_list = [
+            m for m in ms if m.get("range_status") == "below_reference" or m.get("status_flag") == "low"
+        ]
+        above_list = [
+            m for m in ms if m.get("range_status") == "above_reference" or m.get("status_flag") == "high"
+        ]
+        review_list = [
+            m
+            for m in ms
+            if m.get("range_status") in ("requires_manual_review", "lab_flagged_abnormal")
+            or m.get("status_flag") in ("requires_manual_review", "lab_flagged_abnormal")
+        ]
+
+        if below_list:
+            b_strs = [
+                f"**{m.get('test_name')}**: {m.get('measured_value') if m.get('measured_value') is not None else m.get('result_value')} {m.get('unit') or ''} "
+                f"(Below reference interval: {m.get('reference_range_text') or m.get('reference_text') or 'See lab report'})"
+                for m in below_list
+            ]
+            lines.append("- **Results Below Reference Interval:**\n  - " + "\n  - ".join(b_strs))
+        elif "below" in msg_l:
+            lines.append("- **Results Below Reference Interval:** None of the confirmed results in this report are below the printed reference interval.")
+
+        if above_list:
+            a_strs = [
+                f"**{m.get('test_name')}**: {m.get('measured_value') if m.get('measured_value') is not None else m.get('result_value')} {m.get('unit') or ''} "
+                f"(Above reference interval: {m.get('reference_range_text') or m.get('reference_text') or 'See lab report'})"
+                for m in above_list
+            ]
+            lines.append("- **Results Above Reference Interval:**\n  - " + "\n  - ".join(a_strs))
+        elif "above" in msg_l:
+            lines.append("- **Results Above Reference Interval:** None of the confirmed results in this report are above the printed reference interval.")
+
+        if review_list:
+            r_strs = [
+                f"**{m.get('test_name')}**: {m.get('measured_value') if m.get('measured_value') is not None else m.get('result_value')} {m.get('unit') or ''} (*{m.get('status_label') or 'Requires manual review'}*)"
+                for m in review_list
+            ]
+            lines.append("- **Results Flagged for Manual Review:**\n  - " + "\n  - ".join(r_strs))
+
+        # What each flagged test measures
+        if any(kw in msg_l for kw in ("what is this test", "measuring", "what does", "explain", "mean")):
+            explained = (below_list + above_list)[:5] or ms[:4]
+            exp_strs = [
+                f"**{m.get('test_name')}**: {m.get('what_it_measures') or (m.get('interpretation') or {}).get('what_it_measures') or m.get('educational_note') or 'Clinical laboratory measurement.'}"
+                for m in explained
+            ]
+            if exp_strs:
+                lines.append("- **What These Tests Measure:**\n  - " + "\n  - ".join(exp_strs))
+
+        # Possible nutritional concerns
+        concerns = (
+            target_rep.get("possible_nutritional_concerns")
+            or (target_rep.get("summary") or {}).get("possible_nutritional_concerns")
+            or []
+        )
+        if concerns:
+            c_strs = [f"**{c.get('title')}**: {c.get('explanation')}" for c in concerns[:5]]
+            lines.append("- **Possible Nutritional Concerns (Educational & Non-Diagnostic):**\n  - " + "\n  - ".join(c_strs))
+
+        # Lab-to-Plate foods
+        l2p = target_rep.get("lab_to_plate") or {}
+        if l2p.get("kidney_safety_triggered"):
+            lines.append(f"- ⚠️ **Kidney Safety Guardrail:** {l2p.get('kidney_safety_notice')}")
+        for card in (l2p.get("marker_food_cards") or [])[:4]:
+            rec_foods = card.get("recommended_foods") or []
+            f_details = [
+                f"**{f['name_en']}** ({f.get('short_reason') or f.get('standard_serving_name') or 'Verified in IFCT 2017'})"
+                for f in rec_foods[:4]
+            ]
+            lines.append(
+                f"- **GharPlate Foods for {card['test_name']} ({card['focus_nutrient_label']}):** {card['educational_explanation']}"
+                + (f" Recommended options: {', '.join(f_details)}." if f_details else "")
+            )
+
+        # Questions to ask the doctor
+        doc_qs = (target_rep.get("summary") or {}).get("priority_doctor_questions") or []
+        if not doc_qs:
+            for m in below_list + above_list:
+                for q in ((m.get("interpretation") or {}).get("doctor_questions") or []):
+                    if q not in doc_qs:
+                        doc_qs.append(q)
+        if doc_qs:
+            lines.append("- **Questions to Ask Your Doctor:**\n  - " + "\n  - ".join(doc_qs[:4]))
+
+    # 7. AI Symptom Review & Emergency Safety Synthesis
+    sym_data = collected_data.get("symptom_guidance") or collected_data.get("active_symptom_review_context")
+    if isinstance(sym_data, dict) and sym_data:
+        if sym_data.get("red_flag_detected"):
+            banner = sym_data.get("emergency_banner") or {}
+            lines.append(
+                f"🚨 **{banner.get('headline') or 'SEEK IMMEDIATE EMERGENCY MEDICAL CARE (CALL 112 / 108)'}:** "
+                f"{banner.get('action_instruction') or 'Go to the nearest hospital emergency department immediately.'}"
+            )
+        else:
+            lines.append(
+                f"**AI Symptom Review & Care Guidance (*{sym_data.get('urgency_label') or 'Educational Review'}*):** "
+                f"{sym_data.get('educational_overview') or ''}"
+            )
+            if sym_data.get("follow_up_questions"):
+                lines.append(
+                    "- **Helpful Clarifying Questions:** " + " • ".join(sym_data["follow_up_questions"][:2])
+                )
+            meals = sym_data.get("supportive_indian_meals_and_hydration") or []
+            if meals:
+                lines.append(
+                    "- **Supportive Indian Hydration & Gentle Meal Ideas:** "
+                    + ", ".join(f"**{m['name_en']}** (*{m['why_supportive']}*)" for m in meals[:4])
+                )
+            lines.append(f"- *{sym_data.get('medical_disclaimer') or ASSISTANT_MEDICAL_DISCLAIMER}*")
+
+    # 8. Smart Nearby Food Discovery Synthesis
+    disc_data = collected_data.get("nearby_food_discovery") or collected_data.get("active_food_discovery_context")
+    if isinstance(disc_data, dict) and disc_data.get("restaurants") is not None:
+        d_q = disc_data.get("dish_query") or "Indian Meal"
+        loc_c = disc_data.get("location_context") or {}
+        rests = disc_data.get("restaurants") or []
+        lines.append(
+            f"**Nearby Food Discovery for '{d_q}' ({loc_c.get('city', 'Mysuru')} within {loc_c.get('radius_km', 5)} km — {len(rests)} restaurant(s)):**"
+        )
+        for r in rests[:3]:
+            md = r.get("matched_dish") or {}
+            lines.append(
+                f"- **{r['name']}** ({r.get('area') or r['city']}, **{r['distance_km']} km** • {r['dietary_badge']} • {r['price_band_inr']}): "
+                f"*{md.get('dish_name')}* ({md.get('match_badge')}) — "
+                f"[Open in Google Maps]({r['maps_links']['google_maps_place_url']}) • "
+                f"[Swiggy]({r['provider_integrations']['swiggy']['search_url']}) • "
+                f"[Zomato]({r['provider_integrations']['zomato']['search_url']})"
+            )
+        lines.append(f"- **Allergy & Cross-Contact Notice:** *{disc_data.get('member_context', {}).get('allergy_cross_contact_warning', 'Please confirm ingredients and cross-contact risks directly with the restaurant.')}*")
 
     if not lines:
         sr = (collected_data.get("search_results") or {}).get("items") or []

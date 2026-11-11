@@ -1589,3 +1589,203 @@ class BodyRegionFoodLink(Base):
     food: Mapped["FoodItem"] = relationship("FoodItem")
     source: Mapped["DataSource"] = relationship("DataSource")
 
+
+class HealthReport(Base):
+    """
+    User-confirmed medical / laboratory health report metadata.
+    Raw uploaded PDF/image files are processed in memory and NOT persisted unless user explicitly consents.
+    Only user-reviewed and confirmed structured measurements are saved to the database.
+    """
+    __tablename__ = "health_reports"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    household_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("households.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    member_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("household_members.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    report_title: Mapped[str] = mapped_column(
+        String(200), default="Laboratory Health Report", nullable=False
+    )
+    laboratory_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    report_date: Mapped[str] = mapped_column(String(20), index=True, nullable=False)  # YYYY-MM-DD
+    specimen_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    source_file_type: Mapped[str] = mapped_column(
+        String(40), default="pdf", nullable=False
+    )  # pdf, image/jpeg, image/png, image/webp, manual_confirmation
+    extraction_engine: Mapped[str] = mapped_column(
+        String(80), default="pdf_text_parser", nullable=False
+    )
+    retain_raw_document_consent: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    user_confirmed: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    confirmed_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+    report_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    summary_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utc_now, onupdate=utc_now, nullable=False
+    )
+
+    measurements: Mapped[list["HealthReportMeasurement"]] = relationship(
+        "HealthReportMeasurement",
+        back_populates="report",
+        cascade="all, delete-orphan",
+        order_by="HealthReportMeasurement.id.asc()",
+    )
+
+
+class HealthReportMeasurement(Base):
+    """
+    Individual user-confirmed laboratory test measurement belonging to a HealthReport.
+    Preserves the exact printed value, unit, and printed reference interval without fabricating missing ranges.
+    """
+    __tablename__ = "health_report_measurements"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    report_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("health_reports.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    household_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("households.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    member_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("household_members.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    canonical_code: Mapped[str] = mapped_column(String(80), index=True, nullable=False)
+    panel_category: Mapped[str] = mapped_column(
+        String(80), index=True, nullable=False
+    )  # glucose_hba1c, cbc, lipid_profile, kidney_function, liver_function, thyroid_panel, nutritional_markers, other
+    test_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    result_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    result_text: Mapped[str] = mapped_column(String(120), nullable=False)
+    unit: Mapped[str] = mapped_column(String(60), default="", nullable=False)
+    reference_min: Mapped[float | None] = mapped_column(Float, nullable=True)
+    reference_max: Mapped[float | None] = mapped_column(Float, nullable=True)
+    reference_text: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    printed_flag: Mapped[str | None] = mapped_column(
+        String(40), nullable=True
+    )  # H, L, Normal, High, Low, Borderline, None
+    range_status: Mapped[str] = mapped_column(
+        String(50), default="reference_unavailable", nullable=False
+    )  # below_reference, within_reference, above_reference, reference_unavailable
+    test_date: Mapped[str] = mapped_column(String(20), index=True, nullable=False)
+    specimen_info: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    interpretation_json: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict, nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+
+    report: Mapped["HealthReport"] = relationship(
+        "HealthReport", back_populates="measurements"
+    )
+
+
+class SymptomReviewSession(Base):
+    """
+    Non-diagnostic AI Symptom Review & Care Guidance session for a HouseholdMember.
+    Stores reported symptoms, structured intake answers, red-flag emergency screening status,
+    educational possibilities, warning signs, and cautious hydration/food ideas.
+    """
+    __tablename__ = "symptom_review_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    household_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("households.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    member_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("household_members.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    symptom_description: Mapped[str] = mapped_column(Text, nullable=False)
+    onset: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    duration: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    severity: Mapped[str | None] = mapped_column(
+        String(40), nullable=True
+    )  # mild, moderate, severe
+    pattern_or_trend: Mapped[str | None] = mapped_column(
+        String(80), nullable=True
+    )  # improving, unchanged, worsening
+    associated_symptoms: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    clinician_consulted: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    include_health_records_consent: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False
+    )
+    red_flag_detected: Mapped[bool] = mapped_column(
+        Boolean, default=False, index=True, nullable=False
+    )
+    red_flag_triggers: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    urgency_level: Mapped[str] = mapped_column(
+        String(60), default="routine_clinician_review", nullable=False
+    )  # emergency_care_now, prompt_medical_evaluation, routine_clinician_review, self_care_and_monitor
+    clarifying_questions: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    response_payload_json: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict, nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+
+
+class FoodDiscoveryPreference(Base):
+    """
+    Saved member preferences for Smart Nearby Food Discovery & Restaurant Search.
+    """
+    __tablename__ = "food_discovery_preferences"
+    __table_args__ = (
+        UniqueConstraint("member_id", name="uq_member_food_discovery_preference"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    household_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("households.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    member_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("household_members.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    preferred_cuisines: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    favourite_dishes: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    preferred_radius_km: Mapped[float] = mapped_column(Float, default=5.0, nullable=False)
+    default_city: Mapped[str] = mapped_column(String(120), default="Mysuru", nullable=False)
+    default_area: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    default_pincode: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    budget_preference: Mapped[str] = mapped_column(
+        String(40), default="moderate", nullable=False
+    )  # budget, moderate, premium, any
+    dietary_mode_override: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    saved_restaurants_json: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, default=list, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utc_now, onupdate=utc_now, nullable=False
+    )
+
+
+class RestaurantSearchSession(Base):
+    """
+    Audit & history record of food-first nearby restaurant searches and provider statuses.
+    """
+    __tablename__ = "restaurant_search_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    household_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("households.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    member_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("household_members.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    dish_query: Mapped[str] = mapped_column(String(200), index=True, nullable=False)
+    matched_food_slug: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    city: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    area: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    radius_km: Mapped[float] = mapped_column(Float, default=5.0, nullable=False)
+    dietary_filter: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    provider_used: Mapped[str] = mapped_column(
+        String(80), default="local_verified_plus_maps_fallback", nullable=False
+    )
+    result_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)
+
+

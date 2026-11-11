@@ -19,6 +19,19 @@
   --border-strong: rgba(8, 113, 83, 0.24);
   --shadow-soft: 0 10px 30px -8px rgba(8, 77, 60, 0.07), 0 4px 12px -2px rgba(23, 43, 35, 0.04);
   --shadow-elevated: 0 20px 44px -12px rgba(6, 77, 60, 0.13), 0 6px 16px -4px rgba(23, 43, 35, 0.05);
+
+  /* Part G — Dark-Emerald Sidebar Visual System */
+  --sidebar-bg: #064E3B;
+  --sidebar-surface: #075B45;
+  --sidebar-active: #087A5B;
+  --sidebar-hover: rgba(52, 211, 153, 0.14);
+  --sidebar-text: #E8FFF4;
+  --sidebar-muted: #A7D9C0;
+  --sidebar-border: rgba(210, 255, 232, 0.18);
+
+  /* Cursor-Responsive Light-Green Glow Coordinates */
+  --cursor-x: 50%;
+  --cursor-y: 25%;
 }
 
 @layer base {
@@ -81,29 +94,54 @@
     border-color: rgba(8, 113, 83, 0.32);
   }
 
+  /* Part G — Dark-Emerald Left Sidebar Surface & Boundary Separation */
   .gp-sidebar-surface {
-    background: linear-gradient(180deg, rgba(226, 240, 229, 0.96) 0%, rgba(234, 245, 236, 0.94) 55%, rgba(222, 238, 225, 0.97) 100%);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border-right: 1px solid rgba(8, 113, 83, 0.22);
-    box-shadow: 6px 0 28px -10px rgba(6, 77, 60, 0.12);
+    background: linear-gradient(180deg, var(--sidebar-bg) 0%, var(--sidebar-surface) 58%, #053F30 100%);
+    color: var(--sidebar-text);
+    border-right: 1.5px solid var(--sidebar-border);
+    box-shadow: 10px 0 32px -8px rgba(4, 47, 36, 0.34), 2px 0 8px 0 rgba(6, 78, 59, 0.18);
   }
 
+  .gp-sidebar-item-active {
+    background-color: var(--sidebar-active);
+    color: #ffffff;
+    border-left: 3px solid #34d399;
+    box-shadow: 0 6px 16px -4px rgba(4, 38, 29, 0.45);
+  }
+
+  .gp-sidebar-item-idle {
+    color: var(--sidebar-text);
+  }
+
+  .gp-sidebar-item-idle:hover {
+    background-color: var(--sidebar-hover);
+    color: #ffffff;
+  }
+
+  /* Main Workspace with Subtle Cursor-Responsive Light-Green Glow */
   .gp-main-workspace {
-    background: linear-gradient(180deg, rgba(246, 250, 246, 0.72) 0%, rgba(241, 246, 241, 0.92) 100%);
-    box-shadow: inset 2px 0 12px -6px rgba(8, 77, 60, 0.06);
+    position: relative;
+    background:
+      radial-gradient(
+        560px circle at var(--cursor-x, 50%) var(--cursor-y, 25%),
+        rgba(52, 211, 153, 0.11),
+        rgba(16, 185, 129, 0.04) 42%,
+        transparent 72%
+      ),
+      linear-gradient(180deg, rgba(246, 250, 246, 0.80) 0%, rgba(241, 246, 241, 0.94) 100%);
+    box-shadow: inset 3px 0 14px -6px rgba(6, 78, 59, 0.10);
   }
 
   .gp-sidebar-ai-btn {
-    background: linear-gradient(135deg, #064d3c 0%, #087153 60%, #0a8764 100%);
-    border: 1px solid rgba(233, 185, 73, 0.38);
+    background: linear-gradient(135deg, #087A5B 0%, #059669 55%, #10b981 100%);
+    border: 1px solid rgba(233, 185, 73, 0.52);
     transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 180ms ease, filter 180ms ease;
   }
 
   .gp-sidebar-ai-btn:hover {
     transform: translateY(-1.5px);
-    box-shadow: 0 12px 24px -6px rgba(6, 77, 60, 0.28);
-    filter: brightness(1.04);
+    box-shadow: 0 12px 24px -6px rgba(4, 35, 27, 0.55);
+    filter: brightness(1.05);
   }
 }
 
@@ -211,6 +249,10 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .gp-main-workspace {
+    background: linear-gradient(180deg, rgba(246, 250, 246, 0.85) 0%, rgba(241, 246, 241, 0.95) 100%) !important;
+  }
+
   *,
   *::before,
   *::after,

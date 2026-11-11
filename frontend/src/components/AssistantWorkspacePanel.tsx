@@ -646,6 +646,25 @@ export const AssistantWorkspacePanel: React.FC = () => {
         `Is ${fName} suitable for someone going to the gym or for breakfast?`,
         `Add this to today's breakfast`,
       ]);
+    } else if (structuredContext.page_type === 'health_report') {
+      setSuggestedFollowups([
+        'Explain my flagged lab markers and what they mean educationally.',
+        'Which vegetarian Indian foods in GharPlate support my report results?',
+        'What questions should I ask my doctor about this report?',
+      ]);
+    } else if (structuredContext.page_type === 'symptom_review') {
+      setSuggestedFollowups([
+        'What gentle Indian hydration and meals are suitable while I feel this way?',
+        'How do my confirmed lab reports or BP/glucose logs relate to these symptoms?',
+        'What warning signs mean I should see a doctor sooner?',
+      ]);
+    } else if (structuredContext.page_type === 'food_discovery') {
+      const dLabel = activeEntity?.name || 'Masala Dosa';
+      setSuggestedFollowups([
+        `Which nearby restaurants serve ${dLabel} within 5 km?`,
+        `How does ${dLabel} fit my daily protein and calorie goals?`,
+        'What should I ask the restaurant about oil, salt, and allergy cross-contact?',
+      ]);
     } else if (activeEntity?.type === 'body_region') {
       const rName = activeEntity.name || 'this body region';
       setSuggestedFollowups([

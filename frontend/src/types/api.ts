@@ -693,6 +693,7 @@ export interface MealSuggestionResponse {
 export interface AssistantSelectedEntity {
   type:
     | 'food'
+    | 'food_image_analysis'
     | 'packaged_product'
     | 'barcode_result'
     | 'recipe'
@@ -702,6 +703,9 @@ export interface AssistantSelectedEntity {
     | 'goal'
     | 'tracker'
     | 'health_measurement'
+    | 'health_report'
+    | 'symptom_review'
+    | 'food_discovery'
     | 'none'
     | string;
   id?: string | null;
@@ -738,6 +742,9 @@ export interface AssistantPageContext {
     | 'fitness_goal'
     | 'daily_tracker'
     | 'health_measurement'
+    | 'health_report'
+    | 'symptom_review'
+    | 'food_discovery'
     | 'general'
     | string
     | null;
@@ -749,6 +756,9 @@ export interface AssistantPageContext {
   selected_recipe?: Record<string, any> | string | null;
   selected_product?: Record<string, any> | string | null;
   food_image_analysis?: Record<string, any> | null;
+  health_report_context?: Record<string, any> | null;
+  symptom_review_context?: Record<string, any> | null;
+  food_discovery_context?: Record<string, any> | null;
 }
 
 export interface AssistantChatMessage {

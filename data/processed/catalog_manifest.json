@@ -8,7 +8,11 @@
     "KDIGO_CKD_2024",
     "WGO_GI_GUIDELINES",
     "MOHFW_AMB_GUIDELINE",
-    "OPEN_FOOD_FACTS_INDIA"
+    "OPEN_FOOD_FACTS_INDIA",
+    "ICMR_NIN_RDA_2020",
+    "ANU_INDB_2024",
+    "USDA_FDC_2024",
+    "FAO_INFOODS_2024"
   ],
   "categories": [
     "cereals-millets",
@@ -21,7 +25,8 @@
     "indian-dishes",
     "packaged-foods"
   ],
-  "food_count": 77,
+  "nutrient_count": 65,
+  "food_count": 127,
   "condition_count": 24,
   "reviewed_condition_food_mappings": 103
 }

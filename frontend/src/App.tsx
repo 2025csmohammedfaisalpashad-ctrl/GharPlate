@@ -19,11 +19,13 @@ import {
   ProgressAnalyticsPage,
   WaterTrackerPage,
 } from './pages/FitnessTrackerPages';
+import { FoodNearbyPage } from './pages/FoodNearbyPage';
 import {
   BloodGlucoseTrackerPage,
   BloodPressureTrackerPage,
   HealthMeasurementsWorkspacePage,
 } from './pages/HealthMeasurementPages';
+import { HealthReportsAndSymptomsPage } from './pages/HealthReportsAndSymptomsPage';
 import {
   FoodDetailPage,
   FoodExplorerPage,
@@ -42,6 +44,9 @@ import {
 import {
   BodyNutritionExplorerPage,
 } from './pages/BodyNutritionExplorerPage';
+import {
+  NutrientExplorerPage,
+} from './pages/NutrientExplorerPage';
 import {
   RecipeCalculatorPage,
   RecipeDetailPage,
@@ -100,11 +105,15 @@ export const AppRoutes: React.FC = () => (
             <Route path="/" element={<HomePage />} />
             <Route path="/foods" element={<FoodExplorerPage />} />
             <Route path="/foods/:slug" element={<FoodDetailPage />} />
+            <Route path="/nutrient-explorer" element={<NutrientExplorerPage />} />
             <Route path="/explore/body-nutrition" element={<BodyNutritionExplorerPage />} />
+            <Route path="/food-nearby" element={<FoodNearbyPage />} />
             <Route path="/conditions" element={<ConditionExplorerPage />} />
             <Route path="/conditions/:code" element={<ConditionDetailPage />} />
             <Route path="/household" element={<HouseholdDashboardPage />} />
             <Route path="/household/member" element={<MemberProfilePage />} />
+            <Route path="/health/reports" element={<HealthReportsAndSymptomsPage />} />
+            <Route path="/health/symptoms" element={<HealthReportsAndSymptomsPage />} />
             <Route path="/health/measurements" element={<HealthMeasurementsWorkspacePage />} />
             <Route path="/health/blood-pressure" element={<BloodPressureTrackerPage />} />
             <Route path="/health/blood-glucose" element={<BloodGlucoseTrackerPage />} />

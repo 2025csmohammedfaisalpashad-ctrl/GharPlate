@@ -1071,4 +1071,144 @@ export const api = {
       `/explore/body-nutrition/${encodeURIComponent(regionCode)}${qs ? `?${qs}` : ''}`
     );
   },
+
+  // ==========================================
+  // HEALTH REPORT INTELLIGENCE & AI SYMPTOM REVIEW APIs (PARTS A & B)
+  // ==========================================
+  extractHealthReportFile: (
+    file: File,
+    params?: { member_id?: number | null; report_title?: string; report_type?: string }
+  ) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    if (params?.member_id) fd.append('member_id', String(params.member_id));
+    if (params?.report_title) fd.append('report_title', params.report_title);
+    if (params?.report_type) fd.append('report_type', params.report_type);
+    return request<Record<string, any>>('/health/reports/extract', {
+      method: 'POST',
+      body: fd,
+    });
+  },
+
+  extractHealthReportText: (payload: {
+    member_id?: number | null;
+    raw_report_text: string;
+    report_title?: string;
+    report_type?: string;
+    laboratory_name?: string;
+    report_date?: string;
+  }) =>
+    request<Record<string, any>>('/health/reports/extract-text', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  confirmHealthReport: (payload: Record<string, any>) =>
+    request<Record<string, any>>('/health/reports/confirm', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  getHealthReports: (memberId?: number | null) =>
+    request<Record<string, any>[]>(
+      `/health/reports${memberId ? `?member_id=${memberId}` : ''}`
+    ),
+
+  getHealthReportTrends: (memberId?: number | null, canonicalCode?: string) => {
+    const q = new URLSearchParams();
+    if (memberId) q.set('member_id', String(memberId));
+    if (canonicalCode) q.set('canonical_code', canonicalCode);
+    const qs = q.toString();
+    return request<Record<string, any>>(
+      `/health/reports/trends${qs ? `?${qs}` : ''}`
+    );
+  },
+
+  deleteHealthReport: (reportId: number, memberId?: number | null) =>
+    request<{ deleted: boolean; report_id: number }>(
+      `/health/reports/${reportId}${memberId ? `?member_id=${memberId}` : ''}`,
+      { method: 'DELETE' }
+    ),
+
+  evaluateSymptomReview: (payload: Record<string, any>) =>
+    request<Record<string, any>>('/health/symptom-review', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  getSymptomReviewHistory: (memberId?: number | null) =>
+    request<Record<string, any>[]>(
+      `/health/symptom-review/history${memberId ? `?member_id=${memberId}` : ''}`
+    ),
+
+  // ==========================================
+  // SMART NEARBY FOOD DISCOVERY, MAPS & ORDERING APIs (PARTS C, D, E, F)
+  // ==========================================
+  getFoodDiscoveryProviders: () =>
+    request<Record<string, any>>('/food-discovery/providers'),
+
+  geocodeFoodDiscoveryLocation: (q: string) =>
+    request<Record<string, any>>(`/food-discovery/geocode?q=${encodeURIComponent(q)}`),
+
+  getFoodDiscoveryPreferences: (memberId?: number | null) =>
+    request<Record<string, any>>(
+      `/food-discovery/preferences${memberId ? `?member_id=${memberId}` : ''}`
+    ),
+
+  updateFoodDiscoveryPreferences: (payload: Record<string, any>) =>
+    request<Record<string, any>>('/food-discovery/preferences', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
+  searchFoodNearby: (payload: Record<string, any>) =>
+    request<Record<string, any>>('/food-discovery/search', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  prepareSwiggyMcpPreview: (payload: Record<string, any>) =>
+    request<Record<string, any>>('/food-discovery/swiggy-mcp/preview', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  logRestaurantMealToDiary: (payload: Record<string, any>) =>
+    request<Record<string, any>>('/food-discovery/log-meal', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  // ==========================================
+  // NUTRIENT EXPLORER & EXPANDED INDIAN FOOD COMPOSITION APIs
+  // ==========================================
+  getNutrientCatalog: (params?: { q?: string; group?: string }) => {
+    const sp = new URLSearchParams();
+    if (params?.q) sp.set('q', params.q);
+    if (params?.group) sp.set('group', params.group);
+    const qs = sp.toString();
+    return request<Record<string, any>>(`/nutrients/catalog${qs ? `?${qs}` : ''}`);
+  },
+
+  searchFoodsByNutrient: (params: {
+    q: string;
+    dietary_preference?: string;
+    food_form?: string;
+    category_slug?: string;
+    sort_by?: string;
+    limit?: number;
+  }) => {
+    const sp = new URLSearchParams();
+    sp.set('q', params.q);
+    if (params.dietary_preference) sp.set('dietary_preference', params.dietary_preference);
+    if (params.food_form) sp.set('food_form', params.food_form);
+    if (params.category_slug) sp.set('category_slug', params.category_slug);
+    if (params.sort_by) sp.set('sort_by', params.sort_by);
+    if (params.limit) sp.set('limit', String(params.limit));
+    return request<Record<string, any>>(`/nutrients/search?${sp.toString()}`);
+  },
+
+  getNutrientImportSummary: () =>
+    request<Record<string, any>>('/nutrients/import-summary'),
 };
+

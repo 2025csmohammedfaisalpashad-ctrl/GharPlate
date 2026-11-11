@@ -106,13 +106,66 @@ FOOD_IMAGE_URLS: dict[str, str] = {
     "packaged-ready-to-eat-dal-makhani": "/images/foods/packaged-foods/packaged-ready-to-eat-dal-makhani.webp",
 }
 
+EXPANDED_FOOD_IMAGE_URLS: dict[str, str] = {
+    "ragi-roti-karnataka": "/images/foods/indian-dishes/ragi-mudde-finger-millet-ball.webp",
+    "chole-chickpea-masala": "/images/foods/pulses-legumes/chickpeas-kabuli-chana.webp",
+    "rajma-masala-curry": "/images/foods/pulses-legumes/rajma-kidney-beans.webp",
+    "rice-cooked-steamed": "/images/foods/cereals-millets/rice-raw-milled.webp",
+    "brown-rice-cooked": "/images/foods/cereals-millets/brown-rice.webp",
+    "barley-jau-whole": "/images/foods/cereals-millets/wheat-whole-flour.webp",
+    "maize-corn-dry": "/images/foods/cereals-millets/jowar-sorghum.webp",
+    "little-millet-kutki": "/images/foods/cereals-millets/foxtail-millet-navane.webp",
+    "kodo-millet-kodon": "/images/foods/cereals-millets/foxtail-millet-navane.webp",
+    "barnyard-millet-sanwa": "/images/foods/cereals-millets/foxtail-millet-navane.webp",
+    "proso-millet-chena": "/images/foods/cereals-millets/foxtail-millet-navane.webp",
+    "oats-rolled-whole": "/images/foods/packaged-foods/packaged-rolled-oats-plain.webp",
+    "toor-dal-cooked-boiled": "/images/foods/pulses-legumes/toor-dal-red-gram.webp",
+    "moong-dal-cooked-boiled": "/images/foods/pulses-legumes/moong-dal-green-gram.webp",
+    "green-gram-whole-moong": "/images/foods/pulses-legumes/moong-dal-green-gram.webp",
+    "black-chickpeas-kala-chana": "/images/foods/pulses-legumes/chickpeas-kabuli-chana.webp",
+    "chickpeas-boiled-cooked": "/images/foods/pulses-legumes/chickpeas-kabuli-chana.webp",
+    "rajma-cooked-boiled": "/images/foods/pulses-legumes/rajma-kidney-beans.webp",
+    "green-peas-matar-fresh": "/images/foods/vegetables/french-beans.webp",
+    "horse-gram-kulthi": "/images/foods/pulses-legumes/black-gram-urad-dal.webp",
+    "soya-chunks-textured-veg-protein": "/images/foods/protein-sources/soybean-brown.webp",
+    "amaranth-leaves-chaulai": "/images/foods/vegetables/spinach-palak.webp",
+    "fenugreek-leaves-methi": "/images/foods/vegetables/spinach-palak.webp",
+    "curry-leaves-kadi-patta": "/images/foods/vegetables/drumstick-leaves-moringa.webp",
+    "coriander-leaves-dhania": "/images/foods/vegetables/spinach-palak.webp",
+    "beetroot-raw": "/images/foods/vegetables/carrot-orange.webp",
+    "sweet-potato-shakarkandi": "/images/foods/vegetables/potato-raw.webp",
+    "pumpkin-kaddu-yellow": "/images/foods/vegetables/carrot-orange.webp",
+    "broccoli-fresh": "/images/foods/vegetables/cauliflower.webp",
+    "bitter-gourd-karela": "/images/foods/vegetables/cucumber-green.webp",
+    "mushroom-button-uv-exposed": "/images/foods/vegetables/cauliflower.webp",
+    "amla-indian-gooseberry": "/images/foods/fruits/guava-white-flesh.webp",
+    "lemon-nimbu-fresh": "/images/foods/fruits/orange-nagpur.webp",
+    "grapes-green-seedless": "/images/foods/fruits/pomegranate.webp",
+    "watermelon-tarbooz": "/images/foods/fruits/papaya-ripe.webp",
+    "jackfruit-ripe-kathal": "/images/foods/fruits/mango-ripe.webp",
+    "custard-apple-sitaphal": "/images/foods/fruits/guava-white-flesh.webp",
+    "sapota-chikoo": "/images/foods/fruits/apple-red.webp",
+    "coconut-fresh-kernel": "/images/foods/nuts-seeds/cashews-kaju.webp",
+    "milk-buffalo-whole": "/images/foods/dairy/milk-cow-whole.webp",
+    "milk-cow-fortified-vit-d": "/images/foods/dairy/milk-cow-whole.webp",
+    "yogurt-greek-strained": "/images/foods/dairy/curd-dahi-whole-milk.webp",
+    "ghee-cow-clarified-butter": "/images/foods/dairy/cheese-processed-cheddar.webp",
+    "pistachios-pista": "/images/foods/nuts-seeds/almonds-badam.webp",
+    "pumpkin-seeds-pepitas": "/images/foods/nuts-seeds/flaxseeds-alsi.webp",
+    "sunflower-seeds": "/images/foods/nuts-seeds/sesame-seeds-til.webp",
+    "egg-poultry-whole-boiled": "/images/foods/protein-sources/egg-poultry-whole.webp",
+    "sardines-indian-oil-mathi": "/images/foods/protein-sources/rohu-fish-freshwater.webp",
+    "mackerel-indian-bangda": "/images/foods/protein-sources/rohu-fish-freshwater.webp",
+    "tuna-skipjack-fresh": "/images/foods/protein-sources/rohu-fish-freshwater.webp",
+}
+
 
 def resolve_food_image_url(slug: str, category_slug: str = "indian-dishes") -> str | None:
     """
     Resolves the exact food-specific local photograph for a given food slug.
     Does NOT substitute a generic category photograph for an individual food item.
     """
-    return FOOD_IMAGE_URLS.get(slug)
+    return FOOD_IMAGE_URLS.get(slug) or EXPANDED_FOOD_IMAGE_URLS.get(slug)
 
 
 def resolve_category_image_url(category_slug: str) -> str:
