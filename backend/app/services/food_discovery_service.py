@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import math
 import time
-from datetime import datetime, UTC
 from typing import Any
 from urllib.parse import quote_plus
 
@@ -924,7 +923,7 @@ def build_swiggy_and_zomato_links(
             "provider_name": "Swiggy Food & Dineout (Builders Club MCP)",
             "search_url": f"https://www.swiggy.com/search?query={q_encoded}",
             "dish_search_url": f"https://www.swiggy.com/search?query={dish_encoded}",
-            "dineout_url": f"https://www.swiggy.com/dineout",
+            "dineout_url": "https://www.swiggy.com/dineout",
             "mcp_docs_url": "https://mcp.swiggy.com/builders/docs/",
             "live_mcp_authenticated": bool(
                 getattr(settings, "SWIGGY_MCP_ENABLED", False) and getattr(settings, "SWIGGY_MCP_TOKEN", None)
@@ -1169,7 +1168,7 @@ def _evaluate_menu_to_goal_fit(
         )
     if any("hypertension" in c or "cardiovascular" in c for c in conditions):
         ordering_tips.append(
-            f"Blood Pressure Educational Note: Restaurant gravies and chutneys often contain higher salt than home cooking"
+            "Blood Pressure Educational Note: Restaurant gravies and chutneys often contain higher salt than home cooking"
             + (f" (home reference: ~{sod} mg sodium/serving)." if sod is not None else ".")
             + " Request less added salt and avoid papad/pickles."
         )
@@ -1430,11 +1429,11 @@ def search_nearby_food_and_restaurants(
         r_lat = rest.get("latitude")
         r_lon = rest.get("longitude")
         has_valid_coords = (
-            isinstance(r_lat, (int, float))
-            and isinstance(r_lon, (int, float))
-            and -90.0 <= float(r_lat) <= 90.0
-            and -180.0 <= float(r_lon) <= 180.0
-        )
+        isinstance(r_lat, int | float)
+        and isinstance(r_lon, int | float)
+        and -90.0 <= float(r_lat) <= 90.0
+        and -180.0 <= float(r_lon) <= 180.0
+    )
         if has_valid_coords:
             dist_km = haversine_distance_km(user_lat, user_lon, float(r_lat), float(r_lon))
             if dist_km > radius_km:
