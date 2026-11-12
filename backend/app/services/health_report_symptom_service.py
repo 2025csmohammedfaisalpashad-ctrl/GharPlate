@@ -1792,12 +1792,11 @@ def _get_glyph_template_bank() -> tuple[np.ndarray, np.ndarray, list[str]]:
                 except Exception:
                     continue
 
-    if not font_objects:
-        for sz in (36, 44, 52):
-            try:
-                font_objects.append(ImageFont.load_default(size=sz))
-            except Exception:
-                continue
+    for sz in (36, 44, 52):
+        try:
+            font_objects.append(ImageFont.load_default(size=sz))
+        except Exception:
+            continue
 
     templates_bmp: list[np.ndarray] = []
     templates_meta: list[tuple[float, float, float, float]] = []
@@ -2061,6 +2060,11 @@ def _ocr_single_column_strip_numpy(rgb_strip: Image.Image) -> str:
             line_str = re.sub(r"(?<=[0-9OQ])\s*\.\s*(?=[0-9OQ])", ".", line_str)
             line_str = re.sub(r"(?<=1)\s+(?=[0-9OQ.])", "", line_str)
             line_str = re.sub(r"(?<=\d)\s+(?=[OQ]+\b)", "", line_str)
+            line_str = re.sub(
+                r"(?<=\s\d) (?=\d+\s+(?:mg/dL|g/dL|%|pg/mL|ng/mL|ng/dL|ug/dL|mIU/L|uIU/mL|fL|pg|/cumm|lakh/cumm|million/cumm)\b)",
+                "",
+                line_str,
+            )
             # Normalize O/Q -> 0 when adjacent to digits, decimal points, or range dashes
             for _ in range(3):
                 line_str = re.sub(
@@ -2155,9 +2159,9 @@ def _extract_text_from_image_or_vision(
 
     # Tier 1: Local Tesseract OCR binary
     tesseract_bin = _find_tesseract_binary()
+    best_tess_text = ""
+    best_tess_count = 0
     if tesseract_bin:
-        best_tess_text = ""
-        best_tess_count = 0
         for psm in ("6", "4"):
             try:
                 proc = subprocess.run(
@@ -2173,11 +2177,11 @@ def _extract_text_from_image_or_vision(
                     if m_cnt > best_tess_count or (m_cnt == best_tess_count and len(ocr_out) > len(best_tess_text)):
                         best_tess_text = ocr_out
                         best_tess_count = m_cnt
-                    if best_tess_count >= 5:
+                    if best_tess_count >= 20:
                         break
             except Exception:
                 continue
-        if best_tess_count > 0:
+        if best_tess_count >= 20:
             return best_tess_text, "tesseract_local_ocr_layout_preserved", visual_cues
 
     # Tier 2: Local Ollama Vision Model (with proper timeout and resized image)
@@ -2221,10 +2225,14 @@ def _extract_text_from_image_or_vision(
     # Tier 3: Built-in Pure-Python Pillow + NumPy Laboratory Table OCR
     try:
         numpy_ocr_text = _pil_numpy_laboratory_ocr(rgb_oriented)
-        if numpy_ocr_text.strip() and len(parse_laboratory_report_text(numpy_ocr_text)["measurements"]) > 0:
+        numpy_count = len(parse_laboratory_report_text(numpy_ocr_text)["measurements"]) if numpy_ocr_text.strip() else 0
+        if numpy_count > best_tess_count and numpy_count > 0:
             return numpy_ocr_text, "pil_numpy_table_ocr", visual_cues
     except Exception:
         pass
+
+    if best_tess_count > 0:
+        return best_tess_text, "tesseract_local_ocr_layout_preserved", visual_cues
 
     if hint_text and hint_text.strip():
         return hint_text.strip(), "user_assisted_ocr_text", visual_cues
@@ -2288,9 +2296,14 @@ def _normalize_ocr_alpha(text: str) -> str:
         "plate1ets": "platelets",
         "p1me1ets": "platelets",
         "plmelets": "platelets",
+        "p(ate(ets": "platelets",
+        "p(atelets": "platelets",
+        "plate(ets": "platelets",
         "folme": "folate",
         "fo1ate": "folate",
         "fo1me": "folate",
+        "hba1 c": "hba1c",
+        "hb a1 c": "hba1c",
         "ldlcholesterol": "ldl cholesterol",
         "hdlcholesterol": "hdl cholesterol",
         "totalcholesterol": "total cholesterol",

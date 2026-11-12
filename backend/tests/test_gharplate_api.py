@@ -1046,13 +1046,23 @@ def test_blood_report_image_and_scanned_pdf_20_marker_extraction():
     12. Completely unreadable file produces a clear error rather than a fake successful 0-row result.
     13. Confirming the extracted report retrieves verified Indian food recommendations.
     """
+    import os
     from PIL import ImageDraw, ImageFont
 
-    font_path = "/System/Library/Fonts/Helvetica.ttc"
-    try:
-        font = ImageFont.truetype(font_path, 22)
-    except Exception:
-        font = ImageFont.load_default()
+    font = None
+    for candidate_font in (
+        "/System/Library/Fonts/Helvetica.ttc",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    ):
+        if os.path.exists(candidate_font):
+            try:
+                font = ImageFont.truetype(candidate_font, 22)
+                break
+            except Exception:
+                continue
+    if font is None:
+        font = ImageFont.load_default(size=22)
 
     sample_lines = [
         "APOLLO / METROPOLIS CLINICAL DIAGNOSTICS",

@@ -2018,6 +2018,21 @@ def recognize_indian_dish_from_image(
                     detected_component_label=user_hint.strip(),
                 )
             )
+        for dish_item in all_foods:
+            if len(candidates) >= 3:
+                break
+            if dish_item.category and dish_item.category.slug == "indian-dishes":
+                if dish_item.slug not in seen_food_slugs:
+                    seen_food_slugs.add(dish_item.slug)
+                    candidates.append(
+                        _build_dish_candidate_from_food(
+                            db,
+                            dish_item,
+                            score=0.35,
+                            visual_explanation="Additional Indian dish candidate for manual verification.",
+                            explicit_confidence_cat="low_confidence",
+                        )
+                    )
 
     # Sort matched database candidates ahead of unmatched items, then by confidence score descending
     candidates.sort(
